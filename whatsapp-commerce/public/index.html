@@ -262,22 +262,27 @@ async function simulator() {
 }
 
 // ---------- inbox ----------
-async function inbox(sel) {
-  const { conversations } = await api(T('/conversations'));
+async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
+  const [{ conversations: all }, { agents, me }] = await Promise.all([api(T('/conversations')), api(T('/agents')).catch(() => ({ agents: [], me: '' }))]);
+  const conversations = all.filter((c) => filter === 'all' || (filter === 'mine' && c.assigned_to === me) || (filter === 'human' && c.human_handover) || (filter === 'unassigned' && !c.assigned_to));
   const preview = (c) => { const b = c.last || {}; return esc((b.text || b.caption || b.type || '').slice(0, 60)); };
   $('#app').innerHTML = `<div class="split"><div class="card" style="max-height:600px;overflow:auto"><h2>Chats</h2>
-    ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
+    <select id="ifil" style="margin-bottom:8px">${[['all', 'All chats'], ['human', 'Needs a human'], ['mine', 'Assigned to me'], ['unassigned', 'Unassigned']].map(([k, l]) => `<option value="${k}" ${filter === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}${c.assigned_to ? ` <span class="pill">👤 ${esc(c.assigned_to)}</span>` : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
     </div><div class="card" id="thread"><p class="mute">Select a chat</p></div></div>`;
-  $('#app').querySelectorAll('[data-w]').forEach((el) => (el.onclick = () => inbox(el.dataset.w)));
+  $('#app').querySelectorAll('[data-w]').forEach((el) => (el.onclick = () => inbox(el.dataset.w, filter)));
+  $('#ifil').onchange = () => { store.set('wc_inbox', $('#ifil').value); inbox(sel, $('#ifil').value); };
   if (!sel) return;
   const c = conversations.find((x) => x.wa_id === sel);
   const { messages } = await api(T(`/conversations/${sel}/messages`));
-  $('#thread').innerHTML = `<h2>${esc(c?.name || '')} +${esc(sel)} <button class="btn ghost" id="ho">${c?.human_handover ? '🤖 Give back to bot' : '🙋 Take over'}</button></h2>
+  $('#thread').innerHTML = `<h2>${esc(c?.name || '')} +${esc(sel)} <button class="btn ghost" id="ho">${c?.human_handover ? '🤖 Give back to bot' : '🙋 Take over'}</button>
+    <select id="asg" style="width:auto"><option value="">Unassigned</option>${agents.map((a) => `<option ${c?.assigned_to === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></h2>
     ${c?.cart?.length ? `<p class="mute">Cart: ${c.cart.map((i) => esc(i.title) + ' ×' + i.quantity).join(', ')}</p>` : ''}
     <div class="chat" id="tchat">${messages.map((m) => (m.direction === 'in' ? bubble(m.body.text || `[${m.body.raw || m.type}]`, 'in') : bubble(m.body, 'out'))).join('')}</div>
     <div style="display:flex;gap:8px;margin-top:8px"><input id="rep" placeholder="Reply as staff (takes over from bot)"><button class="btn" id="rs">Send</button></div>`;
   $('#tchat').scrollTop = 1e9;
-  $('#ho').onclick = async () => { await api(T(`/conversations/${sel}/handover`), { method: 'POST', body: { on: !c?.human_handover } }); inbox(sel); };
+  $('#asg').onchange = async () => { await api(T(`/conversations/${sel}/assign`), { method: 'POST', body: { to: $('#asg').value || null } }); inbox(sel, filter); };
+  $('#ho').onclick = async () => { await api(T(`/conversations/${sel}/handover`), { method: 'POST', body: { on: !c?.human_handover } }); inbox(sel, filter); };
   $('#rs').onclick = async () => { const r = await api(T(`/conversations/${sel}/reply`), { method: 'POST', body: { text: $('#rep').value } }); if (!r.ok) toast(r.error + ' ' + (r.hint || '')); inbox(sel); };
 }
 

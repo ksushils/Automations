@@ -52,9 +52,29 @@ See [docs/COMPETITOR_REVIEW.md](docs/COMPETITOR_REVIEW.md) for how this compares
 - **Human handover.** The customer types "human" (or the AI decides), staff get an alert, and staff reply from the dashboard **Inbox**. The bot stays quiet until handed back.
 - **Order updates.** Shopify and WooCommerce order webhooks send "confirmed / shipped / completed" updates to the customer on WhatsApp. Customers can also type "order status" or "order 1001".
 - **Abandoned-cart reminder.** One nudge after N minutes, only inside the free 24-hour window.
+- **Drag-and-drop flow builder (Automations tab).** Like AiSensy's: a *Flow start* block (keywords, first message, Click-to-WhatsApp ad IDs) connected to these blocks:
+  - text or media with up to 3 buttons, and list menus — each button or row can lead somewhere different;
+  - questions, validated and saved to the contact;
+  - single or multi product cards from the store, and approved templates;
+  - tags, waits (delays), webhooks to a CRM, hand-off to a human, the shop menu, and end.
+
+  Ready-made starting flows are included: welcome menu, lead capture and FAQ.
+- **Contacts.** Tags, custom fields, CSV import, and which ad a contact came from.
+- **Campaigns.** Approved templates sent to segments (tags, ordered / never ordered, inactive for N days). Schedule up to 2 months ahead, personalise with `{{name}}`, and see sent → delivered → read → replied. Retarget people who didn't read or didn't reply.
+- **Template manager.** Create, list and delete Meta message templates, plus a one-click starter library (order confirmation, shipping update, abandoned cart, payment reminder, win-back, offers, back in stock).
+- **Website orders (Shopify / WooCommerce).** WhatsApp order-confirmation and shipping templates, plus **abandoned-checkout recovery**. Recovery respects marketing consent and stops when the order completes.
+- **Lite mode (no WhatsApp API needed).** The storefront gets a web basket and checkout. Orders land in the dashboard, and the customer taps "Send order on WhatsApp", which messages the shop's normal WhatsApp.
+- **Grow tools.** wa.me link and QR-code generator, and an embeddable floating WhatsApp chat button for any website.
 - **Broadcasts.** Approved WhatsApp templates go to customers who opted in. Customers can type SUBSCRIBE or STOP.
 - **Staff alerts.** New orders go to staff WhatsApp numbers, and to a webhook for n8n, Zapier or Make.
-- **Reseller features.** Multiple clients (tenants), plans with monthly limits, usage metering, per-client admin keys, and secrets encrypted at rest (AES-256-GCM).
+- **Reseller / SaaS features.**
+  - Multiple clients (tenants), plans with monthly limits, usage metering.
+  - Per-client admin keys, owner/staff logins and chat assignment.
+  - Secrets encrypted at rest (AES-256-GCM).
+  - **Self-serve sign-up** with a free trial, **Stripe Billing** subscriptions and a billing portal.
+  - **Meta Embedded Signup**, so clients connect their WhatsApp number themselves.
+- **Operations.** Daily SQLite backups (kept 14 days), error alerts to Slack/Discord/n8n, security headers, rate limiting, graceful shutdown, and a system status endpoint.
+- **Legal templates.** `/legal/terms`, `/legal/privacy` and `/legal/dpa` are drafts to fill in and have a solicitor review.
 - **Built-in simulator** ("Test bot" tab) for trying the whole flow without WhatsApp.
 
 ## Quick start
@@ -178,7 +198,32 @@ Notes:
 
 ## Selling it
 
-Plans live in `src/tenants.js` (`PLANS`). Defaults: **Starter £29**, **Growth £79** (adds broadcasts), **Pro £199**.
+**Self-serve sign-up** is at `https://<PUBLIC_URL>/signup` (the home page redirects there). Each new shop gets a free trial (`TRIAL_DAYS`, default 14) and lands in its dashboard.
+
+**Charging clients (Stripe Billing):**
+1. In your own Stripe account, create one recurring Price per plan.
+2. Set `PLATFORM_STRIPE_SECRET_KEY`, `STRIPE_PRICE_STARTER/GROWTH/PRO` and `PLATFORM_STRIPE_WEBHOOK_SECRET`.
+3. Add a Stripe webhook to `https://<PUBLIC_URL>/webhooks/platform-stripe` for these events:
+   - `checkout.session.completed`
+   - `customer.subscription.created`, `customer.subscription.updated` and `customer.subscription.deleted`
+
+Clients choose and pay for a plan on the **Billing** tab, which also opens Stripe's portal for card, invoices and cancellation. Plan changes sync automatically, and cancelled shops are suspended.
+
+**One-click WhatsApp connection (Meta Embedded Signup):**
+1. Become a Meta **Tech Provider**.
+2. Create a *Facebook Login for Business* configuration for WhatsApp Embedded Signup.
+3. Set `META_APP_ID`, `META_APP_SECRET`, `META_CONFIG_ID` and `META_WEBHOOK_VERIFY_TOKEN`.
+4. Point the app-level webhook at `https://<PUBLIC_URL>/webhooks/whatsapp`.
+
+Clients then click **Connect WhatsApp** on the Overview tab. The token, WABA subscription and number registration are handled for them.
+
+**Operations:**
+- `ALERT_WEBHOOK_URL` receives errors.
+- Backups go to `BACKUP_DIR`. Copy that folder off the server too (e.g. rclone to S3 or Backblaze).
+- `GET /api/system/status` (super admin) shows tenants, jobs and backups.
+- SQLite is fine for tens of shops on one server. Move to Postgres before running hundreds.
+
+Plans live in `src/tenants.js` (`PLANS`). Defaults: **Starter £29**, **Growth £79** (adds campaigns), **Pro £199**.
 Limits cover monthly inbound messages and AI replies; the dashboard shows usage against the limit.
 Compared with Take.App ($29–50, own catalogue only) and Cuedesk (£249–699, no ordering), the pitch is:
 *"Your existing Shopify/WooCommerce shop, sellable on WhatsApp with an AI assistant, from £29/month."*
@@ -198,6 +243,15 @@ All endpoints need the header `Authorization: Bearer <super admin key | tenant a
 | `GET …/orders` · `PATCH …/orders/:oid` `{status, payment_status, notify}` | Orders |
 | `GET …/conversations` · `…/:waId/messages` · `POST …/:waId/reply` · `POST …/:waId/handover` | Inbox |
 | `GET …/customers` · `POST …/broadcasts` `{template, language, components}` | Broadcasts |
+| `GET/POST …/flows` · `PUT/DELETE …/flows/:id` | Automations (flow builder) |
+| `GET …/contacts` · `PATCH …/contacts/:waId` · `POST …/contacts/import` | Contacts, tags, attributes |
+| `GET/POST …/campaigns` · `POST …/campaigns/preview` · `POST …/campaigns/:id/cancel` | Campaigns |
+| `GET/POST …/templates` · `DELETE …/templates/:name` | Meta message templates |
+| `POST …/messages` `{to, text \| template}` | Send a WhatsApp message (developer API) |
+| `GET …/analytics` · `GET …/export/orders.csv` · `GET …/export/customers.csv` · `POST …/catalogue/import` | Analytics & CSV |
+| `GET/POST/DELETE …/staff` · `POST …/conversations/:waId/assign` | Team & chat assignment |
+| `GET …/billing` · `POST …/billing/checkout` · `POST …/billing/portal` · `POST …/whatsapp/embedded` | Billing & Embedded Signup |
+| `POST /api/signup` · `GET /api/system/status` · `POST /api/system/backup` | Sign-up, ops (super admin) |
 
 ## Project layout
 
@@ -205,11 +259,12 @@ All endpoints need the header `Authorization: Bearer <super admin key | tenant a
 src/server.js              Express app & routes
 src/whatsapp/              Cloud API client (send, payload limits, parse) + webhook (signature, dedupe, queue)
 src/bot/engine.js          Conversation flow
-src/bot/{cart,orders,state}.js
+src/bot/{cart,orders,state,pricing,flows}.js   cart, orders, promo/zones/slots, flow engine
+src/campaigns.js · src/templates.js · src/analytics.js · src/platform.js (billing, Embedded Signup) · src/ops.js · src/legal.js
 src/stores/                shopify.js · woocommerce.js · custom.js · manual.js (same interface)
 src/dify/client.js         Dify streaming client
-src/routes/                admin API, Dify tools API, store webhooks
-public/index.html          Dashboard
+src/routes/                admin API, Dify tools API, store webhooks, storefront/receipts/web checkout/widget
+public/index.html          Dashboard · public/flow-builder.js (canvas builder) · public/signup.html
 dify/                      Prompts + OpenAPI tool schema for Dify
 test/                      node:test suite (npm test)
 ```

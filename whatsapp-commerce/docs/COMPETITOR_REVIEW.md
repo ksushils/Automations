@@ -102,7 +102,44 @@ with AI from **our own Dify** (OpenAI / OpenRouter, so we control model costs), 
 | **AI that answers questions and takes orders** | ✅ **(Take.App doesn't have this)** | Dify assistant or agent, created automatically |
 | **Sell from an existing Shopify / WooCommerce store** | ✅ **(Take.App doesn't have this)** | Live products, prices and stock; orders created in the store |
 
+## AiSensy (WhatsApp automation) – feature check (Nov 2026)
+
+Source: [aisensy.com/features/whatsapp-automation](https://aisensy.com/features/whatsapp-automation) plus their pricing pages (Basic ≈ ₹1,500/mo, Pro ≈ ₹3,200/mo in India; USD plans from about $45/mo; flow builder sold as an add-on). AiSensy is a marketing and automation platform built around the WhatsApp API.
+
+| AiSensy feature | Status | Here |
+|---|---|---|
+| Official WhatsApp Business API | ✅ | Cloud API, per-client or via **Embedded Signup** (connect in a few clicks) |
+| Drag-and-drop chatbot flow builder | ✅ | Canvas builder: Flow start (keywords, first message, ad IDs) → text/media + buttons, list, question, single/multi product, template, tag, wait, webhook, human, shop menu, end |
+| Keyword / trigger-based automation, instant replies | ✅ | Exact or "contains" keyword triggers, welcome flow, Click-to-WhatsApp ad triggers |
+| Rules & delays, multi-step journeys | ✅ | Wait blocks (scheduler), branching by button / list choice |
+| Lead qualification | ✅ | Question blocks with validation; answers saved to the contact; webhook to CRM |
+| AI chatbot / AI agents | ✅ | Dify assistant or agent (takes orders), created automatically per client |
+| Human handoff, multiple agents on one number | ✅ | Shared inbox, take over / give back, assign chats to team members, owner/staff logins |
+| Broadcasts | ✅ | Campaigns with approved templates |
+| Scheduler (up to 2 months) | ✅ | Schedule campaigns up to 2 months ahead |
+| Segments & retargeting | ✅ | Tags, ordered / never ordered, inactive N days; retarget people who didn't read, didn't reply, replied or failed |
+| Import contacts, track results | ✅ | CSV import (tags + custom fields); sent / delivered / read / replied / failed per campaign |
+| CTA click tracking | ⚠️ | Quick-reply taps are tracked; URL-button click tracking is not |
+| Template library / manager | ✅ | Create, list and delete Meta templates; one-click starter library |
+| AI template generator, AI flow generation | ❌ | Not built |
+| Click-to-WhatsApp ads | ⚠️ | Ad attribution and ad-triggered flows ✅; **ads manager (creating ads) ❌** – run ads in Meta Ads Manager |
+| Catalog / sell in WhatsApp | ✅ | Live Shopify / WooCommerce / built-in catalogue in chat (stronger than AiSensy here) |
+| Payments in WhatsApp (UPI / card) | ⚠️ | Pay links (Stripe, Shopify, WooCommerce). In-chat native payments are an India/Brazil feature, not available in the UK |
+| WhatsApp Forms (Flows) | ⚠️ | Question blocks cover lead and booking capture; native WhatsApp Flows forms are not built |
+| Webviews | ✅ | Storefront / receipt / pay pages open from WhatsApp links |
+| Shopify integration (abandoned cart, order status) | ✅ | Website order confirmation and shipping templates, abandoned-checkout recovery with consent check, in-chat order tracking |
+| Razorpay / LeadSquared / WebEngage | ⚠️ | Stripe instead of Razorpay (UK); CRMs via webhook block / order webhooks / n8n |
+| Developer APIs, webhooks | ✅ | Send-message API, admin REST API, order and flow webhooks |
+| Free tools: wa.me link, QR, website button | ✅ | Grow tab: link + QR download, embeddable chat-button script |
+| Analytics | ✅ | Sales analytics + campaign funnel |
+| Blue tick | n/a | Applied for through Meta by the business |
+| Mobile apps | ❌ | Responsive web dashboard only |
+| SOC 2 / ISO 27001 | ❌ | Not certified (encryption at rest, signed webhooks, backups and role-based access are in place) |
+| Instagram channel | ❌ | Not built |
+
+**Positioning against AiSensy:** they are stronger at marketing operations (ads manager, AI generators, certifications, mobile apps). We are stronger at **commerce**: a live store catalogue, a full in-chat checkout (zones, slots, promo codes, stock, Stripe), a storefront with a web basket, and an AI agent that places orders.
+
 ## Roadmap ideas (not built yet)
 Tips · add-on modifiers · distance-based delivery fees · birthday offers · Meta Pixel · Instagram/Messenger channels ·
-WhatsApp Flows forms for address capture · Meta catalogue sync (native WhatsApp cart) · Stripe Billing for your own
-subscriptions · POS.
+native WhatsApp Flows forms · URL click tracking · AI flow/template generator · ads manager · Meta catalogue sync ·
+mobile apps · POS · Postgres for large deployments.

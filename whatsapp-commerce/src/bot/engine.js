@@ -8,6 +8,7 @@ import { placeOrder, listOrders, paymentLabel, STATUS_TEXT, findOrderByReceipt, 
 import { quote, validatePromo, findPromo, upcomingSlots } from './pricing.js';
 import { findTriggeredFlow, startFlow, handleFlowButton, handleFlowAnswer, runFlow, getFlow, schedule } from './flows.js';
 import { getDb } from '../db.js';
+import { alert } from '../ops.js';
 
 // ---------- helpers ----------
 const PAY_BUTTONS = { payment_link: '💳 Pay online', cod: '💵 Pay on delivery', bank_transfer: '🏦 Bank transfer' };
@@ -523,6 +524,7 @@ export async function handleInbound(tenant, event, send) {
     }
   } catch (e) {
     console.error(`[engine] tenant=${tenant.id}`, e);
+    alert(`Bot error for ${tenant.id}: ${e.message}`, { key: `engine:${tenant.id}:${e.message}` });
     ctx.reply(mainMenu(ctx, 'Sorry, something went wrong on our side. Please try again in a moment.'));
   }
 

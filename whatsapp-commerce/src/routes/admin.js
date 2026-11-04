@@ -22,6 +22,7 @@ import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY } from 
 import { parseCsv } from '../csv.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, embeddedSignupConfigured } from '../platform.js';
 import { rateLimit } from './web.js';
+import { systemStatus, backup, alert } from '../ops.js';
 import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, buildAgentPrompt } from '../dify/provision.js';
 
 const bearer = (req) => (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
@@ -107,6 +108,8 @@ export function adminRouter() {
     t ? res.json({ tenant: view(t) }) : res.status(404).json({ error: 'not found' });
   });
   r.post('/tenants/:tenantId/rotate-keys', requireSuper, (req, res) => res.json(rotateKeys(req.params.tenantId)));
+  r.get('/system/status', requireSuper, (req, res) => res.json(systemStatus()));
+  r.post('/system/backup', requireSuper, (req, res) => { try { res.json(backup() || { skipped: 'in-memory database' }); } catch (e) { res.status(500).json({ error: e.message }); } });
   r.delete('/tenants/:tenantId', requireSuper, (req, res) => { deleteTenant(req.params.tenantId); res.json({ ok: true }); });
 
   // ----- tenant scoped -----
@@ -327,7 +330,7 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/conversations', requireTenant, (req, res) => {
     const rows = getDb()
       .prepare(
-        `SELECT c.wa_id, c.state, c.human_handover, c.cart, c.updated_at, cu.name,
+        `SELECT c.wa_id, c.state, c.human_handover, c.cart, c.updated_at, c.assigned_to, cu.name,
            (SELECT body FROM messages m WHERE m.tenant_id = c.tenant_id AND m.wa_id = c.wa_id ORDER BY id DESC LIMIT 1) AS last_body,
            (SELECT created_at FROM messages m WHERE m.tenant_id = c.tenant_id AND m.wa_id = c.wa_id AND direction = 'in' ORDER BY id DESC LIMIT 1) AS last_inbound_at
          FROM conversations c LEFT JOIN customers cu ON cu.tenant_id = c.tenant_id AND cu.wa_id = c.wa_id
@@ -352,6 +355,12 @@ export function adminRouter() {
       res.status(200).json({ ok: false, error: e.message, hint: 'Outside the 24h customer-service window you must use an approved template (Broadcast).' });
     }
   }));
+  r.post('/tenants/:tenantId/conversations/:waId/assign', requireTenant, (req, res) => {
+    const to = req.body?.to ? String(req.body.to).slice(0, 80) : null;
+    getDb().prepare('UPDATE conversations SET assigned_to = ? WHERE tenant_id = ? AND wa_id = ?').run(to, req.tenant.id, req.params.waId);
+    res.json({ ok: true, assignedTo: to });
+  });
+  r.get('/tenants/:tenantId/agents', requireTenant, (req, res) => res.json({ agents: ['Owner', ...listStaff(req.tenant.id).map((m) => m.name)], me: req.staff?.name || 'Owner' }));
   r.post('/tenants/:tenantId/conversations/:waId/handover', requireTenant, (req, res) => {
     const c = setHandover(req.tenant.id, req.params.waId, !!req.body?.on);
     res.json({ ok: true, humanHandover: c.humanHandover });
@@ -380,6 +389,7 @@ export function adminRouter() {
 
   r.use((err, req, res, _next) => {
     console.error('[admin]', err);
+    alert(`API error on ${req.method} ${req.path}: ${err.message}`, { key: `api:${req.path}:${err.message}` });
     res.status(500).json({ error: err.message });
   });
   return r;
