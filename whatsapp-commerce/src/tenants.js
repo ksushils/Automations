@@ -132,6 +132,13 @@ export function rotateKeys(id) {
   return { adminKey, toolKey };
 }
 
+/** New Dify tool key (used when pushing credentials to a Dify custom tool – only Dify needs it). */
+export function rotateToolKey(id) {
+  const toolKey = 'tool_' + randomToken(24);
+  getDb().prepare('UPDATE tenants SET tool_key_hash = ? WHERE id = ?').run(sha256(toolKey), id);
+  return toolKey;
+}
+
 export function deleteTenant(id) {
   const d = getDb();
   for (const table of ['messages', 'orders', 'conversations', 'customers', 'usage']) d.prepare(`DELETE FROM ${table} WHERE tenant_id = ?`).run(id);

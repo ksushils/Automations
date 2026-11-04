@@ -29,6 +29,10 @@ export function toolsRouter() {
   r.post('/search_products', async (req, res) => {
     const { store, sym } = req.ctx;
     const products = await store.searchProducts(String(req.body.query || ''), { limit: Math.min(Number(req.body.limit) || 5, 10) });
+    // Remember results so the WhatsApp reply can include a tappable product list
+    const conv = getConversation(req.ctx.tenant.id, req.ctx.waId);
+    conv.data.lastSearch = { at: Date.now(), products: products.slice(0, 10).map((p) => ({ id: p.id, title: p.title, price: p.price, available: p.available, description: (p.description || '').slice(0, 60), compareAtPrice: p.compareAtPrice || null })) };
+    saveConversation(conv);
     res.json({ products: products.map((p) => brief(p, sym)) });
   });
 

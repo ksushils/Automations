@@ -285,6 +285,7 @@ async function askAi(ctx, text) {
   const call = (conversationId) => difyChat({ baseUrl: D.baseUrl, apiKey: D.apiKey, query, inputs, user: `${ctx.tenant.id}:${ctx.conv.waId}`, conversationId });
 
   // Agent tools may modify the cart directly in the DB – persist our copy first, reload afterwards.
+  const startedAt = Date.now();
   saveConversation(ctx.conv);
   let res;
   try {
@@ -302,6 +303,11 @@ async function askAi(ctx, text) {
   if (/\[HANDOVER\]/i.test(answer)) {
     ctx.reply({ type: 'text', text: answer.replace(/\[HANDOVER\]/gi, '').trim() || 'Let me get a team member for you.' });
     return handover(ctx);
+  }
+  // Agent mode: if the agent searched the catalogue this turn, attach those products as a tappable list.
+  const searched = ctx.conv.data.lastSearch;
+  if (!products.length && searched?.at >= startedAt && searched.products?.length && !ctx.conv.humanHandover) {
+    products.push(...searched.products.map((p) => ({ ...p, variants: [] })));
   }
   if (products.length) ctx.reply(productList(ctx, products, answer || 'Here are some products you might like:'));
   else ctx.reply({ type: 'text', text: answer || "Sorry, I didn't catch that. Type *menu* to see options." });

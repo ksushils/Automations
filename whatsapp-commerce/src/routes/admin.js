@@ -13,7 +13,7 @@ import { handleInbound } from '../bot/engine.js';
 import { enqueue } from '../whatsapp/webhook.js';
 import { setHandover } from '../bot/state.js';
 import { listOrders, updateOrder, orderUpdateMessage } from '../bot/orders.js';
-import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt } from '../dify/provision.js';
+import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, buildAgentPrompt } from '../dify/provision.js';
 
 const bearer = (req) => (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
 const isSuper = (req) => !!config.superAdminKey && safeEqual(bearer(req), config.superAdminKey);
@@ -88,11 +88,12 @@ export function adminRouter() {
   // ----- AI assistant (Dify) -----
   r.get('/tenants/:tenantId/ai', requireTenant, wrap(async (req, res) => {
     const models = await listDifyModels().catch((e) => ({ configured: consoleConfigured(), models: [], error: e.message }));
-    res.json({ ...models, prompt: buildPrompt(req.tenant), dify: redactSettings(req.tenant.settings).dify });
+    res.json({ ...models, prompt: req.tenant.settings.dify?.mode === 'agent' ? buildAgentPrompt(req.tenant) : buildPrompt(req.tenant), dify: redactSettings(req.tenant.settings).dify, publicUrl: config.publicUrl });
   }));
   r.post('/tenants/:tenantId/ai/provision', requireTenant, wrap(async (req, res) => {
     try {
-      res.json({ ok: true, ...(await provisionDifyBot(req.tenant.id)), tenant: view(getTenant(req.tenant.id)) });
+      const mode = ['assist', 'agent'].includes(req.body?.mode) ? req.body.mode : undefined;
+      res.json({ ok: true, ...(await provisionDifyBot(req.tenant.id, { mode })), tenant: view(getTenant(req.tenant.id)) });
     } catch (e) {
       res.status(200).json({ ok: false, error: e.message });
     }

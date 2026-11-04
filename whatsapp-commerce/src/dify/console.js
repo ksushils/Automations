@@ -119,3 +119,33 @@ export class DifyConsole {
   async listApiKeys(id) { return (await this.request('GET', `/apps/${id}/api-keys`)).data || []; }
   createApiKey(id) { return this.request('POST', `/apps/${id}/api-keys`); }
 }
+
+// ---- custom (OpenAPI) tool providers – used by Agent mode ----
+DifyConsole.prototype.getToolProvider = async function (name) {
+  try {
+    return await this.request('GET', `/workspaces/current/tool-provider/api/get?provider=${encodeURIComponent(name)}`);
+  } catch (e) {
+    if (e.status === 400 || e.status === 404) return null; // "you have not added provider …"
+    throw e;
+  }
+};
+DifyConsole.prototype.saveToolProvider = async function ({ name, schema, apiKeyHeader, apiKeyValue, exists }) {
+  const body = {
+    provider: name,
+    icon: { background: '#D5F5E3', content: '🛒' },
+    credentials: { auth_type: 'api_key_header', api_key_header: apiKeyHeader, api_key_value: apiKeyValue, api_key_header_prefix: 'no_prefix' },
+    schema_type: 'openapi',
+    schema: typeof schema === 'string' ? schema : JSON.stringify(schema),
+    privacy_policy: '',
+    custom_disclaimer: '',
+    labels: [],
+  };
+  return exists
+    ? this.request('POST', '/workspaces/current/tool-provider/api/update', { ...body, original_provider: name })
+    : this.request('POST', '/workspaces/current/tool-provider/api/add', body);
+};
+DifyConsole.prototype.findToolProviderId = async function (name) {
+  const list = await this.request('GET', '/workspaces/current/tools/api');
+  const p = (Array.isArray(list) ? list : list.data || []).find((x) => x.name === name);
+  return p?.id || null;
+};
