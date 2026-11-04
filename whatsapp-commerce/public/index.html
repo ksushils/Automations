@@ -646,7 +646,8 @@ async function embeddedSignupButton(s) {
     try {
       const d = JSON.parse(ev.data);
       // v4: FINISH, FINISH_ONLY_WABA (no number yet), FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING (coexistence)
-      if (d.type === 'WA_EMBEDDED_SIGNUP' && /^FINISH/.test(d.event)) session = { phoneNumberId: d.data?.phone_number_id || null, wabaId: d.data?.waba_id, businessId: d.data?.business_id || null, event: d.event };
+      // keep any other account IDs Meta adds to the event (e.g. waac_id / cs_id during the account-model rollout)
+      if (d.type === 'WA_EMBEDDED_SIGNUP' && /^FINISH/.test(d.event)) { const { phone_number_id, waba_id, business_id, ...rest } = d.data || {}; session = { phoneNumberId: phone_number_id || null, wabaId: waba_id, businessId: business_id || null, event: d.event, extraIds: Object.fromEntries(Object.entries(rest).filter(([k, v]) => /_id$/.test(k) && typeof v === 'string')) }; }
       if (d.type === 'WA_EMBEDDED_SIGNUP' && d.event === 'CANCEL') $('#esmsg').textContent = `Cancelled${d.data?.current_step ? ' at ' + d.data.current_step : ''}`;
     } catch {}
   });

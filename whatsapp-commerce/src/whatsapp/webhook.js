@@ -1,5 +1,6 @@
 import express from 'express';
-import { findTenantByPhoneNumberId, getTenant, bumpUsage } from '../tenants.js';
+import { findTenantByPhoneNumberId, findTenantByWabaId, getTenant, bumpUsage, updateTenantSettings } from '../tenants.js';
+import { alert } from '../ops.js';
 import { config } from '../config.js';
 import { getDb, json } from '../db.js';
 import { verifyMetaSignature, safeEqual } from '../crypto.js';
@@ -51,13 +52,67 @@ export async function recoverUnprocessed({ olderThanSec = 20 } = {}) {
   return n;
 }
 
+/** Remember new account identifiers if Meta starts sending them (account-model rollout), without depending on them. */
+function captureAccountIds(tenant, value) {
+  const ids = {};
+  for (const k of ['waac_id', 'cs_id', 'messaging_account_id', 'whatsapp_account_id']) {
+    const v = value?.metadata?.[k] ?? value?.[k];
+    if (v && /^[\w-]{1,64}$/.test(String(v))) ids[k] = String(v);
+  }
+  if (!Object.keys(ids).length) return;
+  const have = tenant.settings.whatsapp?.accountIds || {};
+  if (Object.entries(ids).some(([k, v]) => have[k] !== v)) updateTenantSettings(tenant.id, { whatsapp: { accountIds: { ...have, ...ids } } });
+}
+
+function handleAccountUpdate(tenant, value) {
+  const ev = String(value.event || '');
+  if (/OFFBOARD|PARTNER_REMOVED|DISCONNECT|ACCOUNT_DELETED|BANNED|DISABLED/i.test(ev)) {
+    updateTenantSettings(tenant.id, { whatsapp: { numberStatus: 'offboarded', lastAccountEvent: ev } });
+    alert(`WhatsApp account event ${ev} for ${tenant.id} – the shop's number is no longer connected`, { key: `acct:${tenant.id}:${ev}` });
+  } else if (ev) {
+    updateTenantSettings(tenant.id, { whatsapp: { lastAccountEvent: ev } });
+  }
+}
+
+/** Coexistence contacts sync (smb_app_state_sync): add the Business app's contacts with their names. */
+function syncContacts(tenant, value) {
+  for (const s of value.state_sync || []) {
+    const c = s.contact || {};
+    const wa = String(c.phone_number || '').replace(/\D/g, '');
+    if (!wa || s.type !== 'contact') continue;
+    if (s.action === 'remove') continue; // keep our record (orders/consent); the app contact was just deleted
+    getDb().prepare(`INSERT INTO customers (tenant_id, wa_id, name) VALUES (?, ?, ?) ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = COALESCE(customers.name, excluded.name)`).run(tenant.id, wa, c.full_name || c.first_name || null);
+  }
+}
+
+/** Coexistence message history (up to 180 days) – stored for the inbox and AI context, never answered by the bot. */
+function importHistory(tenant, value) {
+  for (const h of value.history || []) {
+    if (h.errors?.length) { console.warn(`[history] ${tenant.id}`, JSON.stringify(h.errors)); continue; }
+    for (const th of h.threads || []) {
+      const wa = String(th.id || '').replace(/\D/g, '');
+      for (const m of th.messages || []) {
+        const fromCustomer = String(m.from || '').replace(/\D/g, '') === wa;
+        try {
+          getDb().prepare("INSERT INTO messages (tenant_id, wa_id, direction, type, body, wa_message_id, processed, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, datetime(?, 'unixepoch'))")
+            .run(tenant.id, wa, fromCustomer ? 'in' : 'out', m.type || 'text', JSON.stringify({ type: 'text', text: m.text?.body || `[${m.type}]`, via: 'history' }), fromCustomer ? `hist-${m.id}` : null, Number(m.timestamp) || Math.floor(Date.now() / 1000));
+        } catch { /* duplicate history chunk */ }
+      }
+    }
+  }
+}
+
 export function processWebhookBody(body, { tenantOverride } = {}) {
   const jobs = [];
   for (const entry of body?.entry || []) {
     for (const change of entry.changes || []) {
       const value = change.value || {};
-      const tenant = tenantOverride || findTenantByPhoneNumberId(value.metadata?.phone_number_id);
+      const tenant = tenantOverride || findTenantByPhoneNumberId(value.metadata?.phone_number_id) || (entry.id && findTenantByWabaId(entry.id));
       if (!tenant) continue;
+      captureAccountIds(tenant, value);
+      if (change.field === 'account_update') { handleAccountUpdate(tenant, value); continue; }
+      if (change.field === 'smb_app_state_sync') { syncContacts(tenant, value); continue; }
+      if (change.field === 'history') { importHistory(tenant, value); continue; }
       const send = createSender(tenant);
       const names = Object.fromEntries((value.contacts || []).map((c) => [c.wa_id, c.profile?.name]));
       for (const m of value.messages || []) {

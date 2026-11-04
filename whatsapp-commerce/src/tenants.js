@@ -138,6 +138,14 @@ export function findTenantByPhoneNumberId(phoneNumberId) {
   return null;
 }
 
+export function findTenantByWabaId(wabaId) {
+  for (const row of getDb().prepare('SELECT * FROM tenants WHERE active = 1').all()) {
+    const s = json(row.settings, {});
+    if (s?.whatsapp?.wabaId && String(s.whatsapp.wabaId) === String(wabaId)) return rowToTenant(row);
+  }
+  return null;
+}
+
 export function updateTenantSettings(id, patch) {
   const t = getTenant(id);
   if (!t) return null;

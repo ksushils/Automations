@@ -142,13 +142,13 @@ async function graph(method, path, { token, body, query } = {}) {
  * phone number is a valid "connected – number pending" state. Coexistence (number stays on the WhatsApp
  * Business app) must not call /register.
  */
-export async function completeEmbeddedSignup(tenantId, { code, phoneNumberId, wabaId, businessId, coexistence = false, event } = {}) {
+export async function completeEmbeddedSignup(tenantId, { code, phoneNumberId, wabaId, businessId, coexistence = false, event, extraIds = {} } = {}) {
   if (!embeddedSignupConfigured()) throw new Error('Embedded Signup is not configured on this server');
   if (!code || !wabaId) throw new Error('code and wabaId are required');
   const { access_token: token } = await graph('GET', 'oauth/access_token', { query: { client_id: config.metaAppId, client_secret: config.metaAppSecret, code } });
   await graph('POST', `${wabaId}/subscribed_apps`, { token });
   updateTenantSettings(tenantId, {
-    whatsapp: { wabaId: String(wabaId), businessId: businessId ? String(businessId) : '', accessToken: token, appSecret: config.metaAppSecret, connectedVia: coexistence ? 'coexistence' : 'embedded_signup', signupEvent: event || '', numberStatus: 'pending' },
+    whatsapp: { wabaId: String(wabaId), businessId: businessId ? String(businessId) : '', accountIds: Object.fromEntries(Object.entries(extraIds || {}).filter(([k, v]) => /^[a-z_]{2,20}$/.test(k) && /^[\w-]{1,64}$/.test(String(v))).map(([k, v]) => [k, String(v)])), accessToken: token, appSecret: config.metaAppSecret, connectedVia: coexistence ? 'coexistence' : 'embedded_signup', signupEvent: event || '', numberStatus: 'pending' },
   });
   return activateNumber(tenantId, { phoneNumberId, coexistence });
 }
@@ -177,8 +177,19 @@ export async function activateNumber(tenantId, { phoneNumberId, coexistence } = 
     }
   }
   const info = await graph('GET', phoneNumberId, { token, query: { fields: 'display_phone_number,verified_name' } }).catch(() => ({}));
+  // Coexistence: Meta requires contacts + message history to be synced within 24h of onboarding, or the business
+  // must offboard and sign up again. Each sync can only be requested once per onboarding.
+  let coexSync = null;
+  if (coexistence && !W.coexSync?.history) {
+    coexSync = { ...(W.coexSync || {}), at: new Date().toISOString() };
+    for (const type of ['smb_app_state_sync', 'history']) {
+      const key = type === 'history' ? 'history' : 'contacts';
+      if (coexSync[key]) continue;
+      coexSync[key] = await graph('POST', `${phoneNumberId}/smb_app_data`, { token, body: { messaging_product: 'whatsapp', sync_type: type } }).then((r) => r.request_id || 'requested', (e) => `error: ${e.message}`);
+    }
+  }
   const tenant = updateTenantSettings(tenantId, {
-    whatsapp: { phoneNumberId: String(phoneNumberId), numberStatus: 'active', ...(pin ? { twoStepPin: pin } : {}) },
+    whatsapp: { phoneNumberId: String(phoneNumberId), numberStatus: 'active', ...(pin ? { twoStepPin: pin } : {}), ...(coexSync ? { coexSync } : {}) },
     ...(info.display_phone_number ? { business: { whatsappNumber: String(info.display_phone_number).replace(/\D/g, '') } } : {}),
   });
   return { tenant, numberStatus: 'active', displayPhoneNumber: info.display_phone_number || null, verifiedName: info.verified_name || null };

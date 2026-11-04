@@ -112,6 +112,13 @@ export function logMessage(tenantId, waId, direction, msg, waMessageId = null, {
   }
 }
 
+/**
+ * The ID used in /<id>/messages-style paths. Today that is the phone number ID (Meta's Coexistence guide keeps using
+ * it). Kept in ONE place so a future switch (e.g. to a WhatsApp account / WAAC ID, which Meta doesn't return yet) is a
+ * one-line change: set whatsapp.senderIdOverride or edit this function.
+ */
+export const senderId = (W = {}) => W.senderIdOverride || W.phoneNumberId;
+
 async function graphPost(tenant, pathPart, body) {
   const { accessToken } = tenant.settings.whatsapp;
   const res = await fetch(`https://graph.facebook.com/${config.graphVersion}/${pathPart}`, {
@@ -143,11 +150,11 @@ export function createSender(tenant, { sink } = {}) {
     const { phoneNumberId, accessToken } = tenant.settings.whatsapp;
     if (!phoneNumberId || !accessToken) throw new Error('WhatsApp is not configured for this tenant');
     try {
-      return await graphPost(tenant, `${phoneNumberId}/messages`, toGraphPayload(to, msg));
+      return await graphPost(tenant, `${senderId(tenant.settings.whatsapp)}/messages`, toGraphPayload(to, msg));
     } catch (e) {
       // Some accounts don't support cta_url / images from certain hosts – fall back to plain text.
       if (msg.type !== 'text' && msg.type !== 'template' && e.status === 400) {
-        return graphPost(tenant, `${phoneNumberId}/messages`, toGraphPayload(to, { type: 'text', text: toPlainText(msg) }));
+        return graphPost(tenant, `${senderId(tenant.settings.whatsapp)}/messages`, toGraphPayload(to, { type: 'text', text: toPlainText(msg) }));
       }
       throw e;
     }
@@ -158,7 +165,7 @@ export function createSender(tenant, { sink } = {}) {
 export async function markRead(tenant, messageId, { typing = true } = {}) {
   const { phoneNumberId, accessToken } = tenant.settings.whatsapp;
   if (!phoneNumberId || !accessToken || !messageId) return;
-  await graphPost(tenant, `${phoneNumberId}/messages`, { messaging_product: 'whatsapp', status: 'read', message_id: messageId, ...(typing ? { typing_indicator: { type: 'text' } } : {}) }).catch(() => {});
+  await graphPost(tenant, `${senderId(tenant.settings.whatsapp)}/messages`, { messaging_product: 'whatsapp', status: 'read', message_id: messageId, ...(typing ? { typing_indicator: { type: 'text' } } : {}) }).catch(() => {});
 }
 
 // ---------- 24-hour customer service window ----------

@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { senderId } from './whatsapp/cloudApi.js';
 
 /** WhatsApp message templates (Meta Business Management API) for a tenant's WABA. */
 async function graph(tenant, method, path, body) {
@@ -59,7 +60,7 @@ export const TEMPLATE_LIBRARY = [
 async function phoneGraph(tenant, method, path, body) {
   const { accessToken, phoneNumberId } = tenant.settings.whatsapp || {};
   if (!accessToken || !phoneNumberId) throw new Error('WhatsApp is not connected');
-  const res = await fetch(`https://graph.facebook.com/${config.graphVersion}/${phoneNumberId}${path}`, {
+  const res = await fetch(`https://graph.facebook.com/${config.graphVersion}/${senderId(tenant.settings.whatsapp)}${path}`, {
     method,
     headers: { Authorization: `Bearer ${accessToken}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,

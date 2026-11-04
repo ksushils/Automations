@@ -97,6 +97,9 @@ test('Embedded Signup v4: finishing with no phone number is a valid pending stat
     r = await (await realFetch(`${base}/api/tenants/${t2.id}/whatsapp/embedded`, { method: 'POST', headers: { ...H, Authorization: 'Bearer ' + k2 }, body: JSON.stringify({ code: 'C', wabaId: 'W5', phoneNumberId: 'PN4', coexistence: true, event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING' }) })).json();
     assert.equal(r.numberStatus, 'active');
     assert.ok(!calls.some((c) => c.endsWith('/register')));
+    // Meta: contacts + history must be synced within 24h of coexistence onboarding
+    assert.equal(calls.filter((c) => c === 'POST /v21.0/PN4/smb_app_data').length, 2);
+    assert.ok(tenants.getTenant(t2.id).settings.whatsapp.coexSync.history);
   } finally {
     globalThis.fetch = realFetch;
     Object.assign(config, { metaAppId: '', metaAppSecret: '', metaConfigId: '' });
@@ -140,4 +143,20 @@ test('plan limit reached: customer gets one polite reply a day and the chat goes
   assert.match(sent[0].text, /team will reply here shortly/);
   assert.equal(getConversation(t.id, '447700900950').humanHandover, true);
   void say;
+});
+
+
+test('coexistence webhooks: contacts sync, history import, account offboarding, new account IDs captured', async () => {
+  const { processWebhookBody } = await import('../src/whatsapp/webhook.js');
+  const t = makeTenant({ whatsapp: { phoneNumberId: 'PNH', wabaId: 'WABAH' } });
+  const T = tenants.getTenant(t.id);
+  await processWebhookBody({ entry: [{ id: 'WABAH', changes: [{ field: 'smb_app_state_sync', value: { metadata: { phone_number_id: 'PNH', waac_id: 'WAAC77' }, state_sync: [{ type: 'contact', action: 'add', contact: { full_name: 'Priya Shah', phone_number: '447700900991' } }] } }] }] }, { tenantOverride: T });
+  assert.equal(getDb().prepare("SELECT name FROM customers WHERE tenant_id = ? AND wa_id = '447700900991'").get(t.id).name, 'Priya Shah');
+  assert.equal(tenants.getTenant(t.id).settings.whatsapp.accountIds.waac_id, 'WAAC77');
+  await processWebhookBody({ entry: [{ id: 'WABAH', changes: [{ field: 'history', value: { metadata: { phone_number_id: 'PNH' }, history: [{ threads: [{ id: '447700900991', messages: [{ from: '447700900991', id: 'h1', timestamp: '1760000000', type: 'text', text: { body: 'Do you have size 8?' } }, { from: '44700', id: 'h2', timestamp: '1760000100', type: 'text', text: { body: 'Yes we do!' } }] }] }] } }] }] }, { tenantOverride: T });
+  const hist = getDb().prepare("SELECT direction, body FROM messages WHERE tenant_id = ? AND wa_id = '447700900991' ORDER BY created_at").all(t.id);
+  assert.deepEqual(hist.map((h) => [h.direction, JSON.parse(h.body).text]), [['in', 'Do you have size 8?'], ['out', 'Yes we do!']]);
+  // account_update arrives without a phone number – routed by WABA id
+  await processWebhookBody({ entry: [{ id: 'WABAH', changes: [{ field: 'account_update', value: { event: 'PARTNER_REMOVED' } }] }] });
+  assert.equal(tenants.getTenant(t.id).settings.whatsapp.numberStatus, 'offboarded');
 });
