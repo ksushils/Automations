@@ -198,7 +198,9 @@ Notes:
 
 ## Selling it
 
-**Self-serve sign-up** is at `https://<PUBLIC_URL>/signup` (the home page redirects there). Each new shop gets a free trial (`TRIAL_DAYS`, default 14) and lands in its dashboard.
+**Sales website.** `https://<PUBLIC_URL>/` is a marketing home page: hero, how it works, features, comparison, pricing (read live from your plans), FAQ and legal links. **Self-serve sign-up** is at `/signup`.
+
+Each new shop gets a free trial (`TRIAL_DAYS`, default 14) with **no card needed**, and lands in its dashboard. The dashboard shows a "days left" banner. When billing is configured, a trial that ends without a subscription pauses that shop's bot, but the dashboard stays open so the owner can pick a plan. Set `STRIPE_AUTOMATIC_TAX=true` to charge UK VAT through Stripe Tax. Stripe itself emails receipts and trial reminders if you switch those emails on in Stripe → Settings → Emails.
 
 **Charging clients (Stripe Billing):**
 1. In your own Stripe account, create one recurring Price per plan.

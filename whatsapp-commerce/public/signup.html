@@ -41,7 +41,7 @@ const FEATURES = {
   growth: ['Everything in Starter', 'Campaigns, segments & retargeting', '5,000 messages · 3,000 AI replies / month'],
   pro: ['Everything in Growth', 'Unlimited messages · 20,000 AI replies / month', 'Priority support'],
 };
-let plan = 'growth';
+let plan = new URLSearchParams(location.search).get('plan') || 'growth';
 fetch('/api/plans').then((r) => r.json()).then((d) => {
   document.getElementById('trial').textContent = `${d.trialDays}-day free trial${d.billing ? '' : ''}.`;
   if (!d.signupEnabled) document.getElementById('f').innerHTML = '<p>Sign-up is currently closed – please contact us.</p>';
@@ -63,7 +63,7 @@ document.getElementById('f').onsubmit = async (e) => {
   const ok = document.getElementById('ok');
   ok.hidden = false;
   ok.innerHTML = `<h2>🎉 You're in!</h2><p>Save your login details (they are not shown again):</p><p>Shop ID: <code>${r.tenantId}</code></p><p>Admin key: <code>${r.adminKey}</code></p>
-    <p><a class="btn" style="display:block;text-align:center;text-decoration:none" href="${r.checkoutUrl || '/admin/'}">${r.checkoutUrl ? 'Add payment details & open dashboard' : 'Open my dashboard'}</a></p>`;
+    <p><a class="btn" style="display:block;text-align:center;text-decoration:none" href="${r.checkoutUrl || '/admin/'}">${r.checkoutUrl ? 'Confirm my plan & open dashboard' : 'Open my dashboard'}</a></p>`;
 };
 </script>
 </body>

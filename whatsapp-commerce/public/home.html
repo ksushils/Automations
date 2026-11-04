@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Commerce · Sell on WhatsApp with AI</title>
+<meta name="description" content="Turn WhatsApp into your best sales channel. Customers browse, ask questions and order inside WhatsApp – connected to your Shopify or WooCommerce shop, with an AI assistant that never sleeps.">
+<meta property="og:title" content="Sell on WhatsApp with AI">
+<meta property="og:description" content="Tap-to-order shopping, AI assistant, campaigns and automations for Shopify, WooCommerce and independent shops.">
+<style>
+:root{--bg:#f6f8f7;--card:#fff;--ink:#14201a;--mute:#56645c;--line:#dde4e0;--brand:#128c4a;--brand2:#0b6b38;--soft:#e6f4ec}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1411;--card:#16201a;--ink:#e8f0ea;--mute:#9cada3;--line:#28352d;--brand:#1fa055;--brand2:#25b862;--soft:#173322}}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+a{color:inherit}.wrap{max-width:1120px;margin:0 auto;padding:0 16px}
+nav{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:20px;height:60px}nav b{font-size:18px;flex:1}nav a{text-decoration:none;color:var(--mute);font-size:15px}nav a:hover{color:var(--ink)}
+.btn{display:inline-block;background:var(--brand);color:#fff!important;text-decoration:none;padding:12px 20px;border-radius:12px;font-weight:600;border:0;cursor:pointer;font:inherit}.btn:hover{background:var(--brand2)}
+.btn.ghost{background:none;color:var(--brand)!important;border:1px solid var(--line)}
+.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;padding:64px 0 40px}
+h1{font-size:clamp(32px,5vw,52px);line-height:1.08;margin:0 0 16px;letter-spacing:-.02em}.lead{font-size:19px;color:var(--mute);margin:0 0 24px}
+.phone{background:#0b141a;border-radius:32px;padding:14px;max-width:340px;margin-left:auto;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.chat{background:#efeae2;border-radius:22px;padding:14px;display:flex;flex-direction:column;gap:8px;font-size:14px;color:#111;min-height:440px}
+@media (prefers-color-scheme:dark){.chat{background:#0b141a;color:#e9edef}.b.out{background:#202c33!important}.b.in{background:#005c4b!important}}
+.b{max-width:85%;padding:8px 10px;border-radius:10px;box-shadow:0 1px 1px rgba(0,0,0,.08)}.b.in{align-self:flex-end;background:#d9fdd3}.b.out{align-self:flex-start;background:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.chips span{border:1px solid #cfd8d3;border-radius:8px;padding:2px 8px;font-size:12px;color:#128c4a;background:#fff}
+section{padding:56px 0;scroll-margin-top:64px}h2{font-size:clamp(26px,3.5vw,36px);margin:0 0 10px;letter-spacing:-.01em}.sub{color:var(--mute);margin:0 0 28px;max-width:700px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px}.card h3{margin:6px 0 6px;font-size:17px}.card p{margin:0;color:var(--mute);font-size:15px}
+.ico{font-size:26px}.steps{counter-reset:s}.steps .card h3::before{counter-increment:s;content:counter(s);display:inline-flex;width:26px;height:26px;border-radius:50%;background:var(--soft);color:var(--brand);align-items:center;justify-content:center;margin-right:8px;font-size:14px}
+.logos{display:flex;flex-wrap:wrap;gap:10px}.logos span{border:1px solid var(--line);border-radius:99px;padding:6px 14px;background:var(--card);font-size:14px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}th,td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;font-size:15px}th{background:var(--soft)}td:not(:first-child),th:not(:first-child){text-align:center}
+.tablewrap{overflow-x:auto}
+.price{font-size:38px;font-weight:700}.plan ul{padding-left:18px;color:var(--mute)}.plan.pop{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand)}
+.tag{display:inline-block;background:var(--soft);color:var(--brand);border-radius:99px;padding:2px 10px;font-size:12px;font-weight:600}
+details{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:10px}summary{cursor:pointer;font-weight:600}details p{color:var(--mute);margin:8px 0 0}
+.cta{background:var(--brand);color:#fff;border-radius:24px;padding:40px;text-align:center}.cta h2{color:#fff}.cta .btn{background:#fff;color:var(--brand)!important}
+footer{border-top:1px solid var(--line);padding:28px 0;color:var(--mute);font-size:14px}footer a{margin-right:16px}
+@media (max-width:820px){.hero{grid-template-columns:1fr;padding-top:36px}.phone{margin:0 auto}nav a.hide{display:none}}
+</style>
+</head>
+<body>
+<nav><div class="wrap"><b>💬 <span class="pn">WhatsApp Commerce</span></b><a class="hide" href="#features">Features</a><a class="hide" href="#pricing">Pricing</a><a class="hide" href="#faq">FAQ</a><a href="/admin/">Log in</a><a class="btn" href="/signup">Start free trial</a></div></nav>
+<main>
+<div class="wrap hero">
+  <div>
+    <span class="tag">For Shopify, WooCommerce & independent shops</span>
+    <h1>Sell on WhatsApp. Let AI take the orders.</h1>
+    <p class="lead">Customers browse your products, ask questions and pay – all inside WhatsApp. Connected live to your shop, with an AI assistant that answers in seconds, day and night.</p>
+    <p><a class="btn" href="/signup">Start your <span class="td">14</span>-day free trial</a> <a class="btn ghost" href="#how">See how it works</a></p>
+    <p class="mute" style="font-size:14px">No card needed to start · Cancel anytime · Official WhatsApp Business API</p>
+  </div>
+  <div class="phone" aria-hidden="true"><div class="chat">
+    <div class="b in">Hi! Do you have the linen cushion in sage?</div>
+    <div class="b out">Yes 😊 The <b>Linen Cushion</b> comes in Sage, Sand and Ink – £32. Free delivery over £50!<div class="chips"><span>View products</span></div></div>
+    <div class="b in">Sage please, 2 of them</div>
+    <div class="b out">Added 2 × Linen Cushion (Sage) ✅<br>Subtotal <b>£64.00</b><div class="chips"><span>✅ Checkout</span><span>🛍️ Keep shopping</span></div></div>
+    <div class="b out">✅ Order <b>#1042</b> created – FREE delivery to SW1A 1AA, Thu 14:00–16:00<div class="chips"><span>Pay now</span></div></div>
+    <div class="b in">Paid! Thank you 🙏</div>
+  </div></div>
+</div>
+
+<section id="how"><div class="wrap">
+  <h2>Live in an afternoon</h2><p class="sub">No developers needed. Connect, customise, share your link.</p>
+  <div class="grid steps">
+    <div class="card"><h3>Connect WhatsApp</h3><p>Link your business number in a few clicks with Meta's official sign-up.</p></div>
+    <div class="card"><h3>Connect your shop</h3><p>Shopify, WooCommerce, your own website – or add products in minutes. Prices and stock stay in sync.</p></div>
+    <div class="card"><h3>Your AI assistant is ready</h3><p>We set up an AI assistant trained on your products, delivery and returns policy automatically.</p></div>
+    <div class="card"><h3>Share & sell</h3><p>Add the WhatsApp button to your site, QR code to packaging, link to your Instagram bio – and watch orders arrive.</p></div>
+  </div>
+</div></section>
+
+<section id="features"><div class="wrap">
+  <h2>Everything you need to sell on WhatsApp</h2><p class="sub">Shopping, AI, marketing and team inbox – in one place.</p>
+  <div class="grid">
+    <div class="card"><div class="ico">🛍️</div><h3>Tap-to-order shopping</h3><p>Categories, product photos, sizes, basket and checkout inside the chat. Delivery or collection, time slots, delivery zones.</p></div>
+    <div class="card"><div class="ico">🤖</div><h3>AI that sells</h3><p>Answers product questions, recommends items and can take the whole order for you – using your real catalogue and policies.</p></div>
+    <div class="card"><div class="ico">💳</div><h3>Get paid your way</h3><p>Card payments (Stripe, Shopify, WooCommerce), cash on delivery or bank transfer – with automatic reminders and receipts.</p></div>
+    <div class="card"><div class="ico">🧩</div><h3>Drag-and-drop automations</h3><p>Build welcome menus, FAQs and lead forms visually. Keywords, buttons, questions, tags, delays and WhatsApp forms.</p></div>
+    <div class="card"><div class="ico">📣</div><h3>Campaigns that convert</h3><p>Send offers to the right segment, schedule up to 2 months ahead, see who read and replied, and retarget the rest.</p></div>
+    <div class="card"><div class="ico">🛒</div><h3>Recover lost sales</h3><p>Abandoned basket and checkout reminders, payment reminders and win-back offers – on autopilot.</p></div>
+    <div class="card"><div class="ico">📦</div><h3>Order updates</h3><p>Confirmations and "your order has shipped" messages on WhatsApp – for WhatsApp and website orders.</p></div>
+    <div class="card"><div class="ico">👥</div><h3>Team inbox</h3><p>Hand over to a human anytime. Assign chats, reply from the dashboard, staff logins.</p></div>
+    <div class="card"><div class="ico">📊</div><h3>Analytics</h3><p>Revenue, orders, conversion, top products and campaign results – plus CSV export.</p></div>
+  </div>
+  <p style="margin-top:22px" class="logos"><span>Shopify</span><span>WooCommerce</span><span>Any website (API)</span><span>Stripe</span><span>WhatsApp Cloud API</span><span>OpenAI / OpenRouter</span><span>n8n · Zapier · Make</span></p>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Why shops switch to us</h2><p class="sub">Most WhatsApp tools are either a separate mini-shop or a marketing inbox. We're both – plugged into the shop you already have.</p>
+  <div class="tablewrap"><table>
+    <tr><th></th><th>Us</th><th>WhatsApp mini-shop tools</th><th>WhatsApp marketing platforms</th></tr>
+    <tr><td>Uses your existing Shopify / WooCommerce catalogue</td><td>✅</td><td>❌</td><td>⚠️</td></tr>
+    <tr><td>Full checkout inside WhatsApp</td><td>✅</td><td>✅</td><td>⚠️</td></tr>
+    <tr><td>AI assistant that takes orders</td><td>✅</td><td>❌</td><td>⚠️</td></tr>
+    <tr><td>Campaigns, retargeting, flow builder</td><td>✅</td><td>⚠️</td><td>✅</td></tr>
+    <tr><td>Abandoned checkout recovery</td><td>✅</td><td>⚠️</td><td>✅</td></tr>
+    <tr><td>Simple UK pricing</td><td>✅</td><td>✅</td><td>⚠️</td></tr>
+  </table></div>
+</div></section>
+
+<section id="pricing"><div class="wrap">
+  <h2>Simple pricing</h2><p class="sub"><span class="td">14</span>-day free trial on every plan. WhatsApp's own message fees are charged by Meta at cost.</p>
+  <div class="grid" id="plans"></div>
+</div></section>
+
+<section id="faq"><div class="wrap">
+  <h2>Questions</h2>
+  <details><summary>Do I need the WhatsApp Business API?</summary><p>For the full chat shop and AI, yes – we connect it for you through Meta's official sign-up in a few minutes. You can also start in "lite" mode: a storefront where orders arrive in your normal WhatsApp.</p></details>
+  <details><summary>Does it work with my Shopify or WooCommerce shop?</summary><p>Yes. Products, prices and stock are read live, and orders are created in your shop – so fulfilment, stock and accounting work exactly as today.</p></details>
+  <details><summary>What does WhatsApp itself charge?</summary><p>Meta charges per marketing/utility template message (pennies in the UK). Replies to customers who message you are free. These fees are billed by Meta directly.</p></details>
+  <details><summary>Can the AI make mistakes?</summary><p>It only uses your real catalogue and the policies you give it, and hands over to your team when it's unsure or the customer asks for a person. You can review every chat in the inbox.</p></details>
+  <details><summary>Can I cancel anytime?</summary><p>Yes – manage or cancel your subscription from the Billing page. No contracts.</p></details>
+  <details><summary>Is my data safe?</summary><p>Credentials are encrypted, webhooks are verified, and we act as your data processor under a UK GDPR data processing agreement.</p></details>
+</div></section>
+
+<section><div class="wrap"><div class="cta"><h2>Start selling on WhatsApp today</h2><p style="opacity:.9">Set up in an afternoon. Free for <span class="td">14</span> days.</p><p><a class="btn" href="/signup">Start free trial</a></p></div></div></section>
+</main>
+<footer><div class="wrap"><span class="pn">WhatsApp Commerce</span> · <a href="/legal/terms">Terms</a><a href="/legal/privacy">Privacy</a><a href="/legal/dpa">DPA</a><a href="/admin/">Log in</a><span id="se"></span></div></footer>
+<script>
+fetch('/api/plans').then((r) => r.json()).then((d) => {
+  document.querySelectorAll('.pn').forEach((e) => (e.textContent = d.productName));
+  document.querySelectorAll('.td').forEach((e) => (e.textContent = d.trialDays));
+  if (d.productName) document.title = `${d.productName} · Sell on WhatsApp with AI`;
+  if (d.supportEmail) document.getElementById('se').innerHTML = ` · <a href="mailto:${d.supportEmail}">${d.supportEmail}</a>`;
+  const F = {
+    starter: ['WhatsApp shop & storefront', 'Shopify / WooCommerce / built-in catalogue', 'AI assistant & agent', 'Flow builder & auto-replies'],
+    growth: ['Everything in Starter', 'Campaigns, segments & retargeting', 'Abandoned checkout recovery'],
+    pro: ['Everything in Growth', 'Priority support'],
+  };
+  const fmt = (n) => (n == null ? 'Unlimited' : n.toLocaleString());
+  document.getElementById('plans').innerHTML = Object.entries(d.plans).map(([k, p]) => `<div class="card plan ${k === 'growth' ? 'pop' : ''}">${k === 'growth' ? '<span class="tag">Most popular</span>' : ''}<h3>${p.label}</h3><div class="price">£${p.priceGbp}<span style="font-size:15px;font-weight:400;color:var(--mute)">/month</span></div>
+    <ul>${(F[k] || []).map((x) => `<li>${x}</li>`).join('')}<li>${fmt(p.monthlyConversationsIn)} customer messages / month</li><li>${fmt(p.aiCalls)} AI replies / month</li></ul><a class="btn ${k === 'growth' ? '' : 'ghost'}" href="/signup?plan=${k}" style="width:100%;text-align:center">Start free trial</a></div>`).join('');
+}).catch(() => {});
+</script>
+</body>
+</html>

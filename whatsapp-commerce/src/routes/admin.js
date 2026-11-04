@@ -21,7 +21,7 @@ import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaig
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile } from '../templates.js';
 import { fetchMedia } from '../whatsapp/cloudApi.js';
 import { parseCsv } from '../csv.js';
-import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, embeddedSignupConfigured } from '../platform.js';
+import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
 import { systemStatus, backup, alert } from '../ops.js';
 import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, buildAgentPrompt } from '../dify/provision.js';
@@ -69,7 +69,7 @@ export function adminRouter() {
   const r = express.Router();
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-  r.get('/plans', (req, res) => res.json({ plans: PLANS, storeTypes: STORE_TYPES, signupEnabled: config.signupEnabled, billing: billingConfigured(), trialDays: config.trialDays }));
+  r.get('/plans', (req, res) => res.json({ plans: PLANS, storeTypes: STORE_TYPES, signupEnabled: config.signupEnabled, billing: billingConfigured(), trialDays: config.trialDays, productName: config.productName, supportEmail: config.supportEmail }));
   r.get('/meta/config', (req, res) => res.json({ enabled: embeddedSignupConfigured(), appId: config.metaAppId || null, configId: config.metaConfigId || null, graphVersion: config.graphVersion }));
 
   // ----- public self-serve sign-up -----
@@ -114,7 +114,7 @@ export function adminRouter() {
   r.delete('/tenants/:tenantId', requireSuper, (req, res) => { deleteTenant(req.params.tenantId); res.json({ ok: true }); });
 
   // ----- tenant scoped -----
-  r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant), role: req.role, staffName: req.staff?.name || null }));
+  r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant), role: req.role, staffName: req.staff?.name || null, banner: billingBanner(req.tenant.id) }));
 
   // ----- billing (your SaaS subscription) -----
   r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS }));

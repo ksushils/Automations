@@ -100,3 +100,26 @@ test('Meta Embedded Signup exchanges code, subscribes WABA, registers number; ap
     Object.assign(config, { metaAppId: '', metaAppSecret: '', metaConfigId: '', metaWebhookVerifyToken: '' });
   }
 }));
+
+test('trial enforcement pauses expired trials only when billing is configured; banner explains', async () => {
+  const { enforceTrials, billingBanner } = await import('../src/platform.js');
+  const { tenant } = tenants.createTenant({ name: 'Trial Shop' });
+  getDb().prepare("UPDATE tenants SET subscription_status = 'trialing', trial_ends_at = datetime('now', '-1 hour') WHERE id = ?").run(tenant.id);
+  assert.equal(enforceTrials(), 0); // billing not configured → never pause
+  config.platformStripeSecret = 'sk_test_x';
+  try {
+    assert.ok(enforceTrials() >= 1);
+    assert.equal(tenants.getTenant(tenant.id).active, false);
+    assert.match(billingBanner(tenant.id).text, /trial has ended/);
+    const { tenant: t2 } = tenants.createTenant({ name: 'Fresh Trial' });
+    getDb().prepare("UPDATE tenants SET subscription_status = 'trialing', trial_ends_at = datetime('now', '+2 days') WHERE id = ?").run(t2.id);
+    assert.match(billingBanner(t2.id).text, /2 days left/);
+    assert.equal(billingBanner(t2.id).level, 'warn');
+  } finally { config.platformStripeSecret = ''; }
+});
+
+test('marketing home page is served', () => withServer(async (base) => {
+  const html = await (await fetch(`${base}/`)).text();
+  assert.match(html, /Sell on WhatsApp\. Let AI take the orders\./);
+  assert.match(html, /id="pricing"/);
+}));

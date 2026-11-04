@@ -57,4 +57,7 @@ Object.assign(config, {
   alertWebhookUrl: env.ALERT_WEBHOOK_URL || '', // errors are POSTed here (Slack/Discord/n8n)
   backupDir: env.BACKUP_DIR || './data/backups',
   backupKeep: Number(env.BACKUP_KEEP || 14),
+  stripeAutomaticTax: env.STRIPE_AUTOMATIC_TAX === 'true', // UK VAT etc. via Stripe Tax (enable Stripe Tax in your dashboard first)
+  productName: env.PRODUCT_NAME || 'WhatsApp Commerce',
+  supportEmail: env.SUPPORT_EMAIL || env.LEGAL_CONTACT_EMAIL || '',
 });

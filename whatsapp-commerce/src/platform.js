@@ -44,9 +44,12 @@ export async function createSubscriptionCheckout(tenant, plan) {
     client_reference_id: tenant.id,
     ...(row.stripe_customer_id ? { customer: row.stripe_customer_id } : row.owner_email ? { customer_email: row.owner_email } : {}),
     line_items: { 0: { price, quantity: 1 } },
-    subscription_data: { metadata: { tenant_id: tenant.id, plan }, ...(trialLeft > 1 ? { trial_period_days: trialLeft } : {}) },
+    // During a free trial no card is needed; if none is added by the end Stripe cancels and the bot pauses.
+    subscription_data: { metadata: { tenant_id: tenant.id, plan }, ...(trialLeft > 1 ? { trial_period_days: trialLeft, trial_settings: { end_behavior: { missing_payment_method: 'cancel' } } } : {}) },
+    ...(trialLeft > 1 ? { payment_method_collection: 'if_required' } : {}),
     metadata: { tenant_id: tenant.id, plan },
     allow_promotion_codes: 'true',
+    ...(config.stripeAutomaticTax ? { automatic_tax: { enabled: 'true' }, tax_id_collection: { enabled: 'true' }, billing_address_collection: 'required', ...(row.stripe_customer_id ? { customer_update: { address: 'auto', name: 'auto' } } : {}) } : {}),
     success_url: `${config.publicUrl}/admin/?billing=success`,
     cancel_url: `${config.publicUrl}/admin/?billing=cancelled`,
   });
@@ -86,6 +89,35 @@ export function handlePlatformStripeEvent(rawBody, signature) {
     }
   }
   return { ok: true, status: 200 };
+}
+
+/**
+ * Trial enforcement (only when billing is configured): when a free trial ends without a subscription the bot
+ * pauses (dashboard stays available so the owner can pick a plan). Returns the number of shops paused.
+ */
+export function enforceTrials() {
+  if (!billingConfigured()) return 0;
+  const rows = getDb().prepare("SELECT id FROM tenants WHERE active = 1 AND subscription_status = 'trialing' AND subscription_id IS NULL AND trial_ends_at IS NOT NULL AND trial_ends_at < datetime('now')").all();
+  for (const r of rows) {
+    getDb().prepare("UPDATE tenants SET subscription_status = 'trial_expired' WHERE id = ?").run(r.id);
+    updateTenantMeta(r.id, { active: false });
+  }
+  return rows.length;
+}
+
+/** Banner text for the dashboard: trial days left / expired / payment problem. */
+export function billingBanner(tenantId) {
+  if (!billingConfigured()) return null;
+  const r = getDb().prepare('SELECT subscription_status AS s, trial_ends_at AS t FROM tenants WHERE id = ?').get(tenantId);
+  if (!r) return null;
+  if (r.s === 'trialing' && r.t) {
+    const days = Math.ceil((Date.parse(r.t + 'Z') - Date.now()) / 864e5);
+    return { level: days <= 3 ? 'warn' : 'info', text: `Free trial: ${Math.max(0, days)} day${days === 1 ? '' : 's'} left. Choose a plan to keep your WhatsApp shop running.` };
+  }
+  if (r.s === 'trial_expired') return { level: 'warn', text: 'Your free trial has ended and your WhatsApp bot is paused. Choose a plan on the Billing tab to switch it back on.' };
+  if (r.s === 'past_due' || r.s === 'unpaid') return { level: 'warn', text: 'We could not take your last payment. Please update your card on the Billing tab to avoid interruption.' };
+  if (r.s === 'canceled') return { level: 'warn', text: 'Your subscription is cancelled and the bot is paused. Choose a plan on the Billing tab to restart.' };
+  return null;
 }
 
 // ---------- Meta Embedded Signup ----------

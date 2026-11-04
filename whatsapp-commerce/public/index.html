@@ -76,6 +76,7 @@ code{background:var(--bg);padding:2px 6px;border-radius:6px;word-break:break-all
   <nav id="nav"></nav>
   <button class="btn ghost" id="logout" style="display:none">Sign out</button>
 </header>
+<div id="banner"></div>
 <main id="app"></main>
 <div id="toast"></div>
 <script>
@@ -110,7 +111,7 @@ async function boot() {
   const who = await api('/whoami');
   S.super = who.super;
   if (!S.tenantId && !S.super) throw new Error('Invalid key');
-  if (S.tenantId) { const r = await api(T('')); S.tenant = r.tenant; S.role = r.role; }
+  if (S.tenantId) { const r = await api(T('')); S.tenant = r.tenant; S.role = r.role; S.banner = r.banner; }
   $('#logout').style.display = '';
   render();
 }
@@ -122,6 +123,8 @@ function render() {
   const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [])];
   if (!tabs.find((t) => t[0] === S.tab)) S.tab = tabs[0][0];
   document.querySelector('main').style.maxWidth = '';
+  $('#banner').innerHTML = S.banner ? `<div style="max-width:1100px;margin:12px auto 0;padding:0 16px"><div class="card" style="margin:0;border-color:${S.banner.level === 'warn' ? 'var(--warn)' : 'var(--line)'}">${S.banner.level === 'warn' ? '⚠️' : '⏳'} ${esc(S.banner.text)} ${S.role === 'owner' ? '<a href="#" id="bgo">Choose a plan →</a>' : ''}</div></div>` : '';
+  if ($('#bgo')) $('#bgo').onclick = (e) => { e.preventDefault(); S.tab = 'billing'; render(); };
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));

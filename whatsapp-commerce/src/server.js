@@ -42,7 +42,7 @@ export function createApp() {
   });
   app.use('/admin', express.static(path.join(__dirname, '..', 'public')));
   app.get('/signup', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'signup.html')));
-  app.get('/', (req, res) => res.redirect(config.signupEnabled ? '/signup' : '/admin'));
+  app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'home.html')));
   return app;
 }
 

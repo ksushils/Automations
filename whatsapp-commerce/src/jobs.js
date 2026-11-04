@@ -9,6 +9,7 @@ import { runCampaign } from './campaigns.js';
 import { resumeFlow } from './bot/engine.js';
 import { enqueue } from './whatsapp/webhook.js';
 import { runAbandonedCheckouts } from './routes/storeWebhooks.js';
+import { enforceTrials } from './platform.js';
 
 /** Scheduled work: flow delays and campaigns. */
 export async function runScheduled() {
@@ -64,7 +65,10 @@ export function startJobs() {
   }, 5 * 60000);
   const minutely = setInterval(() => runScheduled().catch((e) => console.error('[jobs]', e)), 30000);
   minutely.unref();
-  const daily = setInterval(() => runWinBack().catch((e) => console.error('[jobs]', e)), 6 * 3600000);
+  const daily = setInterval(() => {
+    runWinBack().catch((e) => console.error('[jobs]', e));
+    try { const n = enforceTrials(); if (n) console.log(`[billing] paused ${n} expired trial(s)`); } catch (e) { console.error('[jobs]', e); }
+  }, 3600000);
   timer.unref();
   daily.unref();
   return timer;
