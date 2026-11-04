@@ -21,7 +21,7 @@ export function createApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', true);
   // Keep the raw body for Meta signature verification.
-  app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
+  app.use(express.json({ limit: '15mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
   app.use(securityHeaders);
   app.get('/health', (req, res) => {

@@ -9,7 +9,7 @@
 @media (prefers-color-scheme:dark){:root{--bg:#0f1512;--card:#17201b;--ink:#e7efe9;--mute:#9aaba1;--line:#2a362f;--brand:#25d366;--bar:#17a050;--brand2:#1fb457;--bubble-in:#202c33;--bubble-out:#005c4b;--chat:#0b141a}}
 *{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
 header{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2;flex-wrap:wrap}
-header h1{font-size:16px;margin:0;flex:1}nav{display:flex;gap:4px;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;flex:1}nav{display:flex;gap:2px;flex-wrap:nowrap;overflow-x:auto;order:3;flex-basis:100%;scrollbar-width:thin;padding-bottom:2px}nav button{white-space:nowrap}
 nav button{background:none;border:0;padding:6px 10px;border-radius:8px;color:var(--mute);cursor:pointer;font:inherit}nav button.on{background:var(--brand);color:#fff}
 main{max-width:1100px;margin:0 auto;padding:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
@@ -117,7 +117,7 @@ async function boot() {
 }
 $('#logout').onclick = () => { store.set('wc_key', null); S.key = null; S.tenant = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
+const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
 const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders', 'contacts']);
 function render() {
   const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [])];
@@ -128,7 +128,7 @@ function render() {
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
-  ({ tenants, overview, analytics, team, billing, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin ----------
@@ -170,6 +170,7 @@ async function overview() {
       <div class="card"><div class="mute">Orders (month)</div><div class="stat">${t.usage.orders}</div></div>
       <div class="card"><div class="mute">AI replies (month)</div><div class="stat">${t.usage.ai_calls}${lim.aiCalls ? ` / ${lim.aiCalls}` : ''}</div></div>
       <div class="card"><div class="mute">Plan</div><div class="stat">${esc(lim.label || t.plan)}</div></div></div>
+    <div class="card" id="wizard"><h2>Get your WhatsApp shop live</h2><div class="mute">Loading…</div></div>
     <div class="card"><h2>Setup checklist</h2>${checks.map(([l, ok]) => `<div>${ok ? '✅' : '⬜'} ${l}</div>`).join('')}
       ${S.role === 'owner' ? `<p id="esu"></p>` : ''}</div>
     <div class="card"><h2>Connection details</h2>
@@ -185,6 +186,7 @@ async function overview() {
       <div><button class="btn ghost" data-test="dify">Test Dify</button></div>
       <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></div>`;
   embeddedSignupButton(s);
+  setupWizard(t);
   if (s.whatsapp.phoneNumberId) api(T('/whatsapp/health')).then((h) => {
     const el = document.createElement('div'); el.className = 'card';
     if (!h.ok) { el.innerHTML = `<h2>WhatsApp number</h2><p class="pill warn">${esc(h.error)}</p>`; }
@@ -370,7 +372,7 @@ async function catalogue() {
 const FIELDS = [
   ['Business', [['business.name', 'Business name'], ['business.currency', 'Currency code (GBP)'], ['business.currencySymbol', 'Currency symbol'], ['business.welcomeMessage', 'Welcome message ({{name}} = first name)', 'textarea'], ['business.supportHours', 'Support hours'], ['business.exampleQuery', 'Example search shown to customers'], ['business.whatsappNumber', 'Public WhatsApp number (for storefront buttons, e.g. 447700900123)'], ['business.timezone', 'Timezone (e.g. Europe/London)'], ['business.tagline', 'Storefront tagline'], ['business.logoUrl', 'Logo image URL'], ['business.customDomain', 'Custom storefront domain (CNAME to this server)']]],
   ['WhatsApp Cloud API (Meta)', [['whatsapp.phoneNumberId', 'Phone number ID'], ['whatsapp.wabaId', 'WhatsApp Business Account ID'], ['whatsapp.accessToken', 'Permanent access token (System User)', 'secret'], ['whatsapp.appSecret', 'App secret (verifies webhook signatures)', 'secret'], ['whatsapp.verifyToken', 'Webhook verify token']]],
-  ['Store connection', [['store.type', 'Store type', 'select', ['manual', 'shopify', 'woocommerce', 'custom']], ['store.shopify.domain', 'Shopify domain (yourshop.myshopify.com)'], ['store.shopify.adminToken', 'Shopify Admin API access token (shpat_…)', 'secret'], ['store.woocommerce.url', 'WooCommerce site URL (https://…)'], ['store.woocommerce.consumerKey', 'WooCommerce consumer key (ck_…)', 'secret'], ['store.woocommerce.consumerSecret', 'WooCommerce consumer secret (cs_…)', 'secret'], ['store.custom.baseUrl', 'Custom VPS store API base URL'], ['store.custom.apiKey', 'Custom store API key', 'secret']]],
+  ['Store connection', [['store.type', 'Store type (shopify_public = just your Shopify website address)', 'select', ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom']], ['store.shopify.domain', 'Shopify domain (yourshop.co.uk or yourshop.myshopify.com)'], ['store.shopify.adminToken', 'Shopify Admin API access token (shpat_…)', 'secret'], ['store.woocommerce.url', 'WooCommerce site URL (https://…)'], ['store.woocommerce.consumerKey', 'WooCommerce consumer key (ck_…)', 'secret'], ['store.woocommerce.consumerSecret', 'WooCommerce consumer secret (cs_…)', 'secret'], ['store.custom.baseUrl', 'Custom VPS store API base URL'], ['store.custom.apiKey', 'Custom store API key', 'secret']]],
   ['AI (Dify)', [['dify.enabled', 'Enable AI replies', 'bool'], ['dify.baseUrl', 'Dify API base URL'], ['dify.apiKey', 'Dify app API key (app-…)', 'secret'], ['dify.mode', 'Mode', 'select', ['assist', 'agent']]]],
   ['Ordering & payment', [['ordering.paymentMethods', 'Payment methods (comma: payment_link,cod,bank_transfer)', 'csv'], ['ordering.paymentLinkUrl', 'Payment link for built-in catalogue (e.g. Stripe link; {total} {order})'], ['ordering.bankDetails', 'Bank transfer details', 'textarea'], ['ordering.fulfilment', 'Fulfilment (comma: delivery,pickup)', 'csv'], ['ordering.deliveryFee', 'Delivery fee', 'number'], ['ordering.freeDeliveryOver', 'Free delivery over (0 = never)', 'number'], ['ordering.minOrder', 'Minimum order (0 = none)', 'number'], ['ordering.pickupAddress', 'Collection address'], ['ordering.paymentReminderMinutes', 'Remind unpaid orders after minutes (0 = off)', 'number'], ['ordering.askNote', 'Let customers add an order note', 'bool'], ['ordering.lowStockAlert', 'Low-stock alert at (built-in catalogue)', 'number']]],
   ['Promo codes & delivery zones', [['ordering.promoCodes', 'Promo codes (JSON) – [{"code":"WELCOME10","type":"percent|fixed|free_delivery","value":10,"minSpend":0,"expires":"2026-12-31","maxUses":0,"oncePerCustomer":true}]', 'json'], ['ordering.deliveryZones', 'Delivery zones (JSON, empty = deliver anywhere) – [{"name":"Central London","postcodes":["SW1","W1","EC"],"fee":3.5,"minOrder":15,"freeOver":50}]', 'json']]],
@@ -528,6 +530,87 @@ async function templates() {
   $('#app').querySelectorAll('[data-lib]').forEach((b) => (b.onclick = () => submit(r.library[+b.dataset.lib])));
   $('#tgo').onclick = () => submit({ name: $('#tn').value.trim(), category: $('#tc').value, language: $('#tl').value, header: $('#th').value, body: $('#tb').value, footer: $('#tf').value, examples: $('#tx').value.split(',').map((x) => x.trim()), buttons: $('#tq').value.split(',').map((x) => x.trim()).filter(Boolean).map((text) => ({ text })) });
   $('#app').querySelectorAll('[data-deltpl]').forEach((b) => (b.onclick = async () => { if (confirm('Delete template ' + b.dataset.deltpl + '?')) { await api(T('/templates/' + b.dataset.deltpl), { method: 'DELETE' }).catch((e) => toast(e.message)); templates(); } }));
+}
+
+// ---------- setup wizard ----------
+async function setupWizard(t) {
+  const s = t.settings;
+  const kb = await api(T('/knowledge')).catch(() => ({ docs: [] }));
+  const products = s.store.type !== 'manual' || (s.store.manual.products || []).length > 0;
+  const steps = [
+    ['🌐', 'Tell us your website', 'We read your shop, products and policies automatically.', !!s.business.website, 'site'],
+    ['🛍️', 'Products connected', s.store.type === 'manual' ? 'Add products or connect Shopify / WooCommerce.' : `Connected: ${s.store.type.replace('_public', ' (website)')}`, products, 'catalogue'],
+    ['📚', 'Knowledge base', `${kb.docs.length} document${kb.docs.length === 1 ? '' : 's'} – policies, FAQs, guides`, kb.docs.length > 0, 'knowledge'],
+    ['🤖', 'AI chatbot', s.dify.enabled && s.dify.apiKey ? 'Live' + (kb.attached ? ' with your knowledge base' : '') : 'Created automatically', !!(s.dify.enabled && s.dify.apiKey), 'ai'],
+    ['📱', 'Connect WhatsApp', s.whatsapp.phoneNumberId ? 'Connected' : 'Link your business number', !!s.whatsapp.phoneNumberId, 'overview'],
+    ['💬', 'Test your bot', 'Chat with it like a customer would', false, 'simulator'],
+  ];
+  const done = steps.filter((x) => x[3]).length;
+  const el = $('#wizard');
+  if (!el) return;
+  el.innerHTML = `<h2>Get your WhatsApp shop live <span class="mute" style="font-weight:400">${done}/${steps.length - 1}</span></h2>
+    ${!s.business.website && S.role === 'owner' ? `<div class="row" style="margin-bottom:10px"><div><label>Your website – we'll set everything up from it</label><input id="wsite" placeholder="yourshop.co.uk"></div><div style="align-self:end"><button class="btn" id="wgo">Set up from my website</button></div></div><pre id="wres" class="mute" style="white-space:pre-wrap"></pre>` : ''}
+    ${steps.map(([i, title, sub, ok, tab]) => `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)"><span style="font-size:20px">${ok ? '✅' : i}</span><div style="flex:1"><b>${title}</b><div class="mute">${esc(sub)}</div></div>${tab !== 'site' && tab !== 'overview' ? `<button class="btn ghost" data-go="${tab}">${ok ? 'Open' : 'Start'}</button>` : ''}</div>`).join('')}`;
+  el.querySelectorAll('[data-go]').forEach((b) => (b.onclick = () => { S.tab = b.dataset.go; render(); }));
+  if ($('#wgo')) $('#wgo').onclick = async () => {
+    $('#wres').textContent = 'Reading your website… (this can take 20–40 seconds)';
+    try {
+      const r = await api(T('/onboarding/website'), { method: 'POST', body: { url: $('#wsite').value } });
+      $('#wres').textContent = `✅ Found ${r.site.name || r.site.domain} (${r.site.platform})${r.store ? ' – catalogue connected' : ''}. Imported ${r.imported.length} page(s): ${r.imported.map((x) => x.name).join(', ')}`;
+      S.tenant = r.tenant; setTimeout(overview, 2500);
+    } catch (e) { $('#wres').textContent = '⚠️ ' + e.message; }
+  };
+}
+
+// ---------- knowledge base ----------
+async function knowledge() {
+  const k = await api(T('/knowledge'));
+  const owner = S.role === 'owner';
+  const badge = { pending: '⏳ waiting', indexing: '🔄 learning', ready: '✅ ready', error: '⚠️ error', to_delete: '🗑️ removing' };
+  const kb = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+  $('#app').innerHTML = `<div class="card"><h2>📚 Knowledge base</h2>
+      <p class="mute">Everything your AI chatbot should know: delivery & returns policies, FAQs, size guides, product manuals, opening hours… It is searched automatically for every customer question.</p>
+      <p>${k.docs.length} / ${k.limit} documents · ${k.aiConnected ? (k.attached ? '✅ Connected to your AI chatbot' : '🔄 Will connect to your AI chatbot after the next sync') : '<span class="pill warn">AI not connected on the server – documents are saved and the built-in search answers simple questions</span>'}
+      ${owner && k.aiConnected ? ' <button class="btn ghost" id="ksync">Sync now</button>' : ''}</p></div>
+    ${owner ? `<div class="row">
+      <div class="card"><h2>🌐 From your website</h2><label>Page addresses (one per line)</label><textarea id="kurls" placeholder="https://yourshop.co.uk/pages/faq\nhttps://yourshop.co.uk/policies/refund-policy"></textarea>
+        <p><button class="btn" id="kurl">Import pages</button> <button class="btn ghost" id="kauto">Auto-import my site</button></p></div>
+      <div class="card"><h2>📄 Upload files</h2><p class="mute">PDF, Word, Excel, PowerPoint, TXT, Markdown, CSV – up to 10 MB each.</p><input type="file" id="kfiles" multiple accept=".pdf,.doc,.docx,.txt,.md,.csv,.xls,.xlsx,.ppt,.pptx,.html,.htm"><p><button class="btn" id="kup">Upload</button></p></div>
+      <div class="card"><h2>✍️ Write or paste</h2><label>Title</label><input id="ktitle" placeholder="Delivery & returns"><label>Text</label><textarea id="ktext" style="min-height:120px"></textarea><p><button class="btn" id="kadd">Add</button></p></div>
+    </div><pre id="kres" class="mute" style="white-space:pre-wrap"></pre>` : ''}
+    <div class="card"><h2>Documents</h2><div class="tablewrap"><table><tr><th>Name</th><th>Source</th><th>Size</th><th>Status</th><th>Added</th><th></th></tr>
+      ${k.docs.map((d) => `<tr><td><b>${esc(d.name)}</b>${d.url ? `<div class="mute"><a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.url)}</a></div>` : ''}${d.error ? `<div class="mute">${esc(d.error)}</div>` : ''}</td><td>${esc(d.source)}</td><td>${kb(d.size)}</td><td>${badge[d.status] || esc(d.status)}</td><td class="mute">${esc(d.createdAt)}</td><td>${owner ? `<button class="btn ghost" data-kdel="${d.id}">Remove</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="mute">No documents yet – import your website or upload your FAQ to get started.</td></tr>'}
+    </table></div></div>
+    <div class="card"><h2>🔎 Try a question</h2><div style="display:flex;gap:8px"><input id="kq" placeholder="Do you ship to Ireland?"><button class="btn ghost" id="kqgo">Search</button></div><div id="kqres" class="mute" style="margin-top:8px"></div>
+      <p class="mute">This shows what the built-in search finds. Your AI chatbot uses the full knowledge base – try it in <a href="#" id="ktest">Test bot</a>.</p></div>`;
+  const res = (t) => { if ($('#kres')) $('#kres').textContent = t; };
+  const again = () => setTimeout(knowledge, 600);
+  $('#ktest').onclick = (e) => { e.preventDefault(); S.tab = 'simulator'; render(); };
+  $('#kqgo').onclick = async () => { const r = await api(T('/knowledge/search?q=' + encodeURIComponent($('#kq').value))); $('#kqres').innerHTML = r.hits.map((h) => `<div class="card" style="margin:6px 0"><b>${esc(h.doc)}</b><div style="white-space:pre-wrap">${esc(h.text)}</div></div>`).join('') || 'Nothing found – add a document that answers this.'; };
+  $('#app').querySelectorAll('[data-kdel]').forEach((b) => (b.onclick = async () => { if (confirm('Remove this document?')) { await api(T('/knowledge/' + b.dataset.kdel), { method: 'DELETE' }); again(); } }));
+  if (!owner) return;
+  if ($('#ksync')) $('#ksync').onclick = async () => { res('Syncing…'); const r = await api(T('/knowledge/sync'), { method: 'POST' }); res(r.ok ? `✅ Synced ${r.synced || 0}, removed ${r.deleted || 0}${r.failed ? `, ${r.failed} failed` : ''}` : '⚠️ ' + r.error); again(); };
+  $('#kurl').onclick = async () => {
+    const urls = $('#kurls').value.split(/\s+/).filter(Boolean); if (!urls.length) return toast('Enter at least one address');
+    res('Importing…');
+    try { const r = await api(T('/knowledge/url'), { method: 'POST', body: { urls } }); res(r.results.map((x) => `${x.ok ? '✅' : '⚠️'} ${x.url}${x.ok ? '' : ' – ' + x.error}`).join('\n')); again(); } catch (e) { res(e.message); }
+  };
+  $('#kauto').onclick = async () => {
+    const url = prompt('Your website address', S.tenant.settings.business.website || ''); if (!url) return;
+    res('Reading your website…');
+    try { const r = await api(T('/onboarding/website'), { method: 'POST', body: { url } }); res(`✅ Imported ${r.imported.length} page(s): ${r.imported.map((x) => x.name).join(', ')}`); again(); } catch (e) { res(e.message); }
+  };
+  $('#kup').onclick = async () => {
+    const files = [...$('#kfiles').files]; if (!files.length) return toast('Choose files');
+    const out = [];
+    for (const f of files) {
+      if (f.size > 10 * 1048576) { out.push(`⚠️ ${f.name} is larger than 10 MB`); continue; }
+      const b64 = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = no; r.readAsDataURL(f); });
+      try { await api(T('/knowledge/file'), { method: 'POST', body: { filename: f.name, mime: f.type, contentBase64: b64 } }); out.push(`✅ ${f.name}`); } catch (e) { out.push(`⚠️ ${f.name} – ${e.message}`); }
+    }
+    res(out.join('\n')); again();
+  };
+  $('#kadd').onclick = async () => { try { await api(T('/knowledge/text'), { method: 'POST', body: { name: $('#ktitle').value || 'Notes', text: $('#ktext').value } }); toast('Added'); again(); } catch (e) { res(e.message); } };
 }
 
 // ---------- Meta Embedded Signup ----------

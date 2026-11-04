@@ -24,7 +24,8 @@ import { parseCsv } from '../csv.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
 import { systemStatus, backup, alert } from '../ops.js';
-import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, buildAgentPrompt } from '../dify/provision.js';
+import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, buildAgentPrompt, knowledgeChanged } from '../dify/provision.js';
+import { listDocs, addTextDoc, addFileDoc, removeDoc, importUrl, onboardFromWebsite, searchKnowledge } from '../knowledge.js';
 
 const bearer = (req) => (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
 const isSuper = (req) => !!config.superAdminKey && safeEqual(bearer(req), config.superAdminKey);
@@ -83,7 +84,12 @@ export function adminRouter() {
     const plan = PLANS[req.body?.plan] ? req.body.plan : 'starter';
     const { tenant, adminKey } = createTenant({ name, plan });
     getDb().prepare("UPDATE tenants SET owner_email = ?, trial_ends_at = datetime('now', ?), subscription_status = 'trialing' WHERE id = ?").run(email, `+${config.trialDays} days`, tenant.id);
-    if (consoleConfigured()) provisionDifyBot(tenant.id).catch((e) => console.warn('[signup ai]', e.message));
+    // Website given → detect the shop, connect its catalogue, import policy/FAQ pages; then build the AI chatbot
+    const website = String(req.body?.website || '').trim();
+    (async () => {
+      if (website) await onboardFromWebsite(tenant.id, website).catch((e) => console.warn('[signup onboarding]', e.message));
+      if (consoleConfigured()) await provisionDifyBot(tenant.id).catch((e) => console.warn('[signup ai]', e.message));
+    })();
     let checkoutUrl = null;
     if (billingConfigured() && config.stripePrices[plan]) checkoutUrl = await createSubscriptionCheckout(getTenant(tenant.id), plan).catch((e) => { console.warn('[signup billing]', e.message); return null; });
     res.status(201).json({ tenantId: tenant.id, adminKey, checkoutUrl, trialDays: config.trialDays });
@@ -115,6 +121,46 @@ export function adminRouter() {
 
   // ----- tenant scoped -----
   r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant), role: req.role, staffName: req.staff?.name || null, banner: billingBanner(req.tenant.id) }));
+
+  // ----- knowledge base (RAG) -----
+  const kbChanged = (id) => knowledgeChanged(id).catch((e) => console.warn('[knowledge sync]', e.message));
+  const kbErr = (res, e) => res.status(e.status || 400).json({ error: e.message });
+  r.get('/tenants/:tenantId/knowledge', requireTenant, (req, res) => {
+    const d = req.tenant.settings.dify || {};
+    res.json({ docs: listDocs(req.tenant.id), limit: PLANS[req.tenant.plan]?.knowledgeDocs ?? 20, aiConnected: consoleConfigured(), datasetId: d.datasetId || null, attached: !!d.datasetAttached && d.datasetAttached === d.datasetId });
+  });
+  r.post('/tenants/:tenantId/knowledge/text', requireTenant, requireOwner, (req, res) => {
+    try { res.status(201).json({ doc: addTextDoc(req.tenant.id, { name: req.body?.name, text: req.body?.text }) }); kbChanged(req.tenant.id); } catch (e) { kbErr(res, e); }
+  });
+  r.post('/tenants/:tenantId/knowledge/file', requireTenant, requireOwner, (req, res) => {
+    try {
+      const buffer = Buffer.from(String(req.body?.contentBase64 || ''), 'base64');
+      res.status(201).json({ doc: addFileDoc(req.tenant.id, { filename: req.body?.filename, mime: req.body?.mime, buffer }) });
+      kbChanged(req.tenant.id);
+    } catch (e) { kbErr(res, e); }
+  });
+  r.post('/tenants/:tenantId/knowledge/url', requireTenant, requireOwner, wrap(async (req, res) => {
+    const urls = (Array.isArray(req.body?.urls) ? req.body.urls : [req.body?.url]).map((u) => String(u || '').trim()).filter(Boolean).slice(0, 20);
+    if (!urls.length) return res.status(400).json({ error: 'Enter a web page address' });
+    const results = [];
+    for (const u of urls) results.push(await importUrl(req.tenant.id, /^https?:\/\//.test(u) ? u : `https://${u}`).then((doc) => ({ url: u, ok: true, doc }), (e) => ({ url: u, ok: false, error: e.message })));
+    if (results.some((x) => x.ok)) kbChanged(req.tenant.id);
+    res.json({ results });
+  }));
+  r.delete('/tenants/:tenantId/knowledge/:docId', requireTenant, requireOwner, (req, res) => { res.json({ ok: removeDoc(req.tenant.id, req.params.docId) }); kbChanged(req.tenant.id); });
+  r.post('/tenants/:tenantId/knowledge/sync', requireTenant, requireOwner, wrap(async (req, res) => {
+    try { res.json({ ok: true, ...(await knowledgeChanged(req.tenant.id)) }); } catch (e) { res.json({ ok: false, error: e.message }); }
+  }));
+  r.get('/tenants/:tenantId/knowledge/search', requireTenant, (req, res) => res.json({ hits: searchKnowledge(req.tenant.id, req.query.q, { limit: 3 }) }));
+  r.post('/tenants/:tenantId/onboarding/website', requireTenant, requireOwner, wrap(async (req, res) => {
+    const url = String(req.body?.url || '').trim();
+    if (!url) return res.status(400).json({ error: 'Enter your website address' });
+    try {
+      const out = await onboardFromWebsite(req.tenant.id, url);
+      kbChanged(req.tenant.id);
+      res.json({ ok: true, ...out, tenant: view(getTenant(req.tenant.id)) });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  }));
 
   // ----- billing (your SaaS subscription) -----
   r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS }));

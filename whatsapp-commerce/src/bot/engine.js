@@ -10,6 +10,7 @@ import { findTriggeredFlow, startFlow, handleFlowButton, handleFlowAnswer, handl
 import { notify } from '../whatsapp/cloudApi.js';
 import { getDb } from '../db.js';
 import { alert } from '../ops.js';
+import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 
 // ---------- helpers ----------
 const PAY_BUTTONS = { payment_link: '💳 Pay online', cod: '💵 Pay on delivery', bank_transfer: '🏦 Bank transfer' };
@@ -30,6 +31,7 @@ const wasPrice = (p, sym) => (p.compareAtPrice ? ` (was ${money(p.compareAtPrice
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/[!?.]+$/g, '');
 
 function availablePaymentMethods(tenant, store) {
+  if (store.type === 'shopify_public') return ['payment_link']; // paid on the shop's own Shopify checkout
   const S = tenant.settings.ordering;
   return (S.paymentMethods || ['cod']).filter((m) => m !== 'payment_link' || store.type !== 'manual' || S.paymentLinkUrl || tenant.settings.payments?.stripe?.secretKey);
 }
@@ -198,6 +200,12 @@ async function nextCheckoutStep(ctx) {
   const O = ctx.S.ordering;
   const sym = ctx.S.business.currencySymbol || '£';
 
+  if (ctx.store.type === 'shopify_public') {
+    // Delivery, tax and payment are chosen on the shop's Shopify checkout
+    co.fulfilment = 'online_checkout';
+    co.paymentMethod = 'payment_link';
+    return showSummary(ctx);
+  }
   if (!co.fulfilment) {
     const opts = (O.fulfilment?.length ? O.fulfilment : ['delivery']).filter((f) => FUL_BUTTONS[f]);
     if (opts.length === 1) co.fulfilment = opts[0];
@@ -254,8 +262,8 @@ function showSummary(ctx, intro) {
   ctx.reply({
     type: 'buttons',
     header: 'Order summary',
-    text: `${intro ? intro + '\n\n' : ''}${formatCart(ctx.conv.cart, sym)}${q.discount ? `\nDiscount (${q.promo.code}): -${money(q.discount, sym)}` : ''}${co.fulfilment === 'delivery' ? `\nDelivery: ${q.deliveryFee ? money(q.deliveryFee, sym) : 'FREE'}` : ''}\n*Total: ${money(q.total, sym)}*\n\n${co.fulfilment === 'delivery' ? `🚚 Deliver to: ${co.address}` : `🏬 Collection${O.pickupAddress ? ` from ${O.pickupAddress}` : ''}`}${co.slot ? `\n🕒 ${co.slot.label}` : ''}\n💳 Payment: ${paymentLabel(co.paymentMethod)}${co.note ? `\n📝 Note: ${co.note}` : ''}${hints ? `\n\n${hints}` : ''}`,
-    buttons: [{ id: 'confirm', title: '✅ Place order' }, { id: 'cart', title: '✏️ Edit cart' }, { id: 'cancel', title: '❌ Cancel' }],
+    text: `${intro ? intro + '\n\n' : ''}${formatCart(ctx.conv.cart, sym)}${q.discount ? `\nDiscount (${q.promo.code}): -${money(q.discount, sym)}` : ''}${co.fulfilment === 'delivery' ? `\nDelivery: ${q.deliveryFee ? money(q.deliveryFee, sym) : 'FREE'}` : ''}${co.fulfilment === 'online_checkout' ? '\n_Delivery is added at checkout._' : `\n*Total: ${money(q.total, sym)}*`}\n\n${co.fulfilment === 'online_checkout' ? '🚚 You’ll choose delivery and pay securely on our website checkout.' : co.fulfilment === 'delivery' ? `🚚 Deliver to: ${co.address}` : `🏬 Collection${O.pickupAddress ? ` from ${O.pickupAddress}` : ''}`}${co.slot ? `\n🕒 ${co.slot.label}` : ''}${co.fulfilment === 'online_checkout' ? '' : `\n💳 Payment: ${paymentLabel(co.paymentMethod)}`}${co.note ? `\n📝 Note: ${co.note}` : ''}${hints ? `\n\n${hints}` : ''}`,
+    buttons: [{ id: 'confirm', title: co.fulfilment === 'online_checkout' ? '✅ Go to checkout' : '✅ Place order' }, { id: 'cart', title: '✏️ Edit cart' }, { id: 'cancel', title: '❌ Cancel' }],
   });
 }
 
@@ -505,7 +513,7 @@ async function handleText(ctx, raw) {
   if (os) return orderStatus(ctx, os[1]);
   if (/^(order status|track( my)? order|where is my order|my orders?)$/.test(t)) return orderStatus(ctx);
 
-  // Free text → AI (if configured) or catalogue search
+  // Free text → AI (if configured) or knowledge base + catalogue search
   const D = ctx.S.dify || {};
   if (D.enabled && D.apiKey && withinLimit(ctx.tenant, 'ai')) {
     try {
@@ -513,6 +521,18 @@ async function handleText(ctx, raw) {
     } catch (e) {
       console.error(`[dify] tenant=${ctx.tenant.id}`, e.message);
     }
+  }
+  const isQuestion = /\?|^(what|how|when|where|do|does|can|is|are|which|who|why|whats|what's)\b|\b(return|refund|deliver|delivery|shipping|postage|warranty|exchange|open|hours|policy|cost of delivery|track)/i.test(text);
+  const kb = isQuestion ? searchKnowledge(ctx.tenant.id, text, { limit: 1 }) : [];
+  if (kb.length) {
+    ctx.reply({ type: 'text', text: `${kb[0].text.length > 650 ? kb[0].text.slice(0, 650).replace(/\s\S*$/, '') + '…' : kb[0].text}\n\n_From our ${kb[0].doc}${kb[0].url ? `: ${kb[0].url}` : ''}_` });
+    return ctx.reply(mainMenu(ctx, 'Anything else I can help with?'));
+  }
+  // A policy-type question we can't answer exactly: point to the policy and offer a person – don't guess.
+  const topic = isQuestion ? topicOf(text) : null;
+  if (topic) {
+    const doc = topicDoc(ctx.tenant.id, topic);
+    return ctx.reply({ type: 'buttons', text: `Good question! I don't have that exact detail to hand.${doc ? `\nYou can read our ${doc.name.toLowerCase()} here: ${doc.url || ''}` : ''}\n\nA member of our team can confirm for you 🙂`, buttons: [{ id: 'human', title: '🙋 Ask the team' }, { id: 'browse', title: '🛍️ Browse' }] });
   }
   return showSearchResults(ctx, text);
 }

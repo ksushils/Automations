@@ -61,3 +61,8 @@ Object.assign(config, {
   productName: env.PRODUCT_NAME || 'WhatsApp Commerce',
   supportEmail: env.SUPPORT_EMAIL || env.LEGAL_CONTACT_EMAIL || '',
 });
+
+Object.assign(config, {
+  difyDatasetApiKey: env.DIFY_DATASET_API_KEY || '', // optional – otherwise created automatically via the console API
+  allowPrivateFetch: env.ALLOW_PRIVATE_FETCH === 'true', // tests / internal networks only
+});

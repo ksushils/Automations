@@ -38,6 +38,14 @@ See [docs/COMPETITOR_REVIEW.md](docs/COMPETITOR_REVIEW.md) for how this compares
   - `assist` (recommended to start): the service searches the store, gives Dify the matching products and the cart, then sends the AI reply with a tappable product list underneath. Works with any Dify Chatbot or Chatflow app and its knowledge base.
   - `agent`: a Dify Agent app calls this service's store tools (search, add to cart, checkout, order status, handover) through an OpenAPI custom tool. Each call is locked to the customer in the chat by a signed `session_token`.
   - If Dify fails, the bot falls back to a plain catalogue search, so customers always get an answer.
+- **Knowledge base (RAG) per shop.** Shops add knowledge four ways:
+  - upload files (PDF, Word, Excel, PowerPoint, TXT, CSV);
+  - paste text;
+  - import web pages;
+  - one click "auto-import my site" (policies, FAQ, about, contact).
+
+  Each shop gets its own Dify knowledge base, created through Dify's knowledge API with one server-side key, and it is attached to the shop's chatbot automatically. It uses high-quality embeddings when the workspace has an embedding model, otherwise keyword indexing. A built-in keyword search with synonyms answers policy questions even before AI is connected, and points customers to the policy page plus a "talk to the team" button instead of guessing. Website imports are SSRF-protected: internal addresses, redirects and file size are all checked.
+- **One-step onboarding from a website.** At sign-up (or from the Overview wizard) a shop enters its website. A Shopify site is detected via `/meta.json`, which fills in the name, currency and description, connects the catalogue with **no token** (`shopify_public`: reads `/products.json`, checks out with a Shopify cart permalink), and imports its policies into the knowledge base.
 - **Take.App-style extras.**
   - Promo codes (percent, fixed or free delivery; min spend, expiry, usage limits).
   - Delivery zones by postcode, each with its own fee, minimum order and free-over amount.

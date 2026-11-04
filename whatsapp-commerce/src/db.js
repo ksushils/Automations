@@ -138,6 +138,24 @@ CREATE TABLE IF NOT EXISTS store_events (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (tenant_id, kind, ref)
 );
+CREATE TABLE IF NOT EXISTS knowledge_docs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'text',
+  url TEXT,
+  mime TEXT,
+  text TEXT,
+  file BLOB,
+  size INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  dify_document_id TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_kdocs_tenant ON knowledge_docs(tenant_id, status);
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS usage (
   tenant_id TEXT NOT NULL,
   period TEXT NOT NULL,
@@ -182,6 +200,8 @@ export const SECRET_FIELDS = [
   'whatsapp.appSecret',
   'whatsapp.twoStepPin',
   'dify.apiKey',
+  'dify.assistApiKey',
+  'dify.agentApiKey',
   'store.shopify.adminToken',
   'store.woocommerce.consumerKey',
   'store.woocommerce.consumerSecret',

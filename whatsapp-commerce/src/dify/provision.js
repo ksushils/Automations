@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { DifyConsole, consoleConfigured } from './console.js';
 import fs from 'node:fs';
+import { listDocs, syncKnowledge } from '../knowledge.js';
 import { getTenant, updateTenantSettings, rotateToolKey } from '../tenants.js';
 import { getDb } from '../db.js';
 
@@ -42,7 +43,7 @@ Rules:
 
 Shop facts:
 ${facts.map((f) => '- ' + f).join('\n') || '- (none)'}
-${ai.faq ? `\nFAQ & policies (answer from these when relevant):\n${String(ai.faq).slice(0, 12000)}\n` : ''}${ai.instructions ? `\nExtra instructions from the shop owner:\n${String(ai.instructions).slice(0, 3000)}\n` : ''}`;
+${tenant.settings.dify?.datasetId ? '\nThe shop\'s knowledge base (policies, FAQs, guides) is searched automatically for every question – answer delivery, returns, warranty, sizing and opening-hours questions from it. If it doesn\'t cover something, say you\'ll check with the team.\n' : ''}${ai.faq ? `\nFAQ & policies (answer from these when relevant):\n${String(ai.faq).slice(0, 12000)}\n` : ''}${ai.instructions ? `\nExtra instructions from the shop owner:\n${String(ai.instructions).slice(0, 3000)}\n` : ''}`;
 }
 
 const input = (variable, label) => ({ 'text-input': { label, variable, required: false, max_length: 256, default: '' } });
@@ -66,7 +67,7 @@ Tools (you can browse, build the cart and place orders yourself):
 - Customers can always type *menu* to use tap-to-order buttons instead.`;
 }
 
-export function buildModelConfig(tenant, model, { agentTools } = {}) {
+export function buildModelConfig(tenant, model, { agentTools, datasetId } = {}) {
   const ai = tenant.settings.ai || {};
   return {
     model: { provider: model.provider, name: model.name, mode: 'chat', completion_params: { temperature: Number(ai.temperature ?? 0.4), max_tokens: 600 } },
@@ -86,7 +87,9 @@ export function buildModelConfig(tenant, model, { agentTools } = {}) {
     agent_mode: agentTools
       ? { enabled: true, strategy: 'function_call', max_iteration: 6, tools: agentTools }
       : { enabled: false, tools: [] },
-    dataset_configs: { retrieval_model: 'multiple', datasets: { datasets: [] } },
+    dataset_configs: datasetId
+      ? { retrieval_model: 'multiple', top_k: 4, score_threshold_enabled: false, reranking_enable: false, datasets: { strategy: 'router', datasets: [{ dataset: { enabled: true, id: datasetId } }] } }
+      : { retrieval_model: 'multiple', datasets: { datasets: [] } },
   };
 }
 
@@ -168,20 +171,25 @@ export async function provisionDifyBot(tenantId, { client = new DifyConsole(), m
   }
   appIds[wantMode] = appId;
 
-  await client.saveModelConfig(appId, buildModelConfig(tenant, model, { agentTools }));
-
-  const sameApp = !created && D.appId === appId;
-  let apiKey = sameApp ? D.apiKey : null;
-  if (!apiKey) {
-    const existing = await client.listApiKeys(appId);
-    apiKey = existing[0]?.token || (await client.createApiKey(appId)).token;
+  // Knowledge base: sync the shop's documents into its Dify dataset and attach it to the app
+  let datasetId = null;
+  if (listDocs(tenant.id).length) {
+    datasetId = (await syncKnowledge(tenant.id, { client })).datasetId;
+    tenant = getTenant(tenant.id);
   }
+  await client.saveModelConfig(appId, buildModelConfig(tenant, model, { agentTools, datasetId }));
+
+  // Dify only shows an API key once (lists are masked), so keep one key per app and create it when missing.
+  const sameApp = !created && D.appId === appId;
+  let apiKey = created ? null : D[`${wantMode}ApiKey`] || (sameApp ? D.apiKey : null);
+  if (apiKey && apiKey.includes('...')) apiKey = null;
+  if (!apiKey) apiKey = (await client.createApiKey(appId)).token;
 
   tenant = updateTenantSettings(tenant.id, {
-    dify: { enabled: true, baseUrl: `${config.difyConsoleUrl}/v1`, apiKey, appId, appMode, appIds, mode: wantMode, managed: true, model: `${model.provider}|${model.name}`, syncedAt: new Date().toISOString() },
+    dify: { enabled: true, baseUrl: `${config.difyConsoleUrl}/v1`, apiKey, [`${wantMode}ApiKey`]: apiKey, appId, appMode, appIds, mode: wantMode, managed: true, model: `${model.provider}|${model.name}`, datasetAttached: datasetId || null, syncedAt: new Date().toISOString() },
   });
   if (!sameApp) getDb().prepare('UPDATE conversations SET dify_conversation_id = NULL WHERE tenant_id = ?').run(tenant.id);
-  return { appId, created, mode: wantMode, model, tools: agentTools?.length || 0, appUrl: `${config.difyConsoleUrl}/app/${appId}/configuration` };
+  return { appId, created, mode: wantMode, model, datasetId, tools: agentTools?.length || 0, appUrl: `${config.difyConsoleUrl}/app/${appId}/configuration` };
 }
 
 export async function listDifyModels(client = new DifyConsole()) {
@@ -191,3 +199,13 @@ export async function listDifyModels(client = new DifyConsole()) {
 }
 
 export { consoleConfigured };
+
+/** Called after knowledge documents change: sync to Dify and (re)attach the dataset to the bot when needed. */
+export async function knowledgeChanged(tenantId, { client } = {}) {
+  if (!consoleConfigured() && !client?.injected) return { skipped: 'Dify not connected' };
+  const c = client || new DifyConsole();
+  const r = await syncKnowledge(tenantId, { client: c });
+  const t = getTenant(tenantId);
+  if (t.settings.dify?.managed && t.settings.dify?.datasetAttached !== r.datasetId) await provisionDifyBot(tenantId, { client: c });
+  return r;
+}

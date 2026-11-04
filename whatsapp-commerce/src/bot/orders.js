@@ -122,7 +122,9 @@ export async function placeOrder({ tenant, store, conv, customer, fulfilment, pa
   const summary = `${lines.join('\n')}\n*Total: ${money(total, sym)}*${slotLabel ? `\n🕒 ${slotLabel}` : ''}`;
   const receipt = `\n🧾 Receipt: ${receiptUrl(order)}`;
   const messages = [];
-  if (paymentMethod === 'payment_link' && checkoutUrl) {
+  if (fulfilment === 'online_checkout' && checkoutUrl) {
+    messages.push({ type: 'cta', text: `🛒 Your basket is ready!\n\n${items.map((i) => `• ${i.title} × ${i.quantity}`).join('\n')}\n*Subtotal: ${money(total, sym)}*\n\nTap below to choose delivery and pay securely on our website.`, buttonText: 'Checkout', url: checkoutUrl });
+  } else if (paymentMethod === 'payment_link' && checkoutUrl) {
     messages.push({ type: 'cta', text: `✅ Order *${ref}* created!\n\n${summary}\n\nTap below to pay securely. Your order is confirmed as soon as payment is received.`, buttonText: 'Pay now', url: checkoutUrl });
   } else if (paymentMethod === 'bank_transfer') {
     messages.push({ type: 'text', text: `✅ Order *${ref}* received!\n\n${summary}\n\nPlease transfer *${money(total, sym)}* to:\n${S.ordering.bankDetails || '(bank details will be sent by our team)'}\nReference: *${ref}*\n\nReply here with a screenshot once paid.${receipt}` });

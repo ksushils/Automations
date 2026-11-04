@@ -4,9 +4,9 @@ import { config } from './config.js';
 
 /** Plans you sell. Limits are per calendar month. null = unlimited. */
 export const PLANS = {
-  starter: { label: 'Starter', priceGbp: 29, monthlyConversationsIn: 1000, aiCalls: 300, broadcasts: false, storeTypes: ['manual', 'shopify', 'woocommerce', 'custom'] },
-  growth: { label: 'Growth', priceGbp: 79, monthlyConversationsIn: 5000, aiCalls: 3000, broadcasts: true, storeTypes: ['manual', 'shopify', 'woocommerce', 'custom'] },
-  pro: { label: 'Pro', priceGbp: 199, monthlyConversationsIn: null, aiCalls: 20000, broadcasts: true, storeTypes: ['manual', 'shopify', 'woocommerce', 'custom'] },
+  starter: { label: 'Starter', priceGbp: 29, monthlyConversationsIn: 1000, aiCalls: 300, knowledgeDocs: 20, broadcasts: false, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
+  growth: { label: 'Growth', priceGbp: 79, monthlyConversationsIn: 5000, aiCalls: 3000, knowledgeDocs: 100, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
+  pro: { label: 'Pro', priceGbp: 199, monthlyConversationsIn: null, aiCalls: 20000, knowledgeDocs: 500, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
 };
 
 export function defaultSettings(name) {
@@ -48,7 +48,7 @@ export function defaultSettings(name) {
       temperature: 0.4,
     },
     store: {
-      type: 'manual', // manual | shopify | woocommerce | custom
+      type: 'manual', // manual | shopify_public (just the shop URL) | shopify (admin token) | woocommerce | custom
       shopify: { domain: '', adminToken: '', webhookSecret: '' },
       woocommerce: { url: '', consumerKey: '', consumerSecret: '', webhookSecret: '' },
       custom: { baseUrl: '', apiKey: '' },
