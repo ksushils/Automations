@@ -98,7 +98,7 @@ test('Embedded Signup v4: finishing with no phone number is a valid pending stat
     assert.equal(r.numberStatus, 'active');
     assert.ok(!calls.some((c) => c.endsWith('/register')));
     // Meta: contacts + history must be synced within 24h of coexistence onboarding
-    assert.equal(calls.filter((c) => c === 'POST /v21.0/PN4/smb_app_data').length, 2);
+    assert.equal(calls.filter((c) => c === 'POST /v26.0/PN4/smb_app_data').length, 2);
     assert.ok(tenants.getTenant(t2.id).settings.whatsapp.coexSync.history);
   } finally {
     globalThis.fetch = realFetch;
