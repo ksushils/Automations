@@ -93,6 +93,8 @@ export function defaultSettings(name) {
         abandonedCheckout: { enabled: false, template: 'abandoned_cart', language: 'en_GB', afterMinutes: 60, requireMarketingConsent: true },
       },
       defaultCountryCode: '44', // used to turn local numbers (07…) into WhatsApp numbers
+      // Templates used automatically when a customer/staff member is outside the 24h window
+      templates: { orderUpdate: '', paymentReminder: '', staffAlert: '' },
     },
     storeWebhookSecret: randomToken(18),
   };

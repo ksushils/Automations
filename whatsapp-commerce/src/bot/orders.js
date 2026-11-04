@@ -5,7 +5,7 @@ import { quote } from './pricing.js';
 import { config } from '../config.js';
 import { randomToken } from '../crypto.js';
 import { createCheckoutSession } from '../payments/stripe.js';
-import { toPlainText } from '../whatsapp/cloudApi.js';
+import { toPlainText, notify } from '../whatsapp/cloudApi.js';
 
 const PAYMENT_LABELS = { payment_link: 'Pay online', cod: 'Cash on delivery/collection', bank_transfer: 'Bank transfer' };
 export const paymentLabel = (m) => PAYMENT_LABELS[m] || m;
@@ -141,8 +141,10 @@ export async function notifyStaff(tenant, order, send, { lowStock = [], text: cu
   const sym = S.business.currencySymbol || '£';
   const text = customText || `🛒 *New WhatsApp order ${order.store_order_name}*\nCustomer: ${order.customer_name || ''} (+${order.wa_id})\n${order.items.map((i) => `• ${i.title} × ${i.quantity}`).join('\n')}${order.discount ? `\nDiscount ${order.promo_code}: -${money(order.discount, sym)}` : ''}\nTotal: ${money(order.subtotal, sym)}\n${order.fulfilment}${order.address ? `: ${order.address}` : ''}${order.slot ? `\nSlot: ${order.slot}` : ''}${order.notes ? `\nNote: ${order.notes}` : ''}\nPayment: ${paymentLabel(order.payment_method)}${lowStock.length ? `\n\n⚠️ Low stock: ${lowStock.map((l) => `${l.title} (${l.stock} left)`).join(', ')}` : ''}`;
   const jobs = [];
+  const staffTpl = S.notifications?.templates?.staffAlert;
   for (const staff of S.notifications?.staffWaIds || []) {
-    if (send && String(staff).replace(/\D/g, '') !== order.wa_id) jobs.push(send(String(staff).replace(/\D/g, ''), { type: 'text', text }).catch((e) => console.error('[notify staff]', e.message)));
+    const to = String(staff).replace(/\D/g, '');
+    if (send && to !== order.wa_id) jobs.push(notify(tenant, to, { type: 'text', text }, staffTpl ? { name: staffTpl, params: [text.replace(/\*/g, '').replace(/\n+/g, ' · ').slice(0, 900)] } : null, send).catch((e) => console.error('[notify staff]', e.message)));
   }
   if (S.notifications?.webhookUrl) {
     jobs.push(
@@ -194,6 +196,12 @@ export const STATUS_TEXT = {
   completed: 'completed ✅',
   cancelled: 'cancelled ❌',
 };
+
+/** Order status update to the customer, with the order_update template outside the 24h window. */
+export function sendOrderUpdate(tenant, order, send) {
+  const tpl = tenant.settings.notifications?.templates?.orderUpdate;
+  return notify(tenant, order.wa_id, orderUpdateMessage(tenant, order), tpl ? { name: tpl, params: [(order.customer_name || 'there').split(' ')[0], order.store_order_name, (STATUS_TEXT[order.status] || order.status).replace(/[^\w\s]/g, '').trim()] } : null, send);
+}
 
 export function orderUpdateMessage(tenant, order) {
   const sym = tenant.settings.business.currencySymbol || '£';

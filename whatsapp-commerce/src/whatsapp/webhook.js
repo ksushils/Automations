@@ -29,12 +29,13 @@ export function processWebhookBody(body, { tenantOverride } = {}) {
         const ev = parseInbound(m);
         ev.profileName = names[m.from];
         // logMessage returns false for duplicates (Meta retries deliveries)
-        if (!logMessage(tenant.id, ev.waId, 'in', { type: ev.kind, text: ev.text, id: ev.id, raw: m.type }, m.id)) continue;
+        if (!logMessage(tenant.id, ev.waId, 'in', { type: ev.kind, text: ev.text, id: ev.id, raw: m.type, ...(ev.mediaId ? { mediaId: ev.mediaId, mime: ev.mime } : {}) }, m.id)) continue;
+        if (ev.kind === 'ignore') continue; // reactions, stickers – nothing to answer
         bumpUsage(tenant.id, 'inbound');
         recordReply(tenant.id, ev.waId, { isButton: m.type === 'button' });
         jobs.push(
           enqueue(`${tenant.id}:${ev.waId}`, async () => {
-            markRead(tenant, m.id);
+            markRead(tenant, m.id, { typing: ev.kind !== 'ignore' });
             await handleInbound(tenant, ev, send);
           }),
         );

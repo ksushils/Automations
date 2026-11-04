@@ -19,6 +19,7 @@ import { getDb, json } from '../db.js';
  *   { type: "product", productId }                                   – product card from the store (hands over to shop bot)
  *   { type: "products", productIds?: [], category?, text? }          – multi-product list from the store
  *   { type: "template", name, language? }                            – approved template (works outside 24h)
+ *   { type: "form", text, flowId, cta?, screen? }                    – WhatsApp Flows form; answers saved to the contact
  *   { type: "goto", step: "s3" }  { type: "end" }
  * Text supports {{name}}, {{phone}} and {{attr.key}}.
  */
@@ -31,7 +32,7 @@ export const listFlows = (tenantId) => getDb().prepare('SELECT * FROM flows WHER
 export const getFlow = (tenantId, id) => mapFlow(getDb().prepare('SELECT * FROM flows WHERE tenant_id = ? AND id = ?').get(tenantId, Number(id)));
 export const deleteFlow = (tenantId, id) => getDb().prepare('DELETE FROM flows WHERE tenant_id = ? AND id = ?').run(tenantId, Number(id));
 
-const STEP_TYPES = new Set(['message', 'question', 'tag', 'delay', 'webhook', 'handover', 'action', 'goto', 'end', 'list', 'product', 'products', 'template']);
+const STEP_TYPES = new Set(['form', 'message', 'question', 'tag', 'delay', 'webhook', 'handover', 'action', 'goto', 'end', 'list', 'product', 'products', 'template']);
 
 /** Resolve a step reference (id, or legacy 1-based number) to an array index; -1 if missing. */
 export function stepIndex(steps, ref) {
@@ -60,6 +61,7 @@ export function validateFlow(f) {
     if (s.type === 'list' && !(s.rows || []).length) errors.push(`step ${n}: add at least one list row`);
     if (s.type === 'list' && (s.rows || []).length > 10) errors.push(`step ${n}: max 10 list rows`);
     if (s.type === 'template' && !s.name) errors.push(`step ${n}: template name required`);
+    if (s.type === 'form' && !s.flowId) errors.push(`step ${n}: WhatsApp Flow ID required`);
     if (s.type === 'product' && !s.productId) errors.push(`step ${n}: choose a product`);
     if (s.type === 'webhook' && !/^https?:\/\//.test(s.url || '')) errors.push(`step ${n}: webhook URL required`);
     const jumps = [...(s.buttons || []).map((b) => b.goto), ...(s.rows || []).map((r) => r.goto), s.type === 'goto' ? s.step : undefined, s.next].filter((x) => x !== undefined && x !== null && x !== '');
@@ -165,6 +167,10 @@ export async function runFlow(ctx, flow, from = 0) {
         ctx.reply({ type: 'list', text: fillVars(s.text, contact), button: s.button || 'Options', sections: [{ title: s.sectionTitle || 'Options', rows: (s.rows || []).slice(0, 10).map((r, ri) => ({ id: `flow:${flow.id}:${i}:${ri}`, title: r.title, ...(r.description ? { description: r.description } : {}) })) }] });
         conv.data.flow = { id: flow.id, step: i, waiting: 'button' };
         return;
+      case 'form':
+        ctx.reply({ type: 'flow', text: fillVars(s.text || 'Please fill in this short form 👇', contact), flowId: s.flowId, cta: s.cta || 'Open form', screen: s.screen || undefined, token: `wc:${flow.id}:${i}` });
+        conv.data.flow = { id: flow.id, step: i, waiting: 'form' };
+        return;
       case 'template':
         ctx.reply({ type: 'template', name: s.name, language: s.language || 'en_GB' });
         i = next;
@@ -257,3 +263,21 @@ export function dueJobs(limit = 100) {
 }
 
 export const markJobDone = (id) => getDb().prepare('UPDATE scheduled SET done = 1 WHERE id = ?').run(id);
+
+/** A WhatsApp Flows form was submitted: save its fields to the contact and continue the flow. */
+export async function handleFlowForm(ctx, response = {}) {
+  const fields = Object.fromEntries(Object.entries(response).filter(([k, v]) => k !== 'flow_token' && v !== null && typeof v !== 'object').map(([k, v]) => [k, String(v).slice(0, 500)]));
+  updateContact(ctx.tenant.id, ctx.conv.waId, { attributes: fields });
+  if (fields.email) getDb().prepare('UPDATE customers SET email = ? WHERE tenant_id = ? AND wa_id = ?').run(fields.email, ctx.tenant.id, ctx.conv.waId);
+  if (fields.name) getDb().prepare('UPDATE customers SET name = ? WHERE tenant_id = ? AND wa_id = ?').run(fields.name.slice(0, 120), ctx.tenant.id, ctx.conv.waId);
+  const st = ctx.conv.data.flow;
+  const [, fid, step] = String(response.flow_token || '').split(':');
+  const flow = getFlow(ctx.tenant.id, st?.waiting === 'form' ? st.id : fid);
+  if (!flow) return false;
+  const from = st?.waiting === 'form' ? st.step : Number(step);
+  delete ctx.conv.data.flow;
+  const next = nextIndex(flow.steps, from);
+  if (next < 0) { ctx.reply({ type: 'text', text: 'Thanks – we received your details ✅' }); return true; }
+  await runFlow(ctx, flow, next);
+  return true;
+}

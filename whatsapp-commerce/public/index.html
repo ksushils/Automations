@@ -182,6 +182,24 @@ async function overview() {
       <div><button class="btn ghost" data-test="dify">Test Dify</button></div>
       <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></div>`;
   embeddedSignupButton(s);
+  if (s.whatsapp.phoneNumberId) api(T('/whatsapp/health')).then((h) => {
+    const el = document.createElement('div'); el.className = 'card';
+    if (!h.ok) { el.innerHTML = `<h2>WhatsApp number</h2><p class="pill warn">${esc(h.error)}</p>`; }
+    else {
+      const x = h.health; const q = { GREEN: '🟢 High', YELLOW: '🟡 Medium', RED: '🔴 Low' }[x.quality_rating] || x.quality_rating || '–';
+      el.innerHTML = `<h2>WhatsApp number</h2><div class="row"><div><div class="mute">Number</div><b>${esc(x.display_phone_number || '')}</b><div class="mute">${esc(x.verified_name || '')}</div></div>
+        <div><div class="mute">Quality rating</div><b>${q}</b></div><div><div class="mute">Daily limit (unique customers)</div><b>${esc(String(x.messaging_limit_tier || '–').replace('TIER_', ''))}</b></div><div><div class="mute">Display name</div><b>${esc(x.name_status || '–')}</b></div></div>
+        ${x.quality_rating === 'RED' || x.quality_rating === 'YELLOW' ? '<p class="pill warn">Quality is dropping – send fewer marketing messages and make sure contacts opted in, or Meta may limit the number.</p>' : ''}
+        ${S.role === 'owner' ? '<p><button class="btn ghost" id="bprof">Edit WhatsApp business profile</button></p><div id="bpf"></div>' : ''}`;
+    }
+    $('#app').insertBefore(el, $('#app').children[2] || null);
+    const bp = el.querySelector('#bprof');
+    if (bp) bp.onclick = async () => {
+      const r = await api(T('/whatsapp/profile')); const p = r.profile || {};
+      el.querySelector('#bpf').innerHTML = `<div class="row"><div><label>About (max 139)</label><input id="bpa" maxlength="139" value="${esc(p.about || '')}"></div><div><label>Email</label><input id="bpe" value="${esc(p.email || '')}"></div><div><label>Websites (comma, max 2)</label><input id="bpw" value="${esc((p.websites || []).join(', '))}"></div><div><label>Address</label><input id="bpad" value="${esc(p.address || '')}"></div></div><label>Description</label><textarea id="bpd">${esc(p.description || '')}</textarea><p><button class="btn" id="bps">Save profile</button></p>`;
+      el.querySelector('#bps').onclick = async () => { try { await api(T('/whatsapp/profile'), { method: 'POST', body: { about: $('#bpa').value, email: $('#bpe').value, websites: $('#bpw').value, address: $('#bpad').value, description: $('#bpd').value } }); toast('Profile updated on WhatsApp'); } catch (e) { toast(e.message); } };
+    };
+  }).catch(() => {});
   $('#app').querySelectorAll('[data-test]').forEach((b) => (b.onclick = async () => {
     $('#tr').textContent = 'Testing…';
     try { $('#tr').textContent = JSON.stringify(await api(T('/test/' + b.dataset.test), { method: 'POST', body: { to: $('#tw').value } }), null, 2); } catch (e) { $('#tr').textContent = e.message; }
@@ -278,9 +296,12 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
   $('#thread').innerHTML = `<h2>${esc(c?.name || '')} +${esc(sel)} <button class="btn ghost" id="ho">${c?.human_handover ? '🤖 Give back to bot' : '🙋 Take over'}</button>
     <select id="asg" style="width:auto"><option value="">Unassigned</option>${agents.map((a) => `<option ${c?.assigned_to === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></h2>
     ${c?.cart?.length ? `<p class="mute">Cart: ${c.cart.map((i) => esc(i.title) + ' ×' + i.quantity).join(', ')}</p>` : ''}
-    <div class="chat" id="tchat">${messages.map((m) => (m.direction === 'in' ? bubble(m.body.text || `[${m.body.raw || m.type}]`, 'in') : bubble(m.body, 'out'))).join('')}</div>
+    <div class="chat" id="tchat">${messages.map((m) => (m.direction === 'in' ? (m.body.mediaId ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<img data-media="${esc(m.body.mediaId)}" alt="image">` : `<a href="#" data-mediadl="${esc(m.body.mediaId)}">📎 ${esc(m.body.raw || 'file')} – open</a>`}${m.body.text && !/^\[/.test(m.body.text) ? '<br>' + esc(m.body.text) : ''}</div>` : bubble(m.body.text || `[${m.body.raw || m.type}]`, 'in')) : bubble(m.body, 'out'))).join('')}</div>
     <div style="display:flex;gap:8px;margin-top:8px"><input id="rep" placeholder="Reply as staff (takes over from bot)"><button class="btn" id="rs">Send</button></div>`;
   $('#tchat').scrollTop = 1e9;
+  const blobUrl = async (id) => { const r = await fetch('/api' + T('/media/' + id), { headers: { Authorization: 'Bearer ' + S.key } }); if (!r.ok) throw new Error('media unavailable'); return URL.createObjectURL(await r.blob()); };
+  $('#tchat').querySelectorAll('img[data-media]').forEach(async (img) => { try { img.src = await blobUrl(img.dataset.media); } catch { img.replaceWith(document.createTextNode('[image expired]')); } });
+  $('#tchat').querySelectorAll('[data-mediadl]').forEach((a) => (a.onclick = async (e) => { e.preventDefault(); try { window.open(await blobUrl(a.dataset.mediadl)); } catch (err) { toast(err.message); } }));
   $('#asg').onchange = async () => { await api(T(`/conversations/${sel}/assign`), { method: 'POST', body: { to: $('#asg').value || null } }); inbox(sel, filter); };
   $('#ho').onclick = async () => { await api(T(`/conversations/${sel}/handover`), { method: 'POST', body: { on: !c?.human_handover } }); inbox(sel, filter); };
   $('#rs').onclick = async () => { const r = await api(T(`/conversations/${sel}/reply`), { method: 'POST', body: { text: $('#rep').value } }); if (!r.ok) toast(r.error + ' ' + (r.hint || '')); inbox(sel); };
@@ -353,6 +374,7 @@ const FIELDS = [
   ['Delivery / collection time slots', [['ordering.slots.enabled', 'Ask customers to pick a time slot', 'bool'], ['ordering.slots.times', 'Time windows (comma, e.g. 10:00-12:00,14:00-16:00)', 'csv'], ['ordering.slots.days', 'Days ahead to offer', 'number'], ['ordering.slots.leadHours', 'Minimum notice (hours)', 'number'], ['ordering.slots.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum']]],
   ['Card payments (Stripe – built-in catalogue & custom stores)', [['payments.stripe.secretKey', 'Stripe secret key (sk_live_… / rk_live_…)', 'secret'], ['payments.stripe.webhookSecret', 'Stripe webhook signing secret (whsec_…)', 'secret']]],
   ['Notifications', [['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Order webhook URL (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number'], ['notifications.defaultCountryCode', 'Default country code for local numbers (44 = UK)']]],
+  ['Messages outside the 24-hour window (approved templates)', [['notifications.templates.orderUpdate', 'Order update template (vars: name, order, status) – e.g. order_update'], ['notifications.templates.paymentReminder', 'Payment reminder template (vars: name, order, total, link)'], ['notifications.templates.staffAlert', 'Staff alert template (var: alert text) – e.g. staff_alert']]],
   ['Website order notifications (Shopify / WooCommerce)', [['notifications.storeTemplates.orderConfirmation.enabled', 'Send order confirmation on WhatsApp', 'bool'], ['notifications.storeTemplates.orderConfirmation.template', 'Confirmation template (vars: name, order, shop, total)'], ['notifications.storeTemplates.shipping.enabled', 'Send shipping update', 'bool'], ['notifications.storeTemplates.shipping.template', 'Shipping template (vars: name, order, tracking link)'], ['notifications.storeTemplates.abandonedCheckout.enabled', 'Recover abandoned Shopify checkouts', 'bool'], ['notifications.storeTemplates.abandonedCheckout.template', 'Abandoned checkout template (vars: name, shop, checkout link)'], ['notifications.storeTemplates.abandonedCheckout.afterMinutes', 'Send after minutes', 'number'], ['notifications.storeTemplates.abandonedCheckout.requireMarketingConsent', 'Only customers who accepted marketing', 'bool'], ['store.shopify.webhookSecret', 'Shopify webhook signing secret (optional)', 'secret'], ['store.woocommerce.webhookSecret', 'WooCommerce webhook secret (optional)', 'secret']]],
 ];
 const getP = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);

@@ -6,7 +6,8 @@ import { getConversation, saveConversation, upsertCustomer, updateCustomer } fro
 import { addToCart, removeFromCart, subtotal, money, formatCart } from './cart.js';
 import { placeOrder, listOrders, paymentLabel, STATUS_TEXT, findOrderByReceipt, receiptUrl } from './orders.js';
 import { quote, validatePromo, findPromo, upcomingSlots } from './pricing.js';
-import { findTriggeredFlow, startFlow, handleFlowButton, handleFlowAnswer, runFlow, getFlow, schedule } from './flows.js';
+import { findTriggeredFlow, startFlow, handleFlowButton, handleFlowAnswer, handleFlowForm, runFlow, getFlow, schedule } from './flows.js';
+import { notify } from '../whatsapp/cloudApi.js';
 import { getDb } from '../db.js';
 import { alert } from '../ops.js';
 
@@ -357,7 +358,7 @@ function handover(ctx, text) {
   ctx.conv.state = 'idle';
   ctx.reply({ type: 'text', text: text || `🙋 A member of our team will reply here shortly${ctx.S.business.supportHours ? ` (${ctx.S.business.supportHours})` : ''}. Your cart is saved.` });
   const staff = ctx.S.notifications?.staffWaIds || [];
-  for (const s of staff) ctx.rawSend(String(s).replace(/\D/g, ''), { type: 'text', text: `🙋 Customer +${ctx.conv.waId} (${ctx.customer.name || 'unknown'}) asked to talk to a person. Reply from the dashboard.` }).catch(() => {});
+  for (const s of staff) staffAlert(ctx.tenant, String(s).replace(/\D/g, ''), `🙋 Customer +${ctx.conv.waId} (${ctx.customer.name || 'unknown'}) asked to talk to a person. Reply from the dashboard.`, ctx.rawSend);
 }
 
 // ---------- routing ----------
@@ -399,8 +400,46 @@ async function handleAction(ctx, id) {
     case 'human': return handover(ctx);
     case 'subscribe': updateCustomer(ctx.tenant.id, ctx.conv.waId, { opted_in_marketing: 1 }); return ctx.reply({ type: 'text', text: "🔔 You're subscribed to offers. Reply STOP any time to opt out." });
     case 'unsubscribe': updateCustomer(ctx.tenant.id, ctx.conv.waId, { opted_in_marketing: 0 }); return ctx.reply({ type: 'text', text: "🔕 You won't receive promotional messages. You can still order any time." });
-    default: return ctx.reply(mainMenu(ctx));
+    default: {
+      // Template quick-reply buttons send their text as the payload ("Stop offers", "Shop now"…)
+      const t = norm(id.replace(/^[^\w]+/, ''));
+      if (/^(stop|unsubscribe|stop offers|no more offers|opt out)/.test(t)) return handleAction(ctx, 'unsubscribe');
+      if (/^(shop|shop now|browse|order now|view products)/.test(t)) return handleAction(ctx, 'browse');
+      if (/^(track|order status|where is my order)/.test(t)) return handleAction(ctx, 'status');
+      if (/^(talk|human|help|contact)/.test(t)) return handleAction(ctx, 'human');
+      if (/^(pay|pay now)/.test(t)) return orderStatus(ctx);
+      return id && !id.includes(':') && ctx.depth !== 1 ? ((ctx.depth = 1), handleText(ctx, id)) : ctx.reply(mainMenu(ctx));
+    }
   }
+}
+
+/** Native WhatsApp catalogue cart (Meta catalogue synced from Shopify / WooCommerce / built-in). */
+async function handleNativeCart(ctx, order) {
+  const items = order?.product_items || [];
+  let added = 0;
+  for (const it of items) {
+    const rid = String(it.product_retailer_id || '');
+    // Shopify's Facebook channel uses ids like "shopify_GB_<productId>_<variantId>"; others use the product/variant id
+    const parts = rid.split('_');
+    const candidates = ctx.store.type === 'shopify' && parts.length >= 4 ? [`gid://shopify/Product/${parts.at(-2)}`] : [rid, parts.at(-1)];
+    let p = null;
+    for (const c of candidates) if (!p) p = await ctx.store.getProduct(c).catch(() => null);
+    if (!p) continue;
+    const v = p.variants.find((x) => String(x.id).endsWith(parts.at(-1)) || String(x.id) === rid) || p.variants[0];
+    if (!v?.available) continue;
+    addToCart(ctx.conv.cart, { productId: p.id, variantId: v.id, title: v.title === p.title ? p.title : `${p.title} (${v.title})`, price: Number(v.price ?? it.item_price), quantity: it.quantity });
+    added++;
+  }
+  if (!added) return ctx.reply(mainMenu(ctx, "Sorry, I couldn't match those items to our shop. Please browse here instead."));
+  ctx.conv.data.reminded = false;
+  ctx.reply({ type: 'text', text: `🛒 Added ${added} item${added === 1 ? '' : 's'} from your WhatsApp cart.` });
+  return startCheckout(ctx);
+}
+
+/** Staff alerts: free-form inside 24h, otherwise the staff alert template (if configured). */
+function staffAlert(tenant, staffWaId, text, send) {
+  const tpl = tenant.settings.notifications?.templates?.staffAlert;
+  return notify(tenant, staffWaId, { type: 'text', text }, tpl ? { name: tpl, params: [text.slice(0, 900)] } : null, send).catch((e) => console.warn('[staff alert]', e.message));
 }
 
 async function handleText(ctx, raw) {
@@ -494,6 +533,9 @@ export async function handleInbound(tenant, event, send) {
   }
   const isFirstMessage = !conv.data.seen;
   conv.data.seen = true;
+  // opens / extends the 24h customer-service window
+  getDb().prepare("UPDATE customers SET last_inbound_at = datetime('now') WHERE tenant_id = ? AND wa_id = ?").run(tenant.id, conv.waId);
+  if (event.kind === 'ignore') { saveConversation(conv); return replies; }
 
   if (conv.humanHandover) {
     // A human is handling this chat – the bot stays quiet. "menu" lets the customer return to the bot.
@@ -507,6 +549,10 @@ export async function handleInbound(tenant, event, send) {
     let flow = null;
     if (event.kind === 'action' && event.id.startsWith('flow:')) {
       if (!(await handleFlowButton(ctx, event.id))) ctx.reply(mainMenu(ctx));
+    } else if (event.kind === 'form') {
+      if (!(await handleFlowForm(ctx, event.response))) ctx.reply({ type: 'text', text: 'Thanks – we received your details ✅' });
+    } else if (event.kind === 'native_order') {
+      await handleNativeCart(ctx, event.order);
     } else if (event.kind === 'text' && (await handleFlowAnswer(ctx, event.text))) {
       // answered a flow question
     } else if ((event.kind === 'text' || event.referral) && (flow = findTriggeredFlow(tenant.id, { text: event.text, isFirstMessage, adId: event.referral?.source_id })) && (!busy || flow.triggers.keywords?.includes(norm(event.text)))) {
@@ -516,9 +562,16 @@ export async function handleInbound(tenant, event, send) {
     else if (event.kind === 'location') {
       if (conv.state === 'awaiting_address') await setAddress(ctx, `${customer.name || ''}\n${event.text}\nhttps://maps.google.com/?q=${event.location.latitude},${event.location.longitude}`.trim());
       else ctx.reply(mainMenu(ctx, 'Thanks for sharing your location! 📍'));
-    } else if (event.kind === 'unsupported' && ['image', 'document'].includes(event.type)) {
-      ctx.reply({ type: 'text', text: 'Thanks! 🙏 A member of our team will check this shortly.' });
-      for (const s of tenant.settings.notifications?.staffWaIds || []) send(String(s).replace(/\D/g, ''), { type: 'text', text: `📎 Customer +${conv.waId} sent a ${event.type} (possibly payment proof). Check the dashboard.` }).catch(() => {});
+    } else if (event.kind === 'media' && event.type === 'audio') {
+      ctx.reply({ type: 'buttons', text: "🎙️ Sorry, I can't listen to voice notes yet. Please type your message, or a team member can help.", buttons: [{ id: 'menu', title: '📋 Menu' }, { id: 'human', title: '🙋 Talk to us' }] });
+    } else if (event.kind === 'media') {
+      // Most likely a payment proof (bank transfer) or a photo for the team
+      const unpaid = getDb().prepare("SELECT id, store_order_name FROM orders WHERE tenant_id = ? AND wa_id = ? AND payment_status = 'unpaid' AND payment_method = 'bank_transfer' AND status != 'cancelled' ORDER BY id DESC LIMIT 1").get(tenant.id, conv.waId);
+      if (unpaid) getDb().prepare("UPDATE orders SET notes = TRIM(COALESCE(notes, '') || ' [payment proof received ' || datetime('now') || ']'), updated_at = datetime('now') WHERE id = ?").run(unpaid.id);
+      ctx.reply({ type: 'text', text: unpaid ? `Thanks! 🙏 We've received your payment proof for order *${unpaid.store_order_name}* and will confirm shortly.` : 'Thanks! 🙏 A member of our team will check this shortly.' });
+      for (const s of tenant.settings.notifications?.staffWaIds || []) staffAlert(tenant, String(s).replace(/\D/g, ''), `📎 Customer +${conv.waId} sent a ${event.type}${unpaid ? ` – payment proof for ${unpaid.store_order_name}` : ''}. View it in the dashboard inbox.`, send);
+    } else if (event.kind === 'text' && event.text) {
+      await handleText(ctx, event.text);
     } else {
       ctx.reply(mainMenu(ctx, "I can't read that type of message yet — please type or tap an option."));
     }

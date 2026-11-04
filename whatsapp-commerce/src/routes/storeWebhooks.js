@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { getTenant } from '../tenants.js';
 import { safeEqual } from '../crypto.js';
 import { getDb, json } from '../db.js';
-import { findOrderByStoreId, updateOrder, orderUpdateMessage } from '../bot/orders.js';
+import { findOrderByStoreId, updateOrder, sendOrderUpdate } from '../bot/orders.js';
 import { createSender } from '../whatsapp/cloudApi.js';
 import { updateContact } from '../bot/flows.js';
 import { money } from '../bot/cart.js';
@@ -179,7 +179,7 @@ export function storeWebhookRouter() {
       const payment = ev.paid ? 'paid' : order.payment_status;
       if (status === order.status && payment === order.payment_status) return;
       const updated = updateOrder(t.id, order.id, { status, payment_status: payment });
-      await createSender(t)(order.wa_id, orderUpdateMessage(t, updated)).catch((e) => console.warn('[store webhook notify]', e.message));
+      await sendOrderUpdate(t, updated).catch((e) => console.warn('[store webhook notify]', e.message));
     } catch (e) {
       console.error('[store webhook]', e.message);
     }

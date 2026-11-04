@@ -11,6 +11,7 @@
     product: { icon: '🛍️', label: 'Single product', color: '#c46a12', make: () => ({ productId: '' }) },
     products: { icon: '🛒', label: 'Multi product', color: '#c46a12', make: () => ({ text: 'Our bestsellers 👇', productIds: [], category: '' }) },
     template: { icon: '⚡', label: 'Template', color: '#b5470b', make: () => ({ name: '', language: 'en_GB' }) },
+    form: { icon: '📝', label: 'WhatsApp form', color: '#8a5cd1', make: () => ({ text: 'Please fill in this short form 👇', flowId: '', cta: 'Open form', screen: '' }) },
     tag: { icon: '🏷️', label: 'Add / remove tag', color: '#5d6b63', make: () => ({ add: ['lead'], remove: [] }) },
     delay: { icon: '⏱️', label: 'Wait', color: '#5d6b63', make: () => ({ minutes: 60 }) },
     webhook: { icon: '🔗', label: 'Send to webhook', color: '#5d6b63', make: () => ({ url: 'https://' }) },
@@ -24,7 +25,7 @@
   function outputs(s) {
     if (s.type === 'message') return s.buttons?.length ? s.buttons.map((b, i) => ({ key: `b:${i}`, label: b.title || `Button ${i + 1}` })) : [{ key: 'next', label: 'Next' }];
     if (s.type === 'list') return (s.rows || []).map((r, i) => ({ key: `r:${i}`, label: r.title || `Row ${i + 1}` }));
-    if (['question', 'tag', 'delay', 'webhook', 'template'].includes(s.type)) return [{ key: 'next', label: 'Next' }];
+    if (['question', 'tag', 'delay', 'webhook', 'template', 'form'].includes(s.type)) return [{ key: 'next', label: s.type === 'form' ? 'After submit' : 'Next' }];
     return [];
   }
   const getLink = (s, key) => (key === 'next' ? s.next : key.startsWith('b:') ? s.buttons?.[+key.slice(2)]?.goto : s.rows?.[+key.slice(2)]?.goto);
@@ -41,6 +42,7 @@
       case 'product': return s.productId ? `Product: ${s.productId}` : 'Choose a product';
       case 'products': return s.category ? `Category: ${s.category}` : `${(s.productIds || []).length} products`;
       case 'template': return s.name || 'Choose a template';
+      case 'form': return `${s.text}\n[ ${s.cta || 'Open form'} ]${s.flowId ? '' : ' – set Flow ID'}`;
       case 'tag': return [...(s.add || []).map((t) => '+' + t), ...(s.remove || []).map((t) => '−' + t)].join(' ');
       case 'delay': return `Wait ${s.minutes} min`;
       case 'webhook': return s.url;
@@ -151,6 +153,7 @@
         if (!s) { inspector.innerHTML = '<p class="mute">Select a block</p>'; return; }
         const t = TYPES[s.image !== undefined && s.type === 'message' ? 'media' : s.type];
         let h = `<h3>${t.icon} ${t.label}</h3>`;
+        if (s.type === 'form') h += field('Message text', `<textarea data-i="text">${esc(s.text)}</textarea>`) + field('Flow ID (WhatsApp Manager → Flows)', `<input data-i="flowId" value="${esc(s.flowId)}">`) + field('Button label', `<input data-i="cta" value="${esc(s.cta)}" maxlength="20">`) + field('First screen ID (optional)', `<input data-i="screen" value="${esc(s.screen || '')}">`) + '<p class="mute">Build the form in Meta’s Flow builder and publish it. Every field the customer submits is saved to the contact (e.g. {{attr.date}}).</p>';
         if (['message', 'list', 'question', 'products', 'handover'].includes(s.type)) h += field(s.type === 'handover' ? 'Message (optional)' : 'Message text', `<textarea data-i="text">${esc(s.text)}</textarea>`);
         if (s.type === 'message' && s.image !== undefined) h += field('Image URL', `<input data-i="image" value="${esc(s.image)}">`);
         if (s.type === 'message') h += `<label>Buttons (max 3 – each can lead somewhere different)</label>${(s.buttons || []).map((b, i) => `<div class="fb-rowedit"><input data-btn="${i}" value="${esc(b.title)}" maxlength="20"><button class="btn ghost" data-rmbtn="${i}">✕</button></div>`).join('')}${(s.buttons || []).length < 3 ? '<button class="btn ghost" data-addbtn>+ Add button</button>' : ''}`;

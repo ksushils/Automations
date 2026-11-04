@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS usage (
 // Columns added after v1 – applied to existing databases on start.
 const MIGRATIONS = {
   orders: { discount: 'REAL NOT NULL DEFAULT 0', delivery_fee: 'REAL NOT NULL DEFAULT 0', promo_code: 'TEXT', slot: 'TEXT', receipt_token: 'TEXT', paid_at: 'TEXT', reminded_at: 'TEXT', stripe_session_id: 'TEXT' },
-  customers: { winback_sent_at: 'TEXT', tags: "TEXT NOT NULL DEFAULT '[]'", attributes: "TEXT NOT NULL DEFAULT '{}'", source: 'TEXT' },
+  customers: { last_inbound_at: 'TEXT', winback_sent_at: 'TEXT', tags: "TEXT NOT NULL DEFAULT '[]'", attributes: "TEXT NOT NULL DEFAULT '{}'", source: 'TEXT' },
   conversations: { assigned_to: 'TEXT' },
   tenants: { owner_email: 'TEXT', stripe_customer_id: 'TEXT', subscription_id: 'TEXT', subscription_status: 'TEXT', trial_ends_at: 'TEXT' },
 };

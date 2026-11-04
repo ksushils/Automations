@@ -7,7 +7,7 @@ import { money } from '../bot/cart.js';
 import { verifyStripeSignature } from '../payments/stripe.js';
 import { handlePlatformStripeEvent } from '../platform.js';
 import { renderLegal } from '../legal.js';
-import { createSender } from '../whatsapp/cloudApi.js';
+import { createSender, notify } from '../whatsapp/cloudApi.js';
 import { getDb } from '../db.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -209,7 +209,8 @@ export function publicRouter() {
     const updated = updateOrder(t.id, o.id, { payment_status: 'paid', status: o.status === 'new' ? 'confirmed' : o.status });
     const send = createSender(t);
     const sym = t.settings.business.currencySymbol || '£';
-    await send(o.wa_id, { type: 'text', text: `💳 Payment received for order *${o.store_order_name}* (${money(o.subtotal, sym)}). Thank you! Your order is confirmed ✅` }).catch((e) => console.warn('[stripe notify]', e.message));
+    const tpl = t.settings.notifications?.templates?.orderUpdate;
+    await notify(t, o.wa_id, { type: 'text', text: `💳 Payment received for order *${o.store_order_name}* (${money(o.subtotal, sym)}). Thank you! Your order is confirmed ✅` }, tpl ? { name: tpl, params: [(o.customer_name || 'there').split(' ')[0], o.store_order_name, 'paid and confirmed'] } : null, send).catch((e) => console.warn('[stripe notify]', e.message));
     notifyStaff(t, updated, send, { event: 'order.paid', text: `💳 Order ${o.store_order_name} PAID – ${money(o.subtotal, sym)} (+${o.wa_id})` }).catch(() => {});
   });
 

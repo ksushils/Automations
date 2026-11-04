@@ -101,6 +101,7 @@ test('built-in catalogue stock: limits quantity, decrements, low-stock alert', a
   await say(t, wa, { action: 'checkout' });
   await say(t, wa, { action: 'ful:pickup' });
   await say(t, wa, { action: 'pay:cod' });
+  getDb().prepare("INSERT INTO customers (tenant_id, wa_id, last_inbound_at) VALUES (?, '447000000999', datetime('now'))").run(t.id); // staff messaged us today
   const staffMsgs = [];
   const { engine } = await import('./helpers.js');
   await engine.handleInbound(tenants.getTenant(t.id), { waId: wa, kind: 'action', id: 'confirm' }, async (to, m) => { if (to !== wa) staffMsgs.push(m); });
@@ -220,6 +221,10 @@ test('catalogue CSV import endpoint adds categories', () => withServer(async (ba
 test('payment reminder sent once for unpaid bank transfer order', async () => {
   const t = makeTenant({ whatsapp: { phoneNumberId: 'P', accessToken: 'tok' }, ordering: { paymentReminderMinutes: 30 } });
   getDb().prepare(`INSERT INTO orders (tenant_id, wa_id, store_order_name, payment_method, items, subtotal, created_at) VALUES (?, '447700900306', 'WA-X', 'bank_transfer', '[]', 12, datetime('now', '-2 hours'))`).run(t.id);
+  getDb().prepare(`INSERT INTO orders (tenant_id, wa_id, store_order_name, payment_method, items, subtotal, created_at) VALUES (?, '447700900316', 'WA-Y', 'payment_link', '[]', 9, datetime('now', '-2 hours'))`).run(t.id);
+  getDb().prepare("INSERT INTO customers (tenant_id, wa_id, last_inbound_at) VALUES (?, '447700900306', datetime('now', '-1 hour'))").run(t.id);
+  getDb().prepare("INSERT INTO customers (tenant_id, wa_id, last_inbound_at) VALUES (?, '447700900316', datetime('now', '-3 days'))").run(t.id);
+  tenants.updateTenantSettings(t.id, { notifications: { templates: { paymentReminder: 'payment_reminder' } } });
   const realFetch = globalThis.fetch;
   const sent = [];
   globalThis.fetch = async (url, opts) => { sent.push(JSON.parse(opts.body)); return new Response('{}', { status: 200 }); };
@@ -230,6 +235,12 @@ test('payment reminder sent once for unpaid bank transfer order', async () => {
   const mine = sent.filter((m) => m.to === '447700900306');
   assert.equal(mine.length, 1);
   assert.match(mine[0].text.body, /WA-X/);
+  // outside the 24h window → approved template instead of free text
+  const late = sent.filter((m) => m.to === '447700900316');
+  assert.equal(late.length, 1);
+  assert.equal(late[0].type, 'template');
+  assert.equal(late[0].template.name, 'payment_reminder');
+  assert.equal(late[0].template.components[0].parameters[1].text, 'WA-Y');
 });
 
 test('analytics summarises revenue, top products and promos', async () => {

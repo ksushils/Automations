@@ -1,7 +1,8 @@
 import { getDb, json } from './db.js';
 import { getTenant, listTenants } from './tenants.js';
 import { getConversation, saveConversation } from './bot/state.js';
-import { createSender } from './whatsapp/cloudApi.js';
+import { createSender, notify, inServiceWindow } from './whatsapp/cloudApi.js';
+import { config } from './config.js';
 import { formatCart } from './bot/cart.js';
 import { dueJobs, markJobDone } from './bot/flows.js';
 import { runCampaign } from './campaigns.js';
@@ -42,6 +43,7 @@ export async function runAbandonedCartReminders(now = Date.now()) {
     const minutes = Number(tenant?.settings.notifications?.abandonedCartMinutes) || 0;
     if (!tenant?.active || !minutes) continue;
     if (now - Date.parse(row.updated_at + 'Z') < minutes * 60000) continue;
+    if (!inServiceWindow(row.tenant_id, row.wa_id)) continue; // only free-form inside the 24h window
     const conv = getConversation(row.tenant_id, row.wa_id);
     conv.data.reminded = true;
     saveConversation(conv);
@@ -81,10 +83,12 @@ export async function runPaymentReminders(now = Date.now()) {
     if (!tenant?.active || !minutes || now - Date.parse(o.created_at + 'Z') < minutes * 60000) continue;
     getDb().prepare("UPDATE orders SET reminded_at = datetime('now') WHERE id = ?").run(o.id);
     const sym = tenant.settings.business.currencySymbol || '£';
+    const tpl = tenant.settings.notifications?.templates?.paymentReminder;
+    const fallback = tpl ? { name: tpl, params: [(o.customer_name || 'there').split(' ')[0], o.store_order_name, `${sym}${Number(o.subtotal).toFixed(2)}`, o.checkout_url || `${config.publicUrl}/r/${o.receipt_token}`] } : null;
     const msg = o.payment_method === 'payment_link' && o.checkout_url
       ? { type: 'cta', text: `⏰ Friendly reminder: order *${o.store_order_name}* (${sym}${Number(o.subtotal).toFixed(2)}) is waiting for payment.`, buttonText: 'Pay now', url: o.checkout_url }
       : { type: 'text', text: `⏰ Friendly reminder: we haven't received payment for order *${o.store_order_name}* (${sym}${Number(o.subtotal).toFixed(2)}) yet.\n${tenant.settings.ordering.bankDetails || ''}\nReference: ${o.store_order_name}\n\nAlready paid? Just send us the screenshot here 🙏` };
-    await createSender(tenant)(o.wa_id, msg).then(() => sent++, (e) => console.warn('[payment reminder]', e.message));
+    await notify(tenant, o.wa_id, msg, fallback).then((r) => r !== 'outside_window' && sent++, (e) => console.warn('[payment reminder]', e.message));
   }
   return sent;
 }

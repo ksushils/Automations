@@ -12,13 +12,14 @@ import { createSender } from '../whatsapp/cloudApi.js';
 import { handleInbound } from '../bot/engine.js';
 import { enqueue } from '../whatsapp/webhook.js';
 import { setHandover } from '../bot/state.js';
-import { listOrders, updateOrder, orderUpdateMessage } from '../bot/orders.js';
+import { listOrders, updateOrder, orderUpdateMessage, sendOrderUpdate } from '../bot/orders.js';
 import { createStaff, listStaff, deleteStaff, authenticateStaff, ROLES } from '../staff.js';
 import { toCsv, productsFromCsv } from '../csv.js';
 import { analytics } from '../analytics.js';
 import { listFlows, getFlow, saveFlow, deleteFlow, validateFlow, getContact, updateContact } from '../bot/flows.js';
 import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaignStats } from '../campaigns.js';
-import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY } from '../templates.js';
+import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile } from '../templates.js';
+import { fetchMedia } from '../whatsapp/cloudApi.js';
 import { parseCsv } from '../csv.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, embeddedSignupConfigured } from '../platform.js';
 import { rateLimit } from './web.js';
@@ -214,6 +215,23 @@ export function adminRouter() {
     try { res.json({ ok: true, result: await deleteTemplate(req.tenant, req.params.name) }); } catch (e) { res.status(400).json({ error: e.message }); }
   }));
 
+  // ----- WhatsApp number health, business profile, inbound media -----
+  r.get('/tenants/:tenantId/whatsapp/health', requireTenant, wrap(async (req, res) => {
+    try { res.json({ ok: true, health: await numberHealth(req.tenant) }); } catch (e) { res.json({ ok: false, error: e.message }); }
+  }));
+  r.get('/tenants/:tenantId/whatsapp/profile', requireTenant, requireOwner, wrap(async (req, res) => {
+    try { res.json({ ok: true, profile: await getBusinessProfile(req.tenant) }); } catch (e) { res.json({ ok: false, error: e.message }); }
+  }));
+  r.post('/tenants/:tenantId/whatsapp/profile', requireTenant, requireOwner, wrap(async (req, res) => {
+    try { await updateBusinessProfile(req.tenant, req.body || {}); res.json({ ok: true }); } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  }));
+  r.get('/tenants/:tenantId/media/:mediaId', requireTenant, wrap(async (req, res) => {
+    // only media that this tenant actually received
+    const known = getDb().prepare("SELECT 1 FROM messages WHERE tenant_id = ? AND direction = 'in' AND body LIKE ? LIMIT 1").get(req.tenant.id, `%"mediaId":"${String(req.params.mediaId).replace(/[%_"]/g, '')}"%`);
+    if (!known) return res.sendStatus(404);
+    try { const m = await fetchMedia(req.tenant, req.params.mediaId); res.type(m.mime).set('Cache-Control', 'private, max-age=3600').send(m.body); } catch (e) { res.status(502).json({ error: e.message }); }
+  }));
+
   // ----- developer API: send a message -----
   r.post('/tenants/:tenantId/messages', requireTenant, requireOwner, wrap(async (req, res) => {
     const to = String(req.body?.to || '').replace(/\D/g, '');
@@ -321,7 +339,7 @@ export function adminRouter() {
     if (!o) return res.status(404).json({ error: 'not found' });
     let notified = false;
     if (req.body?.notify) {
-      notified = await createSender(req.tenant)(o.wa_id, orderUpdateMessage(req.tenant, o)).then(() => true, (e) => e.message);
+      notified = await sendOrderUpdate(req.tenant, o).then((r) => (r === 'outside_window' ? 'customer is outside the 24h window – set an order_update template in Settings → Notifications' : true), (e) => e.message);
     }
     res.json({ order: o, notified });
   }));
