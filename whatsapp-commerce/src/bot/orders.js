@@ -132,7 +132,8 @@ export async function placeOrder({ tenant, store, conv, customer, fulfilment, pa
     const how = fulfilment === 'pickup' ? `collection${S.ordering.pickupAddress ? ` from ${S.ordering.pickupAddress}` : ''}` : 'delivery';
     messages.push({ type: 'text', text: `✅ Order *${ref}* confirmed!\n\n${summary}\n\nPayment: ${paymentLabel(paymentMethod)} on ${how}. We'll message you here with updates. Thank you! 🙏${receipt}` });
   }
-  messages.push({ type: 'buttons', text: 'Anything else?', buttons: [{ id: 'status', title: '📦 Order status' }, { id: 'browse', title: '🛍️ Keep shopping' }] });
+  const decided = getDb().prepare('SELECT 1 FROM consents WHERE tenant_id = ? AND wa_id = ? LIMIT 1').get(tenant.id, conv.waId);
+  messages.push({ type: 'buttons', text: 'Anything else?', buttons: [{ id: 'status', title: '📦 Order status' }, { id: 'browse', title: '🛍️ Keep shopping' }, ...(decided ? [] : [{ id: 'subscribe', title: '🔔 Get offers' }])] });
 
   notifyStaff(tenant, order, send, { lowStock }).catch((e) => console.error('[notify]', e.message));
   return { order, messages };

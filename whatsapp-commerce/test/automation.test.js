@@ -64,9 +64,9 @@ test('flow list row → products node; handover node; contains match; welcome tr
   saveFlow(t.id, { name: 'Hours', triggers: { keywords: ['open'], match: 'contains' }, steps: [{ type: 'message', text: 'Open 9-5' }] });
   saveFlow(t.id, { name: 'First', triggers: { keywords: [], welcome: true }, steps: [{ type: 'message', text: 'Welcome newbie!' }] });
   let r = await say(t, '447700900502', 'what time are you open?');
-  assert.equal(r[0].text, 'Open 9-5');
+  assert.match(r[0].text, /automated assistant[\s\S]*\n\nOpen 9-5$/); // first message carries the AI disclosure
   r = await say(t, '447700900503', 'random first message');
-  assert.equal(r[0].text, 'Welcome newbie!');
+  assert.match(r[0].text, /Welcome newbie!$/);
   r = await say(t, '447700900503', 'random second message');
   assert.notEqual(r[0]?.text, 'Welcome newbie!');
   r = await say(t, '447700900504', 'hi');
@@ -79,7 +79,8 @@ test('delay step schedules a resume that the job runner delivers', async () => {
   saveFlow(t.id, { name: 'Drip', triggers: { keywords: ['drip'] }, steps: [{ id: 'a', type: 'message', text: 'Part 1', next: 'b' }, { id: 'b', type: 'delay', minutes: 1, next: 'c' }, { id: 'c', type: 'message', text: 'Part 2' }] });
   const wa = '447700900505';
   const r = await say(t, wa, 'drip');
-  assert.deepEqual(r.map((m) => m.text), ['Part 1']);
+  assert.equal(r.length, 1);
+  assert.match(r[0].text, /Part 1$/);
   getDb().prepare("UPDATE scheduled SET run_at = datetime('now', '-1 minute') WHERE tenant_id = ?").run(t.id);
   const sent = [];
   const realFetch = globalThis.fetch;
@@ -93,8 +94,11 @@ test('delay step schedules a resume that the job runner delivers', async () => {
 test('segments, scheduled campaign, delivery/read tracking and retargeting', async () => {
   const t = makeTenant({ whatsapp: { phoneNumberId: 'P', accessToken: 'tok' } });
   const d = getDb();
-  const add = (wa, name, tags, optin = 1) => d.prepare('INSERT INTO customers (tenant_id, wa_id, name, tags, opted_in_marketing) VALUES (?, ?, ?, ?, ?)').run(t.id, wa, name, JSON.stringify(tags), optin);
+  const { recordConsent } = await import('../src/consent.js');
+  const add = (wa, name, tags, optin = 1) => { d.prepare('INSERT INTO customers (tenant_id, wa_id, name, tags) VALUES (?, ?, ?, ?)').run(t.id, wa, name, JSON.stringify(tags)); if (optin) recordConsent(t.id, wa, { status: 'granted', source: 'whatsapp_opt_in', wording: 'yes' }); };
   add('441', 'Ann Lee', ['vip']); add('442', 'Bob', ['vip', 'wholesale']); add('443', 'Cy', []); add('444', 'Di', ['vip'], 0);
+  // a flag without a ledger entry (e.g. legacy data) must not receive marketing
+  d.prepare("INSERT INTO customers (tenant_id, wa_id, name, tags, opted_in_marketing) VALUES (?, '445', 'Ed', '[\"vip\"]', 1)").run(t.id);
   d.prepare("INSERT INTO orders (tenant_id, wa_id, items) VALUES (?, '441', '[]')").run(t.id);
   assert.deepEqual(resolveAudience(t.id, { tags: ['vip'] }).sort(), ['441', '442']);
   assert.deepEqual(resolveAudience(t.id, { tags: ['vip'], excludeTags: ['wholesale'] }), ['441']);

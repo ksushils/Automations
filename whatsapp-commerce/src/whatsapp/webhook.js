@@ -1,10 +1,12 @@
 import express from 'express';
 import { findTenantByPhoneNumberId, getTenant, bumpUsage } from '../tenants.js';
 import { config } from '../config.js';
+import { getDb, json } from '../db.js';
 import { verifyMetaSignature, safeEqual } from '../crypto.js';
 import { createSender, parseInbound, logMessage, markRead } from './cloudApi.js';
 import { handleInbound } from '../bot/engine.js';
 import { recordStatus, recordReply } from '../campaigns.js';
+import { setHandover } from '../bot/state.js';
 
 // Serialise processing per customer so rapid taps don't race each other.
 const queues = new Map();
@@ -14,6 +16,39 @@ export function enqueue(key, job) {
   queues.set(key, next);
   next.finally(() => queues.get(key) === next && queues.delete(key));
   return next;
+}
+
+/** Handle one stored inbound message and mark it processed (also used by crash recovery). */
+async function processStored(tenant, ev, waMessageId, send) {
+  getDb().prepare('UPDATE messages SET attempts = attempts + 1 WHERE tenant_id = ? AND wa_message_id = ? AND direction = ?').run(tenant.id, waMessageId, 'in');
+  markRead(tenant, waMessageId, { typing: true });
+  try {
+    await handleInbound(tenant, ev, send);
+  } finally {
+    getDb().prepare('UPDATE messages SET processed = 1 WHERE tenant_id = ? AND wa_message_id = ? AND direction = ?').run(tenant.id, waMessageId, 'in');
+  }
+}
+
+/**
+ * Replay inbound messages that were stored but never finished (crash / deploy mid-processing).
+ * Only recent ones (< 2h) and at most 3 attempts, so a poison message can't loop forever.
+ */
+export async function recoverUnprocessed({ olderThanSec = 20 } = {}) {
+  const rows = getDb().prepare(`SELECT tenant_id, wa_id, wa_message_id, body FROM messages WHERE direction = 'in' AND processed = 0 AND attempts < 3
+     AND created_at < datetime('now', ?) AND created_at > datetime('now', '-2 hours') ORDER BY id LIMIT 200`).all(`-${olderThanSec} seconds`);
+  let n = 0;
+  for (const r of rows) {
+    const tenant = getTenant(r.tenant_id);
+    const stored = json(r.body, {});
+    if (!tenant?.active || !stored.message) {
+      getDb().prepare("UPDATE messages SET processed = 1 WHERE tenant_id = ? AND wa_message_id = ? AND direction = 'in'").run(r.tenant_id, r.wa_message_id);
+      continue;
+    }
+    const ev = parseInbound(stored.message);
+    ev.profileName = stored.profileName || undefined;
+    await enqueue(`${tenant.id}:${ev.waId}`, () => processStored(tenant, ev, r.wa_message_id, createSender(tenant))).then(() => n++);
+  }
+  return n;
 }
 
 export function processWebhookBody(body, { tenantOverride } = {}) {
@@ -28,17 +63,20 @@ export function processWebhookBody(body, { tenantOverride } = {}) {
       for (const m of value.messages || []) {
         const ev = parseInbound(m);
         ev.profileName = names[m.from];
-        // logMessage returns false for duplicates (Meta retries deliveries)
-        if (!logMessage(tenant.id, ev.waId, 'in', { type: ev.kind, text: ev.text, id: ev.id, raw: m.type, ...(ev.mediaId ? { mediaId: ev.mediaId, mime: ev.mime } : {}) }, m.id)) continue;
-        if (ev.kind === 'ignore') continue; // reactions, stickers – nothing to answer
+        // Persist first (processed = 0), then handle. logMessage returns false for duplicates (Meta retries).
+        // If the server dies mid-reply, recoverUnprocessed() replays it – so a retry being de-duplicated never loses a message.
+        const stored = { type: ev.kind, text: ev.text, id: ev.id, raw: m.type, ...(ev.mediaId ? { mediaId: ev.mediaId, mime: ev.mime } : {}), message: m, profileName: ev.profileName || null };
+        if (!logMessage(tenant.id, ev.waId, 'in', stored, m.id, { processed: ev.kind === 'ignore' ? 1 : 0 })) continue;
         bumpUsage(tenant.id, 'inbound');
         recordReply(tenant.id, ev.waId, { isButton: m.type === 'button' });
-        jobs.push(
-          enqueue(`${tenant.id}:${ev.waId}`, async () => {
-            markRead(tenant, m.id, { typing: ev.kind !== 'ignore' });
-            await handleInbound(tenant, ev, send);
-          }),
-        );
+        if (ev.kind === 'ignore') continue; // reactions, stickers – nothing to answer
+        jobs.push(enqueue(`${tenant.id}:${ev.waId}`, () => processStored(tenant, ev, m.id, send)));
+      }
+      // Coexistence: messages the owner sent from the WhatsApp Business app on their phone
+      for (const e of value.message_echoes || []) {
+        if (!e.to) continue;
+        logMessage(tenant.id, e.to, 'out', { type: 'text', text: e.text?.body || `[${e.type} sent from the WhatsApp Business app]`, via: 'business_app' });
+        jobs.push(enqueue(`${tenant.id}:${e.to}`, async () => setHandover(tenant.id, e.to, true))); // a human is replying – bot steps back
       }
       // value.statuses (sent/delivered/read/failed) – log failures for debugging
       for (const s of value.statuses || []) {

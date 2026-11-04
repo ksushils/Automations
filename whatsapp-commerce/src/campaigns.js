@@ -1,6 +1,7 @@
 import { getDb, json } from './db.js';
 import { createSender } from './whatsapp/cloudApi.js';
 import { schedule } from './bot/flows.js';
+import { HAS_CONSENT_SQL } from './consent.js';
 
 /**
  * Audience (segment) definition:
@@ -12,7 +13,8 @@ export function resolveAudience(tenantId, a = {}) {
   if (Array.isArray(a.waIds) && a.waIds.length) return [...new Set(a.waIds.map((w) => String(w).replace(/\D/g, '')).filter(Boolean))];
   const where = ['c.tenant_id = ?'];
   const args = [tenantId];
-  if (a.optedInOnly !== false) where.push('c.opted_in_marketing = 1');
+  // Marketing needs recorded consent (ledger), not just a flag. optedInOnly:false is only for utility templates.
+  if (a.optedInOnly !== false) where.push(`c.opted_in_marketing = 1 AND ${HAS_CONSENT_SQL}`);
   if (a.hasOrdered === true) where.push("EXISTS (SELECT 1 FROM orders o WHERE o.tenant_id = c.tenant_id AND o.wa_id = c.wa_id AND o.status != 'cancelled')");
   if (a.hasOrdered === false) where.push("NOT EXISTS (SELECT 1 FROM orders o WHERE o.tenant_id = c.tenant_id AND o.wa_id = c.wa_id AND o.status != 'cancelled')");
   if (Number(a.lastOrderOlderThanDays) > 0) {

@@ -11,6 +11,10 @@ import { notify } from '../whatsapp/cloudApi.js';
 import { getDb } from '../db.js';
 import { alert } from '../ops.js';
 import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
+import { recordConsent, defaultWording } from '../consent.js';
+import { directConfigured } from '../ai/direct.js';
+
+const consentWording = (ctx) => ctx.S.notifications?.consentWording || defaultWording(ctx.S.business.name);
 
 // ---------- helpers ----------
 const PAY_BUTTONS = { payment_link: '💳 Pay online', cod: '💵 Pay on delivery', bank_transfer: '🏦 Bank transfer' };
@@ -406,8 +410,16 @@ async function handleAction(ctx, id) {
     case 'cancel': ctx.conv.state = 'idle'; delete ctx.conv.data.checkout; return ctx.reply(mainMenu(ctx, 'Checkout cancelled — your cart is still saved.'));
     case 'status': return orderStatus(ctx);
     case 'human': return handover(ctx);
-    case 'subscribe': updateCustomer(ctx.tenant.id, ctx.conv.waId, { opted_in_marketing: 1 }); return ctx.reply({ type: 'text', text: "🔔 You're subscribed to offers. Reply STOP any time to opt out." });
-    case 'unsubscribe': updateCustomer(ctx.tenant.id, ctx.conv.waId, { opted_in_marketing: 0 }); return ctx.reply({ type: 'text', text: "🔕 You won't receive promotional messages. You can still order any time." });
+    case 'subscribe':
+      // Ask first, record the exact wording only when they confirm (PECR: specific, informed, unambiguous)
+      return ctx.reply({ type: 'buttons', text: `🔔 ${consentWording(ctx)}\n\nWe'll send a few offers a month. Reply STOP any time to opt out.`, buttons: [{ id: 'optin:yes', title: '✅ Yes, sign me up' }, { id: 'optin:no', title: 'No thanks' }] });
+    case 'optin':
+      if (arg !== 'yes') return ctx.reply({ type: 'text', text: "No problem – we won't send you promotions." });
+      recordConsent(ctx.tenant.id, ctx.conv.waId, { status: 'granted', source: 'whatsapp_opt_in', wording: consentWording(ctx), evidence: ctx.event?.messageId ? `wamid ${ctx.event.messageId}` : 'whatsapp button', actor: 'customer' });
+      return ctx.reply({ type: 'text', text: "🔔 You're subscribed to offers. Reply STOP any time to opt out." });
+    case 'unsubscribe':
+      recordConsent(ctx.tenant.id, ctx.conv.waId, { status: 'withdrawn', source: 'whatsapp_stop', evidence: ctx.event?.messageId ? `wamid ${ctx.event.messageId}` : 'whatsapp', actor: 'customer' });
+      return ctx.reply({ type: 'text', text: "🔕 You won't receive promotional messages. You can still order any time." });
     default: {
       // Template quick-reply buttons send their text as the payload ("Stop offers", "Shop now"…)
       const t = norm(id.replace(/^[^\w]+/, ''));
@@ -515,7 +527,8 @@ async function handleText(ctx, raw) {
 
   // Free text → AI (if configured) or knowledge base + catalogue search
   const D = ctx.S.dify || {};
-  if (D.enabled && D.apiKey && withinLimit(ctx.tenant, 'ai')) {
+  if (aiAvailable(ctx) && !withinLimit(ctx.tenant, 'ai')) ownerNotice(ctx.tenant, 'ai', ctx.rawSend);
+  if (aiAvailable(ctx) && withinLimit(ctx.tenant, 'ai')) {
     try {
       return await askAi(ctx, text);
     } catch (e) {
@@ -546,6 +559,7 @@ export async function handleInbound(tenant, event, send) {
   const customer = upsertCustomer(tenant.id, event.waId, event.profileName);
   const replies = [];
   const ctx = buildCtx(tenant, conv, customer, send, replies);
+  ctx.event = event;
 
   // Click-to-WhatsApp ad attribution (first touch wins)
   if (event.referral && !customer.source) {
@@ -562,7 +576,18 @@ export async function handleInbound(tenant, event, send) {
     if (event.kind === 'text' && ['menu', 'bot'].includes(norm(event.text))) conv.humanHandover = false;
     else return replies;
   }
-  if (!withinLimit(tenant, 'inbound')) return replies;
+  if (!withinLimit(tenant, 'inbound')) {
+    // Plan limit reached: never leave a customer in silence – acknowledge once a day, hand to a human, tell the owner.
+    const key = `limit:${tenant.id}:${conv.waId}:${new Date().toISOString().slice(0, 10)}`;
+    if (!getDb().prepare('SELECT 1 FROM kv WHERE key = ?').get(key)) {
+      getDb().prepare('INSERT OR IGNORE INTO kv (key, value) VALUES (?, ?)').run(key, '1');
+      conv.humanHandover = true;
+      saveConversation(conv);
+      await send(conv.waId, { type: 'text', text: `Thanks for your message! 🙏 A member of the ${tenant.settings.business.name} team will reply here shortly.` }).catch(() => {});
+      ownerNotice(tenant, 'inbound', send);
+    }
+    return replies;
+  }
 
   try {
     const busy = ['awaiting_address', 'awaiting_qty', 'checkout_confirm', 'checkout_slot'].includes(conv.state);
@@ -601,6 +626,15 @@ export async function handleInbound(tenant, event, send) {
     ctx.reply(mainMenu(ctx, 'Sorry, something went wrong on our side. Please try again in a moment.'));
   }
 
+  // Transparency: tell people on their first message that they're talking to an automated assistant
+  if (isFirstMessage && tenant.settings.ai?.disclosure !== false && replies.length) {
+    const name = tenant.settings.ai?.assistantName || `${tenant.settings.business.name} assistant`;
+    const note = `🤖 _I'm ${name}, an automated assistant${aiAvailable(ctx) ? ' (AI)' : ''}. Type *human* any time to talk to a person._`;
+    // put it on top of the first reply (one message, not two – every message is billed by Meta)
+    const first = replies.find((m) => ['text', 'buttons', 'list', 'cta', 'flow'].includes(m.type));
+    if (first) first.text = `${note}\n\n${first.text}`;
+    else replies.unshift({ type: 'text', text: note });
+  }
   saveConversation(conv);
   for (const m of replies) {
     try {
@@ -610,6 +644,23 @@ export async function handleInbound(tenant, event, send) {
     }
   }
   return replies;
+}
+
+/** Is an AI engine configured for this shop (Dify app or direct provider)? */
+function aiAvailable(ctx) {
+  const D = ctx.S.dify || {};
+  if ((ctx.S.ai?.provider || 'dify') === 'direct') return !!(ctx.S.ai?.enabled !== false && directConfigured());
+  return !!(D.enabled && D.apiKey);
+}
+
+/** Tell the shop owner (once a day per kind) that a plan limit was reached. */
+function ownerNotice(tenant, kind, send) {
+  const key = `notice:${tenant.id}:${kind}:${new Date().toISOString().slice(0, 10)}`;
+  if (getDb().prepare('SELECT 1 FROM kv WHERE key = ?').get(key)) return;
+  getDb().prepare('INSERT OR IGNORE INTO kv (key, value) VALUES (?, ?)').run(key, '1');
+  const text = kind === 'ai' ? `⚠️ ${tenant.settings.business.name}: this month's AI replies are used up – the bot now answers with keyword search only. Upgrade on the Billing tab to restore AI replies.` : `⚠️ ${tenant.settings.business.name}: this month's message limit is reached – new chats are handed to your team instead of the bot. Upgrade on the Billing tab.`;
+  for (const s of tenant.settings.notifications?.staffWaIds || []) staffAlert(tenant, String(s).replace(/\D/g, ''), text, send);
+  alert(`Plan limit (${kind}) reached for ${tenant.id}`, { key: `limit:${tenant.id}:${kind}` });
 }
 
 function buildCtx(tenant, conv, customer, send, replies) {

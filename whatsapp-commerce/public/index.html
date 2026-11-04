@@ -169,7 +169,8 @@ async function overview() {
       <div class="card"><div class="mute">Messages in (month)</div><div class="stat">${t.usage.inbound}${lim.monthlyConversationsIn ? ` / ${lim.monthlyConversationsIn}` : ''}</div></div>
       <div class="card"><div class="mute">Orders (month)</div><div class="stat">${t.usage.orders}</div></div>
       <div class="card"><div class="mute">AI replies (month)</div><div class="stat">${t.usage.ai_calls}${lim.aiCalls ? ` / ${lim.aiCalls}` : ''}</div></div>
-      <div class="card"><div class="mute">Plan</div><div class="stat">${esc(lim.label || t.plan)}</div></div></div>
+      <div class="card"><div class="mute">Plan</div><div class="stat">${esc(lim.label || t.plan)}</div></div>
+      <div class="card"><div class="mute">Est. Meta fees (month)</div><div class="stat" id="metacost">…</div><div class="mute" id="metafree"></div></div></div>
     <div class="card" id="wizard"><h2>Get your WhatsApp shop live</h2><div class="mute">Loading…</div></div>
     <div class="card"><h2>Setup checklist</h2>${checks.map(([l, ok]) => `<div>${ok ? '✅' : '⬜'} ${l}</div>`).join('')}
       ${S.role === 'owner' ? `<p id="esu"></p>` : ''}</div>
@@ -187,6 +188,7 @@ async function overview() {
       <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></div>`;
   embeddedSignupButton(s);
   setupWizard(t);
+  api(T('/meta-costs')).then((m) => { $('#metacost').textContent = '£' + m.totalGbp.toFixed(2); $('#metafree').textContent = `${m.freeServiceLeft} of 1,000 free replies left · billed by Meta`; }).catch(() => {});
   if (s.whatsapp.phoneNumberId) api(T('/whatsapp/health')).then((h) => {
     const el = document.createElement('div'); el.className = 'card';
     if (!h.ok) { el.innerHTML = `<h2>WhatsApp number</h2><p class="pill warn">${esc(h.error)}</p>`; }
@@ -501,8 +503,10 @@ async function campaigns() {
     hasOrdered: $('#aord').value === '' ? null : $('#aord').value === 'true', lastOrderOlderThanDays: Number($('#alast').value) || 0,
     retarget: $('#art').value ? { campaignId: Number($('#art').value), status: $('#arts').value } : undefined,
   });
-  $('#cprev').onclick = async () => { const r = await api(T('/campaigns/preview'), { method: 'POST', body: { audience: audience() } }); $('#cinfo').textContent = `${r.recipients} recipients`; };
+  $('#cprev').onclick = async () => { const r = await api(T('/campaigns/preview'), { method: 'POST', body: { audience: audience() } }); $('#cinfo').textContent = `${r.recipients} recipients · estimated Meta cost ≈ £${r.cost.estimatedGbp.toFixed(2)} (billed by Meta)`; };
   $('#cgo').onclick = async () => {
+    const pv = await api(T('/campaigns/preview'), { method: 'POST', body: { audience: audience() } });
+    if (!confirm(`Send to ${pv.recipients} opted-in contacts?\nEstimated Meta cost ≈ £${pv.cost.estimatedGbp.toFixed(2)} (billed to your Meta account).`)) return;
     const [template, language = 'en_GB'] = $('#ctpl').value.split('|');
     const vars = $('#cv').value.split(',').map((x) => x.trim()).filter(Boolean);
     const components = vars.length ? [{ type: 'body', parameters: vars.map((text) => ({ type: 'text', text })) }] : undefined;
@@ -619,31 +623,45 @@ async function embeddedSignupButton(s) {
   if (!el) return;
   const cfg = await api('/meta/config').catch(() => ({}));
   if (!cfg.enabled) { el.innerHTML = s.whatsapp.phoneNumberId ? '' : '<span class="mute">Connect WhatsApp by entering your Meta details in Settings (one-click connect becomes available when the server has Meta Embedded Signup configured).</span>'; return; }
-  el.innerHTML = `<button class="btn" id="esbtn">${s.whatsapp.phoneNumberId ? '🔄 Reconnect WhatsApp number' : '📱 Connect WhatsApp (takes 2 minutes)'}</button> <span id="esmsg" class="mute"></span>`;
+  const pending = s.whatsapp.wabaId && s.whatsapp.numberStatus && s.whatsapp.numberStatus !== 'active';
+  el.innerHTML = `<button class="btn" id="esbtn">${s.whatsapp.phoneNumberId ? '🔄 Reconnect WhatsApp number' : '📱 Connect a new WhatsApp number'}</button>
+    <button class="btn ghost" id="escoex" title="Keep using the WhatsApp Business app on your phone – messages sync both ways">📲 I use the WhatsApp Business app on my number</button>
+    ${pending ? '<button class="btn ghost" id="esref">↻ Refresh number</button>' : ''} <span id="esmsg" class="mute">${pending ? 'Connected – waiting for a verified phone number.' : ''}</span>`;
   let session = {};
   window.addEventListener('message', (ev) => {
     if (!/facebook\.com$/.test(new URL(ev.origin).hostname)) return;
-    try { const d = JSON.parse(ev.data); if (d.type === 'WA_EMBEDDED_SIGNUP' && d.event === 'FINISH') session = { phoneNumberId: d.data.phone_number_id, wabaId: d.data.waba_id }; } catch {}
+    try {
+      const d = JSON.parse(ev.data);
+      // v4: FINISH, FINISH_ONLY_WABA (no number yet), FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING (coexistence)
+      if (d.type === 'WA_EMBEDDED_SIGNUP' && /^FINISH/.test(d.event)) session = { phoneNumberId: d.data?.phone_number_id || null, wabaId: d.data?.waba_id, businessId: d.data?.business_id || null, event: d.event };
+      if (d.type === 'WA_EMBEDDED_SIGNUP' && d.event === 'CANCEL') $('#esmsg').textContent = `Cancelled${d.data?.current_step ? ' at ' + d.data.current_step : ''}`;
+    } catch {}
   });
+  if ($('#esref')) $('#esref').onclick = async () => { const r = await api(T('/whatsapp/refresh-number'), { method: 'POST' }).catch((e) => ({ ok: false, error: e.message })); $('#esmsg').textContent = r.ok ? (r.message || `Connected ${r.displayPhoneNumber || ''} ✅`) : '⚠️ ' + r.error; if (r.numberStatus === 'active') overview(); };
   const loadSdk = () => new Promise((res) => {
     if (window.FB) return res();
     window.fbAsyncInit = () => { FB.init({ appId: cfg.appId, autoLogAppEvents: true, xfbml: false, version: cfg.graphVersion }); res(); };
     const sc = document.createElement('script'); sc.src = 'https://connect.facebook.net/en_US/sdk.js'; sc.async = true; sc.crossOrigin = 'anonymous'; document.head.appendChild(sc);
   });
-  $('#esbtn').onclick = async () => {
+  const launch = async (coexistence) => {
     await loadSdk();
+    session = {};
     FB.login((resp) => {
       const code = resp.authResponse?.code;
       if (!code) return ($('#esmsg').textContent = 'Cancelled');
       $('#esmsg').textContent = 'Connecting…';
       setTimeout(async () => {
-        const r = await api(T('/whatsapp/embedded'), { method: 'POST', body: { code, ...session } }).catch((e) => ({ ok: false, error: e.message }));
+        if (!session.wabaId) return ($('#esmsg').textContent = '⚠️ Meta did not return the account details – please try again.');
+        const r = await api(T('/whatsapp/embedded'), { method: 'POST', body: { code, ...session, coexistence } }).catch((e) => ({ ok: false, error: e.message }));
         if (!r.ok) return ($('#esmsg').textContent = '⚠️ ' + r.error);
+        if (r.numberStatus !== 'active') { $('#esmsg').textContent = r.message; return; }
         toast(`Connected ${r.displayPhoneNumber || ''} ✅`);
         overview();
-      }, 800); // the FINISH message can arrive just after the login callback
-    }, { config_id: cfg.configId, response_type: 'code', override_default_response_type: true, extras: { setup: {}, sessionInfoVersion: '3' } });
+      }, 1000); // the FINISH message can arrive just after the login callback
+    }, { config_id: cfg.configId, response_type: 'code', override_default_response_type: true, extras: coexistence ? { setup: {}, featureType: 'whatsapp_business_app_onboarding' } : { setup: {} } });
   };
+  $('#esbtn').onclick = () => launch(false);
+  $('#escoex').onclick = () => launch(true);
 }
 
 // ---------- billing ----------

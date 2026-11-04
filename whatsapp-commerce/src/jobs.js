@@ -7,9 +7,10 @@ import { formatCart } from './bot/cart.js';
 import { dueJobs, markJobDone } from './bot/flows.js';
 import { runCampaign } from './campaigns.js';
 import { resumeFlow } from './bot/engine.js';
-import { enqueue } from './whatsapp/webhook.js';
+import { enqueue, recoverUnprocessed } from './whatsapp/webhook.js';
 import { runAbandonedCheckouts } from './routes/storeWebhooks.js';
 import { enforceTrials } from './platform.js';
+import { HAS_CONSENT_SQL } from './consent.js';
 
 /** Scheduled work: flow delays and campaigns. */
 export async function runScheduled() {
@@ -63,7 +64,12 @@ export function startJobs() {
     runPaymentReminders().catch((e) => console.error('[jobs]', e));
     runAbandonedCheckouts().catch((e) => console.error('[jobs]', e));
   }, 5 * 60000);
-  const minutely = setInterval(() => runScheduled().catch((e) => console.error('[jobs]', e)), 30000);
+  const minutely = setInterval(() => {
+    runScheduled().catch((e) => console.error('[jobs]', e));
+    recoverUnprocessed().then((n) => n && console.log(`[recovery] replayed ${n} unfinished message(s)`), (e) => console.error('[recovery]', e));
+  }, 30000);
+  // also right after start-up (messages interrupted by the previous deploy/crash)
+  setTimeout(() => recoverUnprocessed({ olderThanSec: 0 }).catch((e) => console.error('[recovery]', e)), 5000).unref();
   minutely.unref();
   const daily = setInterval(() => {
     runWinBack().catch((e) => console.error('[jobs]', e));
@@ -105,7 +111,7 @@ export async function runWinBack() {
     if (!tenant.active || !W?.enabled || !W.template) continue;
     const days = Math.max(7, Number(W.afterDays) || 30);
     const rows = getDb()
-      .prepare(`SELECT c.wa_id FROM customers c WHERE c.tenant_id = ? AND c.opted_in_marketing = 1
+      .prepare(`SELECT c.wa_id FROM customers c WHERE c.tenant_id = ? AND c.opted_in_marketing = 1 AND ${HAS_CONSENT_SQL}
                 AND (c.winback_sent_at IS NULL OR c.winback_sent_at < datetime('now', ?))
                 AND EXISTS (SELECT 1 FROM orders o WHERE o.tenant_id = c.tenant_id AND o.wa_id = c.wa_id)
                 AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.tenant_id = c.tenant_id AND o.wa_id = c.wa_id AND o.created_at > datetime('now', ?))

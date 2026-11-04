@@ -22,7 +22,7 @@ input{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;bac
 <body>
 <main>
   <h1>Sell on WhatsApp – with AI 🤖</h1>
-  <p class="mute">Connect your Shopify / WooCommerce shop (or add products), and customers can browse, ask questions and order inside WhatsApp. <b id="trial">14-day free trial.</b></p>
+  <p class="mute">Connect your Shopify / WooCommerce shop (or add products), and customers can browse, ask questions and order inside WhatsApp. <b id="trial">14-day free trial.</b> Meta's own WhatsApp message fees are billed by Meta to your Meta account.</p>
   <div class="grid" id="plans"></div>
   <div class="card" style="max-width:520px">
     <form id="f">
@@ -40,7 +40,7 @@ input{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;bac
 const FEATURES = {
   starter: ['Tap-to-order WhatsApp shop & storefront', 'Shopify / WooCommerce / built-in catalogue', 'AI assistant & agent', 'Flow builder & auto-replies', '1,000 messages · 300 AI replies / month'],
   growth: ['Everything in Starter', 'Campaigns, segments & retargeting', '5,000 messages · 3,000 AI replies / month'],
-  pro: ['Everything in Growth', 'Unlimited messages · 20,000 AI replies / month', 'Priority support'],
+  pro: ['Everything in Growth', 'No limit on incoming messages · 20,000 AI replies / month', 'Priority support'],
 };
 let plan = new URLSearchParams(location.search).get('plan') || 'growth';
 fetch('/api/plans').then((r) => r.json()).then((d) => {

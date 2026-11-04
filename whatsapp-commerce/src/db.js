@@ -156,6 +156,18 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
 );
 CREATE INDEX IF NOT EXISTS idx_kdocs_tenant ON knowledge_docs(tenant_id, status);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS consents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  wa_id TEXT NOT NULL,
+  status TEXT NOT NULL,            -- granted | withdrawn
+  source TEXT NOT NULL,            -- whatsapp_opt_in, whatsapp_stop, web_checkout, import:<declared>, staff, api
+  wording TEXT,                    -- exact text the person agreed to
+  evidence TEXT,                   -- message id, IP / user agent, import file, staff note
+  actor TEXT,                      -- customer | owner | staff name
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_consents ON consents(tenant_id, wa_id, id);
 CREATE TABLE IF NOT EXISTS usage (
   tenant_id TEXT NOT NULL,
   period TEXT NOT NULL,
@@ -172,6 +184,7 @@ const MIGRATIONS = {
   orders: { discount: 'REAL NOT NULL DEFAULT 0', delivery_fee: 'REAL NOT NULL DEFAULT 0', promo_code: 'TEXT', slot: 'TEXT', receipt_token: 'TEXT', paid_at: 'TEXT', reminded_at: 'TEXT', stripe_session_id: 'TEXT' },
   customers: { last_inbound_at: 'TEXT', winback_sent_at: 'TEXT', tags: "TEXT NOT NULL DEFAULT '[]'", attributes: "TEXT NOT NULL DEFAULT '{}'", source: 'TEXT' },
   conversations: { assigned_to: 'TEXT' },
+  messages: { processed: 'INTEGER NOT NULL DEFAULT 1', attempts: 'INTEGER NOT NULL DEFAULT 0' },
   tenants: { owner_email: 'TEXT', stripe_customer_id: 'TEXT', subscription_id: 'TEXT', subscription_status: 'TEXT', trial_ends_at: 'TEXT' },
 };
 

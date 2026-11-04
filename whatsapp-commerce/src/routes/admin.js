@@ -21,7 +21,9 @@ import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaig
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile } from '../templates.js';
 import { fetchMedia } from '../whatsapp/cloudApi.js';
 import { parseCsv } from '../csv.js';
-import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, embeddedSignupConfigured, billingBanner } from '../platform.js';
+import { estimateCampaign, monthEstimate } from '../metaPricing.js';
+import { recordConsent, consentHistory, HAS_CONSENT_SQL } from '../consent.js';
+import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
 import { systemStatus, backup, alert } from '../ops.js';
 import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, buildAgentPrompt, knowledgeChanged } from '../dify/provision.js';
@@ -175,7 +177,13 @@ export function adminRouter() {
   r.post('/tenants/:tenantId/whatsapp/embedded', requireTenant, requireOwner, wrap(async (req, res) => {
     try {
       const r2 = await completeEmbeddedSignup(req.tenant.id, req.body || {});
-      res.json({ ok: true, displayPhoneNumber: r2.displayPhoneNumber, verifiedName: r2.verifiedName, tenant: view(r2.tenant) });
+      res.json({ ok: true, numberStatus: r2.numberStatus, message: r2.message || null, displayPhoneNumber: r2.displayPhoneNumber || null, verifiedName: r2.verifiedName || null, tenant: view(r2.tenant) });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  }));
+  r.post('/tenants/:tenantId/whatsapp/refresh-number', requireTenant, requireOwner, wrap(async (req, res) => {
+    try {
+      const r2 = await activateNumber(req.tenant.id, {});
+      res.json({ ok: true, numberStatus: r2.numberStatus, message: r2.message || null, displayPhoneNumber: r2.displayPhoneNumber || null, tenant: view(r2.tenant) });
     } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
   }));
 
@@ -217,31 +225,51 @@ export function adminRouter() {
   r.patch('/tenants/:tenantId/contacts/:waId', requireTenant, (req, res) => {
     const { addTags, removeTags, attributes, opted_in_marketing, name } = req.body || {};
     if (!getContact(req.tenant.id, req.params.waId)) return res.status(404).json({ error: 'not found' });
-    if (opted_in_marketing !== undefined) getDb().prepare('UPDATE customers SET opted_in_marketing = ? WHERE tenant_id = ? AND wa_id = ?').run(opted_in_marketing ? 1 : 0, req.tenant.id, req.params.waId);
+    if (opted_in_marketing !== undefined) {
+      if (opted_in_marketing && !String(req.body?.consentNote || '').trim()) return res.status(400).json({ error: 'Say how this person agreed (e.g. "signed up in shop 3 Nov, paper form")' });
+      recordConsent(req.tenant.id, req.params.waId, { status: opted_in_marketing ? 'granted' : 'withdrawn', source: 'staff', wording: req.body?.consentWording || null, evidence: req.body?.consentNote || 'removed by staff', actor: req.staff?.name || 'owner' });
+    }
     if (name) getDb().prepare('UPDATE customers SET name = ? WHERE tenant_id = ? AND wa_id = ?').run(String(name).slice(0, 120), req.tenant.id, req.params.waId);
     res.json({ contact: updateContact(req.tenant.id, req.params.waId, { addTags, removeTags, attributes }) });
   });
   r.post('/tenants/:tenantId/contacts/import', requireTenant, requireOwner, (req, res) => {
     // columns: phone,name,email,tags (separated by ;),opt_in (yes/no) – any other column becomes an attribute
     const rows = parseCsv(req.body?.csv || '');
-    let imported = 0;
+    let imported = 0, consented = 0;
     const errors = [];
+    // Opt-ins are only imported with a declaration of where consent came from (kept in the ledger as evidence)
+    const decl = req.body?.consentDeclaration || {};
+    const declared = decl.confirmed === true && String(decl.source || '').trim().length >= 3 && String(decl.wording || '').trim().length >= 10;
     rows.forEach((r, i) => {
       const wa = String(r.phone || r.whatsapp || r.wa_id || '').replace(/\D/g, '').replace(/^0(?=7)/, '44');
       if (wa.length < 8) return errors.push(`line ${i + 2}: invalid phone "${r.phone || ''}"`);
       const { phone, whatsapp, wa_id, name, email, tags, opt_in, ...attrs } = r;
-      getDb().prepare(`INSERT INTO customers (tenant_id, wa_id, name, email, opted_in_marketing) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = COALESCE(excluded.name, customers.name), email = COALESCE(excluded.email, customers.email), opted_in_marketing = excluded.opted_in_marketing`)
-        .run(req.tenant.id, wa, name || null, email || null, /^(y|yes|true|1)$/i.test(opt_in || '') ? 1 : 0);
-      updateContact(req.tenant.id, wa, { addTags: String(tags || '').split(/[;|]/).map((t) => t.trim()).filter(Boolean), attributes: Object.fromEntries(Object.entries(attrs).filter(([, v]) => v !== '')) });
+      const { consent_date, consent_source, ...rest } = attrs;
+      getDb().prepare(`INSERT INTO customers (tenant_id, wa_id, name, email) VALUES (?, ?, ?, ?)
+        ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = COALESCE(excluded.name, customers.name), email = COALESCE(excluded.email, customers.email)`)
+        .run(req.tenant.id, wa, name || null, email || null);
+      if (/^(y|yes|true|1)$/i.test(opt_in || '') && declared) {
+        recordConsent(req.tenant.id, wa, { status: 'granted', source: `import:${String(consent_source || decl.source).slice(0, 60)}`, wording: decl.wording, evidence: `CSV import ${new Date().toISOString().slice(0, 10)}${consent_date ? `; consented ${consent_date}` : ''}`, actor: req.staff?.name || 'owner' });
+        consented++;
+      }
+      updateContact(req.tenant.id, wa, { addTags: String(tags || '').split(/[;|]/).map((t) => t.trim()).filter(Boolean), attributes: Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== '')) });
       imported++;
     });
-    res.json({ imported, errors: errors.slice(0, 20), note: 'Only contacts with opt_in = yes receive marketing campaigns (WhatsApp policy).' });
+    res.json({ imported, consented, errors: errors.slice(0, 20), note: declared ? `${consented} contact(s) opted in with your consent declaration recorded.` : 'Contacts were imported WITHOUT marketing consent. To import opt-ins, confirm where the consent came from and the wording people agreed to.' });
+  });
+  r.get('/tenants/:tenantId/contacts/:waId/consent', requireTenant, (req, res) => res.json({ history: consentHistory(req.tenant.id, req.params.waId) }));
+  r.get('/tenants/:tenantId/export/consent.csv', requireTenant, requireOwner, (req, res) => {
+    const rows = getDb().prepare('SELECT wa_id, status, source, wording, evidence, actor, created_at FROM consents WHERE tenant_id = ? ORDER BY id').all(req.tenant.id);
+    res.type('text/csv').attachment(`consent-ledger-${req.tenant.id}.csv`).send(toCsv(rows, [{ key: 'wa_id', label: 'whatsapp' }, { key: 'status' }, { key: 'source' }, { key: 'wording' }, { key: 'evidence' }, { key: 'actor' }, { key: 'created_at' }]));
   });
 
   // ----- campaigns (scheduled broadcasts, segments, retargeting) -----
   r.get('/tenants/:tenantId/campaigns', requireTenant, (req, res) => res.json({ campaigns: listCampaigns(req.tenant.id) }));
-  r.post('/tenants/:tenantId/campaigns/preview', requireTenant, (req, res) => res.json({ recipients: resolveAudience(req.tenant.id, req.body?.audience || {}).length }));
+  r.post('/tenants/:tenantId/campaigns/preview', requireTenant, (req, res) => {
+    const list = resolveAudience(req.tenant.id, req.body?.audience || {});
+    res.json({ recipients: list.length, cost: estimateCampaign(list, req.body?.category === 'UTILITY' ? 'utility' : 'marketing') });
+  });
+  r.get('/tenants/:tenantId/meta-costs', requireTenant, (req, res) => res.json(monthEstimate(req.tenant.id)));
   r.post('/tenants/:tenantId/campaigns', requireTenant, requireOwner, (req, res) => {
     if (!PLANS[req.tenant.plan]?.broadcasts && !req.isSuper) return res.status(403).json({ error: 'Campaigns are not included in this plan' });
     if (!req.body?.template) return res.status(400).json({ error: 'template required' });
@@ -440,7 +468,7 @@ export function adminRouter() {
     if (!template) return res.status(400).json({ error: 'template (approved template name) required' });
     const recipients = Array.isArray(waIds) && waIds.length
       ? waIds.map((w) => String(w).replace(/\D/g, ''))
-      : getDb().prepare('SELECT wa_id FROM customers WHERE tenant_id = ? AND opted_in_marketing = 1').all(req.tenant.id).map((r) => r.wa_id);
+      : getDb().prepare(`SELECT c.wa_id FROM customers c WHERE c.tenant_id = ? AND c.opted_in_marketing = 1 AND ${HAS_CONSENT_SQL}`).all(req.tenant.id).map((r) => r.wa_id);
     const send = createSender(req.tenant);
     let sent = 0;
     const failed = [];

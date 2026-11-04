@@ -31,7 +31,7 @@ test('reactions/stickers get no reply; voice notes get a polite reply; images ma
 
 test('template quick-reply payloads: "Stop offers" opts out, "Shop now" browses', async () => {
   const t = makeTenant();
-  getDb().prepare("INSERT INTO customers (tenant_id, wa_id, opted_in_marketing) VALUES (?, '447700900601', 1)").run(t.id);
+  (await import('../src/consent.js')).recordConsent(t.id, '447700900601', { status: 'granted', source: 'whatsapp_opt_in' });
   let r = await run(t, { kind: 'action', id: 'Stop offers', text: 'Stop offers' });
   assert.match(r[0].text, /won't receive promotional messages/);
   assert.equal(getContact(t.id, '447700900601').opted_in_marketing, 0);

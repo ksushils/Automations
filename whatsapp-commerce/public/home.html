@@ -47,7 +47,7 @@ footer{border-top:1px solid var(--line);padding:28px 0;color:var(--mute);font-si
     <h1>Sell on WhatsApp. Let AI take the orders.</h1>
     <p class="lead">Customers browse your products, ask questions and pay – all inside WhatsApp. Connected live to your shop, with an AI assistant that answers in seconds, day and night.</p>
     <p><a class="btn" href="/signup">Start your <span class="td">14</span>-day free trial</a> <a class="btn ghost" href="#how">See how it works</a></p>
-    <p class="mute" style="font-size:14px">No card needed to start · Cancel anytime · Official WhatsApp Business API</p>
+    <p class="mute" style="font-size:14px">No card needed for the trial · Cancel anytime · Official WhatsApp Business API</p>
   </div>
   <div class="phone" aria-hidden="true"><div class="chat">
     <div class="b in">Hi! Do you have the linen cushion in sage?</div>
@@ -99,15 +99,19 @@ footer{border-top:1px solid var(--line);padding:28px 0;color:var(--mute);font-si
 </div></section>
 
 <section id="pricing"><div class="wrap">
-  <h2>Simple pricing</h2><p class="sub"><span class="td">14</span>-day free trial on every plan. WhatsApp's own message fees are charged by Meta at cost.</p>
+  <h2>Simple pricing</h2><p class="sub"><span class="td">14</span>-day free trial on every plan. Our price covers the software and the AI. WhatsApp's own per-message fees are separate and billed by Meta straight to your Meta account – no markup.</p>
   <div class="grid" id="plans"></div>
+  <div class="card" style="margin-top:16px"><h3>What WhatsApp (Meta) charges you</h3>
+    <p>Since October 2026 Meta charges per message delivered: <b>marketing</b> templates (offers, campaigns), <b>utility</b> templates (order updates) and <b>service replies</b> – including the bot's answers – after the first <b>1,000 free service messages per number each month</b>. Customers messaging you is always free.</p>
+    <p>Rough UK guide: a reply or order update costs about 2p, a marketing message about 5p (check Meta's current rate card). Example: 3,000 bot replies a month ≈ 2,000 paid × 2p ≈ <b>£40 to Meta</b>. Your dashboard shows an estimate before you send.</p></div>
 </div></section>
 
 <section id="faq"><div class="wrap">
   <h2>Questions</h2>
-  <details><summary>Do I need the WhatsApp Business API?</summary><p>For the full chat shop and AI, yes – we connect it for you through Meta's official sign-up in a few minutes. You can also start in "lite" mode: a storefront where orders arrive in your normal WhatsApp.</p></details>
+  <details><summary>Do I need the WhatsApp Business API?</summary><p>For the full chat shop and AI, yes – you connect it through Meta's official sign-up in a few minutes, and you can keep using the WhatsApp Business app on the same number. Going live needs a Meta business account with a payment method (Meta bills its message fees to you directly). During the trial you can try everything in the built-in test chat first. You can also start in "lite" mode: a storefront where orders arrive in your normal WhatsApp.</p></details>
   <details><summary>Does it work with my Shopify or WooCommerce shop?</summary><p>Yes. Products, prices and stock are read live, and orders are created in your shop – so fulfilment, stock and accounting work exactly as today.</p></details>
-  <details><summary>What does WhatsApp itself charge?</summary><p>Meta charges per marketing/utility template message (pennies in the UK). Replies to customers who message you are free. These fees are billed by Meta directly.</p></details>
+  <details><summary>What does WhatsApp itself charge?</summary><p>Meta charges per delivered message: marketing and utility templates, and – since 1 October 2026 – service replies after 1,000 free per number per month. In the UK that's roughly 2p per reply/update and 5p per marketing message. Meta bills you directly; we never mark it up, and the dashboard estimates your Meta spend before you send a campaign.</p></details>
+  <details><summary>Is it really an AI?</summary><p>Yes – and your customers are told so in the first reply, with an easy way to reach a person. It's built for selling to and supporting <i>your own</i> customers, as WhatsApp's rules require.</p></details>
   <details><summary>Can the AI make mistakes?</summary><p>It only uses your real catalogue and the policies you give it, and hands over to your team when it's unsure or the customer asks for a person. You can review every chat in the inbox.</p></details>
   <details><summary>Can I cancel anytime?</summary><p>Yes – manage or cancel your subscription from the Billing page. No contracts.</p></details>
   <details><summary>Is my data safe?</summary><p>Credentials are encrypted, webhooks are verified, and we act as your data processor under a UK GDPR data processing agreement.</p></details>
@@ -129,7 +133,7 @@ fetch('/api/plans').then((r) => r.json()).then((d) => {
   };
   const fmt = (n) => (n == null ? 'Unlimited' : n.toLocaleString());
   document.getElementById('plans').innerHTML = Object.entries(d.plans).map(([k, p]) => `<div class="card plan ${k === 'growth' ? 'pop' : ''}">${k === 'growth' ? '<span class="tag">Most popular</span>' : ''}<h3>${p.label}</h3><div class="price">£${p.priceGbp}<span style="font-size:15px;font-weight:400;color:var(--mute)">/month</span></div>
-    <ul>${(F[k] || []).map((x) => `<li>${x}</li>`).join('')}<li>${fmt(p.monthlyConversationsIn)} customer messages / month</li><li>${fmt(p.aiCalls)} AI replies / month</li></ul><a class="btn ${k === 'growth' ? '' : 'ghost'}" href="/signup?plan=${k}" style="width:100%;text-align:center">Start free trial</a></div>`).join('');
+    <ul>${(F[k] || []).map((x) => `<li>${x}</li>`).join('')}<li>${p.monthlyConversationsIn == null ? 'No limit on' : fmt(p.monthlyConversationsIn)} incoming customer messages / month</li><li>${fmt(p.aiCalls)} AI replies / month</li><li class="mute">+ Meta's per-message fees, billed by Meta</li></ul><a class="btn ${k === 'growth' ? '' : 'ghost'}" href="/signup?plan=${k}" style="width:100%;text-align:center">Start free trial</a></div>`).join('');
 }).catch(() => {});
 </script>
 </body>

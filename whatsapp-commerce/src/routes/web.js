@@ -9,6 +9,7 @@ import { subtotal, money } from '../bot/cart.js';
 import { createSender } from '../whatsapp/cloudApi.js';
 import { toWaId } from './storeWebhooks.js';
 import { updateContact } from '../bot/flows.js';
+import { recordConsent, defaultWording } from '../consent.js';
 
 // ---------- tiny in-memory rate limiter ----------
 export function rateLimit({ windowMs = 60000, max = 30, key = (req) => req.ip } = {}) {
@@ -78,7 +79,8 @@ export function webRouter() {
       if (S.ordering.slots?.enabled && slots.length && !slot) return res.status(400).json({ error: 'Please choose a time slot' });
 
       const customer = upsertCustomer(t.id, waId, String(b.name).slice(0, 120));
-      updateCustomer(t.id, waId, { name: String(b.name).slice(0, 120), ...(b.email ? { email: String(b.email).slice(0, 200) } : {}), ...(fulfilment === 'delivery' ? { address: String(b.address).slice(0, 500) } : {}), ...(b.optIn ? { opted_in_marketing: 1 } : {}) });
+      updateCustomer(t.id, waId, { name: String(b.name).slice(0, 120), ...(b.email ? { email: String(b.email).slice(0, 200) } : {}), ...(fulfilment === 'delivery' ? { address: String(b.address).slice(0, 500) } : {}) });
+      if (b.optIn) recordConsent(t.id, waId, { status: 'granted', source: 'web_checkout', wording: S.notifications?.consentWording || defaultWording(S.business.name), evidence: `ip ${req.ip}; ua ${String(req.get('user-agent') || '').slice(0, 120)}`, actor: 'customer' });
       updateContact(t.id, waId, { addTags: ['web-order'] });
       customer.name = String(b.name).slice(0, 120);
       customer.email = b.email || customer.email;

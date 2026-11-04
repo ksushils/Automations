@@ -18,7 +18,7 @@
 |---|---|
 | Shopify / WooCommerce shops | Their existing catalogue sellable inside WhatsApp, with AI answering product and policy questions, campaigns and abandoned-checkout recovery |
 | Small sellers with no website | A built-in catalogue, a storefront / link-in-bio page, and orders by WhatsApp |
-| Any business wanting an AI assistant on WhatsApp | A knowledge-base chatbot (upload documents or import a website) with hand-off to humans |
+| Businesses that want AI sales & customer support for **their own customers** on WhatsApp (Meta's rules since 15 Jan 2026 forbid general-purpose AI assistants) | A knowledge-base chatbot (upload documents or import a website) with hand-off to humans |
 
 **Positioning against competitors** (full comparison in `docs/COMPETITOR_REVIEW.md`):
 - **Take.App** ($29–50/mo): a separate mini-shop with weak AI. We use the shop's existing catalogue and add an AI agent.

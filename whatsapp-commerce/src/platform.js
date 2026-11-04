@@ -136,19 +136,50 @@ async function graph(method, path, { token, body, query } = {}) {
  * Finish Embedded Signup: exchange the code for a business token, subscribe our app to the client's WABA,
  * register the number for Cloud API and store everything on the tenant.
  */
-export async function completeEmbeddedSignup(tenantId, { code, phoneNumberId, wabaId }) {
+/**
+ * Embedded Signup v4+ (v2/v3 were retired on 15 Oct 2026).
+ * The business may finish with a verified number, an unverified number or no number at all, so a missing
+ * phone number is a valid "connected – number pending" state. Coexistence (number stays on the WhatsApp
+ * Business app) must not call /register.
+ */
+export async function completeEmbeddedSignup(tenantId, { code, phoneNumberId, wabaId, businessId, coexistence = false, event } = {}) {
   if (!embeddedSignupConfigured()) throw new Error('Embedded Signup is not configured on this server');
-  if (!code || !phoneNumberId || !wabaId) throw new Error('code, phoneNumberId and wabaId are required');
+  if (!code || !wabaId) throw new Error('code and wabaId are required');
   const { access_token: token } = await graph('GET', 'oauth/access_token', { query: { client_id: config.metaAppId, client_secret: config.metaAppSecret, code } });
   await graph('POST', `${wabaId}/subscribed_apps`, { token });
-  const pin = String(Math.floor(100000 + Math.random() * 900000));
-  await graph('POST', `${phoneNumberId}/register`, { token, body: { messaging_product: 'whatsapp', pin } }).catch((e) => {
-    if (!/already registered/i.test(e.message)) throw e;
+  updateTenantSettings(tenantId, {
+    whatsapp: { wabaId: String(wabaId), businessId: businessId ? String(businessId) : '', accessToken: token, appSecret: config.metaAppSecret, connectedVia: coexistence ? 'coexistence' : 'embedded_signup', signupEvent: event || '', numberStatus: 'pending' },
   });
+  return activateNumber(tenantId, { phoneNumberId, coexistence });
+}
+
+/** Pick / register the WABA's phone number. Safe to call again ("Refresh") after the business adds or verifies one. */
+export async function activateNumber(tenantId, { phoneNumberId, coexistence } = {}) {
+  const t = getTenant(tenantId);
+  const W = t.settings.whatsapp || {};
+  const token = W.accessToken;
+  coexistence ??= W.connectedVia === 'coexistence';
+  if (!token || !W.wabaId) throw new Error('Connect WhatsApp first');
+  if (!phoneNumberId) {
+    const list = await graph('GET', `${W.wabaId}/phone_numbers`, { token, query: { fields: 'id,display_phone_number,verified_name,code_verification_status,status' } }).catch(() => ({ data: [] }));
+    phoneNumberId = (list.data || []).find((n) => n.code_verification_status === 'VERIFIED')?.id || list.data?.[0]?.id;
+  }
+  if (!phoneNumberId) {
+    return { tenant: getTenant(tenantId), numberStatus: 'pending', message: 'Connected – add or verify a phone number in WhatsApp Manager, then press “Refresh number”.' };
+  }
+  let pin = W.twoStepPin;
+  if (!coexistence) {
+    pin ||= String(Math.floor(100000 + Math.random() * 900000));
+    const reg = await graph('POST', `${phoneNumberId}/register`, { token, body: { messaging_product: 'whatsapp', pin } }).then(() => 'ok', (e) => (/already registered/i.test(e.message) ? 'ok' : e.message));
+    if (reg !== 'ok') {
+      updateTenantSettings(tenantId, { whatsapp: { phoneNumberId: String(phoneNumberId), numberStatus: 'unverified', twoStepPin: pin } });
+      return { tenant: getTenant(tenantId), numberStatus: 'unverified', message: `Number found but not ready yet (${reg}). Verify it in WhatsApp Manager, then press “Refresh number”.` };
+    }
+  }
   const info = await graph('GET', phoneNumberId, { token, query: { fields: 'display_phone_number,verified_name' } }).catch(() => ({}));
-  const t = updateTenantSettings(tenantId, {
-    whatsapp: { phoneNumberId: String(phoneNumberId), wabaId: String(wabaId), accessToken: token, appSecret: config.metaAppSecret, twoStepPin: pin, connectedVia: 'embedded_signup' },
+  const tenant = updateTenantSettings(tenantId, {
+    whatsapp: { phoneNumberId: String(phoneNumberId), numberStatus: 'active', ...(pin ? { twoStepPin: pin } : {}) },
     ...(info.display_phone_number ? { business: { whatsappNumber: String(info.display_phone_number).replace(/\D/g, '') } } : {}),
   });
-  return { tenant: t, displayPhoneNumber: info.display_phone_number || null, verifiedName: info.verified_name || null };
+  return { tenant, numberStatus: 'active', displayPhoneNumber: info.display_phone_number || null, verifiedName: info.verified_name || null };
 }

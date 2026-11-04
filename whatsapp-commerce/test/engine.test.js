@@ -105,5 +105,12 @@ test('remove line and opt-in/out', async () => {
   let r = await say(t, wa, 'remove 1');
   assert.match(r[0].text, /cart is empty/);
   r = await say(t, wa, { action: 'subscribe' });
+  assert.deepEqual(ids(r), ['optin:yes', 'optin:no']); // asks with the exact wording first
+  r = await say(t, wa, { action: 'optin:yes' });
   assert.match(r[0].text, /subscribed/);
+  const { latestConsent } = await import('../src/consent.js');
+  assert.equal(latestConsent(t.id, wa).source, 'whatsapp_opt_in');
+  assert.match(latestConsent(t.id, wa).wording, /Yes, send me offers and news from Test Shop/);
+  r = await say(t, wa, 'stop');
+  assert.equal(latestConsent(t.id, wa).status, 'withdrawn');
 });
