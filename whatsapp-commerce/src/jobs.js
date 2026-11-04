@@ -7,6 +7,7 @@ import { dueJobs, markJobDone } from './bot/flows.js';
 import { runCampaign } from './campaigns.js';
 import { resumeFlow } from './bot/engine.js';
 import { enqueue } from './whatsapp/webhook.js';
+import { runAbandonedCheckouts } from './routes/storeWebhooks.js';
 
 /** Scheduled work: flow delays and campaigns. */
 export async function runScheduled() {
@@ -57,6 +58,7 @@ export function startJobs() {
   const timer = setInterval(() => {
     runAbandonedCartReminders().catch((e) => console.error('[jobs]', e));
     runPaymentReminders().catch((e) => console.error('[jobs]', e));
+    runAbandonedCheckouts().catch((e) => console.error('[jobs]', e));
   }, 5 * 60000);
   const minutely = setInterval(() => runScheduled().catch((e) => console.error('[jobs]', e)), 30000);
   minutely.unref();

@@ -49,8 +49,8 @@ export function defaultSettings(name) {
     },
     store: {
       type: 'manual', // manual | shopify | woocommerce | custom
-      shopify: { domain: '', adminToken: '' },
-      woocommerce: { url: '', consumerKey: '', consumerSecret: '' },
+      shopify: { domain: '', adminToken: '', webhookSecret: '' },
+      woocommerce: { url: '', consumerKey: '', consumerSecret: '', webhookSecret: '' },
       custom: { baseUrl: '', apiKey: '' },
       manual: {
         categories: [{ id: 'general', title: 'All products' }],
@@ -84,6 +84,13 @@ export function defaultSettings(name) {
       abandonedCartMinutes: 120, // 0 disables reminders
       // Win-back: approved template sent to opted-in customers who haven't ordered for N days
       winBack: { enabled: false, template: '', language: 'en_GB', afterDays: 30 },
+      // WhatsApp templates for orders placed on the website (Shopify / WooCommerce), not via WhatsApp
+      storeTemplates: {
+        orderConfirmation: { enabled: false, template: 'order_confirmation', language: 'en_GB' },
+        shipping: { enabled: false, template: 'shipping_update', language: 'en_GB' },
+        abandonedCheckout: { enabled: false, template: 'abandoned_cart', language: 'en_GB', afterMinutes: 60, requireMarketingConsent: true },
+      },
+      defaultCountryCode: '44', // used to turn local numbers (07…) into WhatsApp numbers
     },
     storeWebhookSecret: randomToken(18),
   };

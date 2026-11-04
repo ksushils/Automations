@@ -184,6 +184,8 @@ export const SECRET_FIELDS = [
   'store.woocommerce.consumerKey',
   'store.woocommerce.consumerSecret',
   'store.custom.apiKey',
+  'store.shopify.webhookSecret',
+  'store.woocommerce.webhookSecret',
   'payments.stripe.secretKey',
   'payments.stripe.webhookSecret',
 ];
