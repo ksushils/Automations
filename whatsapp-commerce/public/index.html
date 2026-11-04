@@ -116,7 +116,7 @@ async function boot() {
 }
 $('#logout').onclick = () => { store.set('wc_key', null); S.key = null; S.tenant = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team']];
+const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team']];
 const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders', 'contacts']);
 function render() {
   const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [])];
@@ -125,7 +125,7 @@ function render() {
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
-  ({ tenants, overview, analytics, team, ai, automations, contacts, campaigns, templates, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ tenants, overview, analytics, team, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin ----------
@@ -496,6 +496,46 @@ async function templates() {
   $('#app').querySelectorAll('[data-lib]').forEach((b) => (b.onclick = () => submit(r.library[+b.dataset.lib])));
   $('#tgo').onclick = () => submit({ name: $('#tn').value.trim(), category: $('#tc').value, language: $('#tl').value, header: $('#th').value, body: $('#tb').value, footer: $('#tf').value, examples: $('#tx').value.split(',').map((x) => x.trim()), buttons: $('#tq').value.split(',').map((x) => x.trim()).filter(Boolean).map((text) => ({ text })) });
   $('#app').querySelectorAll('[data-deltpl]').forEach((b) => (b.onclick = async () => { if (confirm('Delete template ' + b.dataset.deltpl + '?')) { await api(T('/templates/' + b.dataset.deltpl), { method: 'DELETE' }).catch((e) => toast(e.message)); templates(); } }));
+}
+
+// ---------- grow: links, QR, widget, storefront ----------
+function loadQr() {
+  if (window.QRCode) return Promise.resolve();
+  return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+}
+async function grow() {
+  const t = (S.tenant = (await api(T(''))).tenant);
+  const s = t.settings;
+  const num = String(s.business.whatsappNumber || '').replace(/\D/g, '');
+  const origin = location.origin;
+  const snippet = `<script src="${origin}/widget/${t.id}.js" async><\/script>`;
+  $('#app').innerHTML = `${num ? '' : '<div class="card"><p class="pill warn">Set your public WhatsApp number in Settings → Business first.</p></div>'}
+    <div class="card"><h2>WhatsApp link & QR code</h2><p class="mute">Put the link in your Instagram bio, Google Business profile, emails and ads. Print the QR on flyers, packaging and shop counters.</p>
+      <div class="row"><div><label>Pre-filled message</label><input id="gmsg" value="Hi! I'd like to order"></div><div><label>Link</label><input id="glink" readonly></div></div>
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:12px"><div id="gqr" style="background:#fff;padding:10px;border-radius:10px;width:200px;height:200px"></div>
+      <div><button class="btn ghost" id="gcopy">Copy link</button> <button class="btn ghost" id="gdl">Download QR</button></div></div></div>
+    <div class="card"><h2>Storefront / link-in-bio page</h2><p><a href="${esc(t.urls.storefront)}" target="_blank" rel="noopener">${esc(t.urls.storefront)}</a></p>
+      <div class="row"><div><label>Ordering on the page</label><select id="smode">${[['auto', 'Automatic (WhatsApp chat if connected, otherwise web basket)'], ['chat', 'Buttons open WhatsApp chat'], ['cart', 'Web basket + checkout (works without WhatsApp API)']].map(([k, l]) => `<option value="${k}" ${s.storefront?.mode === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label>Brand colour</label><input id="scolor" type="color" value="${esc(s.storefront?.brandColor || '#128c4a')}"></div></div></div>
+    <div class="card"><h2>Website chat button</h2><p class="mute">Paste this before &lt;/body&gt; on any website (Shopify: Online Store → Themes → Edit code → theme.liquid; WordPress: a header/footer plugin).</p>
+      <code style="display:block;padding:10px">${esc(snippet)}</code>
+      <div class="row"><div><label>Button colour</label><input id="wcolor" type="color" value="${esc(s.widget?.color || '#25d366')}"></div><div><label>Position</label><select id="wpos"><option value="right">Bottom right</option><option value="left" ${s.widget?.position === 'left' ? 'selected' : ''}>Bottom left</option></select></div>
+      <div><label>Greeting</label><input id="wgreet" value="${esc(s.widget?.greeting || '')}" placeholder="Hi 👋 Need help or want to order?"></div><div><label>Pre-filled message</label><input id="wpre" value="${esc(s.widget?.prefill || 'Hi!')}"></div></div>
+      <p><button class="btn" id="gsave">Save</button></p></div>`;
+  const update = async () => {
+    const link = `https://wa.me/${num}?text=${encodeURIComponent($('#gmsg').value)}`;
+    $('#glink').value = link;
+    try { await loadQr(); $('#gqr').innerHTML = ''; new QRCode($('#gqr'), { text: link, width: 180, height: 180, correctLevel: QRCode.CorrectLevel.M }); } catch { $('#gqr').textContent = 'QR library could not load'; }
+  };
+  $('#gmsg').oninput = update; update();
+  $('#gcopy').onclick = () => { navigator.clipboard?.writeText($('#glink').value); toast('Link copied'); };
+  $('#gdl').onclick = () => { const c = $('#gqr canvas'); if (!c) return; const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = 'whatsapp-qr.png'; a.click(); };
+  $('#gsave').onclick = async () => {
+    try {
+      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
+      toast('Saved');
+    } catch (e) { toast(e.message); }
+  };
 }
 
 // ---------- analytics ----------

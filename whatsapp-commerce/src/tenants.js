@@ -74,6 +74,8 @@ export function defaultSettings(name) {
       paymentReminderMinutes: 60, // remind unpaid online / bank-transfer orders (0 = off)
       lowStockAlert: 3, // built-in catalogue: alert staff when stock falls to this level
     },
+    widget: { color: '#25d366', position: 'right', greeting: '', prefill: 'Hi!', label: 'Chat with us' },
+    storefront: { mode: 'auto', brandColor: '#128c4a' }, // mode: auto | chat (buttons open WhatsApp) | cart (web basket + checkout)
     payments: {
       // Stripe Checkout for the built-in catalogue / custom stores (Shopify & WooCommerce use their own checkout)
       stripe: { secretKey: '', webhookSecret: '' },

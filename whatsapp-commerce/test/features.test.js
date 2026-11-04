@@ -186,7 +186,7 @@ test('stripe checkout link for built-in catalogue + webhook marks paid, receipt 
 }));
 
 test('storefront page lists products with WhatsApp order links', () => withServer(async (base) => {
-  const t = makeTenant({ business: { whatsappNumber: '+44 7700 900123', tagline: 'Organic goodies' } });
+  const t = makeTenant({ business: { whatsappNumber: '+44 7700 900123', tagline: 'Organic goodies' }, storefront: { mode: 'chat' } });
   const html = await (await fetch(`${base}/s/${t.id}`)).text();
   assert.match(html, /Organic goodies/);
   assert.match(html, /White Mug/);

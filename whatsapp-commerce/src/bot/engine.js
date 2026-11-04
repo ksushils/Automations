@@ -4,7 +4,7 @@ import { createSessionToken } from '../session.js';
 import { withinLimit, bumpUsage } from '../tenants.js';
 import { getConversation, saveConversation, upsertCustomer, updateCustomer } from './state.js';
 import { addToCart, removeFromCart, subtotal, money, formatCart } from './cart.js';
-import { placeOrder, listOrders, paymentLabel, STATUS_TEXT } from './orders.js';
+import { placeOrder, listOrders, paymentLabel, STATUS_TEXT, findOrderByReceipt, receiptUrl } from './orders.js';
 import { quote, validatePromo, findPromo, upcomingSlots } from './pricing.js';
 import { findTriggeredFlow, startFlow, handleFlowButton, handleFlowAnswer, runFlow, getFlow, schedule } from './flows.js';
 import { getDb } from '../db.js';
@@ -424,6 +424,17 @@ async function handleText(ctx, raw) {
     if (O.askNote !== false && !COMMANDS.has(t) && !GREETING.test(t) && text.split(/\s+/).length >= 2 && !/^(yes|no|ok|confirm|place order)\b/.test(t)) {
       co.note = text.slice(0, 300);
       return showSummary(ctx, '📝 Note added.');
+    }
+  }
+
+  // Customer confirming a web order on WhatsApp: "… [order:RECEIPT_TOKEN]"
+  const webOrder = text.match(/\[order:([A-Za-z0-9_-]{8,64})\]/);
+  if (webOrder) {
+    const o = findOrderByReceipt(webOrder[1]);
+    if (o && o.tenant_id === ctx.tenant.id && o.wa_id === ctx.conv.waId) {
+      ctx.conv.data.greeted = true;
+      const sym = ctx.S.business.currencySymbol || '£';
+      return ctx.reply({ type: 'buttons', text: `✅ Thanks ${ctx.customer.name?.split(' ')[0] || ''}! We've got your order *${o.store_order_name}* (${money(o.subtotal, sym)}).${o.checkout_url && o.payment_status !== 'paid' ? `\n💳 Pay here: ${o.checkout_url}` : ''}\n🧾 ${receiptUrl(o)}\n\nWe'll message you here with updates.`, buttons: [{ id: 'status', title: '📦 Order status' }, { id: 'browse', title: '🛍️ Keep shopping' }] });
     }
   }
 

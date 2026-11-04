@@ -10,11 +10,19 @@ import { getDb } from '../db.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-const page = (title, body, { description = '', image = '' } = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+const page = (title, body, { description = '', image = '', brand = '' } = {}) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title><meta name="description" content="${esc(description)}"><meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}">${image ? `<meta property="og:image" content="${esc(image)}">` : ''}
 <style>
 :root{--bg:#f5f7f6;--card:#fff;--ink:#17201b;--mute:#5d6b63;--line:#dfe5e1;--brand:#128c4a}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1512;--card:#17201b;--ink:#e7efe9;--mute:#9aaba1;--line:#2a362f;--brand:#25d366}}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1512;--card:#17201b;--ink:#e7efe9;--mute:#9aaba1;--line:#2a362f;--brand:#1fa055}}
+${/^#[0-9a-f]{3,8}$/i.test(brand) ? `:root{--brand:${brand}}` : ''}
+.btn.ghost{background:none;color:var(--brand);border:1px solid var(--line)}button.btn{border:0;cursor:pointer;font:inherit}
+.var{width:100%;margin:0 0 8px;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+#cartbar{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:5;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100% - 32px)}
+#co label{display:block;font-size:13px;color:var(--mute);margin:10px 0 0}#co input,#co textarea,#co select{display:block;width:100%;padding:9px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;margin-top:3px}
+#co .chk input,#co .seg input{display:inline;width:auto}.seg{display:flex;gap:16px;margin-top:10px}.seg label{margin:0;color:var(--ink)}
+.line{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}.line button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;width:26px;cursor:pointer}
+.tot{margin:12px 0;line-height:1.7}.err{color:#c0392b}
 *{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
 main{max-width:960px;margin:0 auto;padding:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
 h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 8px}.mute{color:var(--mute)}
@@ -38,24 +46,99 @@ async function cached(key, ms, fn) {
   return value;
 }
 
+export const storefrontMode = (t) => {
+  const m = t.settings.storefront?.mode;
+  if (m === 'chat' || m === 'cart') return m;
+  return t.settings.whatsapp?.phoneNumberId && t.settings.whatsapp?.accessToken ? 'chat' : 'cart';
+};
+
 export async function renderStorefront(tenant, { category, q } = {}) {
   const S = tenant.settings;
   const sym = S.business.currencySymbol || '£';
   const store = getStore(tenant);
   const number = S.business.whatsappNumber;
+  const mode = storefrontMode(tenant);
   const [cats, products] = await Promise.all([
     cached(`${tenant.id}:cats`, 300000, () => store.listCategories().catch(() => [])),
     cached(`${tenant.id}:p:${category || ''}:${q || ''}`, 300000, () => (category ? store.productsInCategory(category, { limit: 50 }) : store.searchProducts(q || '', { limit: 50 })).catch(() => [])),
   ]);
-  const grid = products.map((p) => `<div class="card p">${p.image ? `<img src="${esc(p.image)}" alt="${esc(p.title)}" loading="lazy">` : ''}<h3>${esc(p.title)}</h3>
-    <div>${p.compareAtPrice ? `<s>${money(p.compareAtPrice, sym)}</s> ` : ''}<b>${money(p.price, sym)}</b>${p.available ? '' : ' <span class="mute">· sold out</span>'}</div>
-    <p class="mute" style="font-size:13px">${esc((p.description || '').slice(0, 90))}</p>
-    ${number && p.available ? `<a class="btn" href="${esc(waLink(number, `Hi! I'd like to order ${p.title} [ref:${p.id}]`))}">Order on WhatsApp</a>` : ''}</div>`).join('');
+  const grid = products.map((p) => {
+    const vars = p.variants.filter((v) => v.available);
+    const action = !p.available ? '<span class="mute">Sold out</span>'
+      : mode === 'cart'
+        ? `${vars.length > 1 ? `<select class="var" aria-label="Option">${vars.map((v) => `<option value="${esc(v.id)}" data-price="${v.price}">${esc(v.title)} – ${money(v.price, sym)}</option>`).join('')}</select>` : ''}<button class="btn add" data-id="${esc(p.id)}" data-vid="${esc(vars[0]?.id)}" data-title="${esc(p.title)}" data-price="${vars[0]?.price ?? p.price}">Add to basket</button>`
+        : number ? `<a class="btn" href="${esc(waLink(number, `Hi! I'd like to order ${p.title} [ref:${p.id}]`))}">Order on WhatsApp</a>` : '';
+    return `<div class="card p">${p.image ? `<img src="${esc(p.image)}" alt="${esc(p.title)}" loading="lazy">` : ''}<h3>${esc(p.title)}</h3>
+    <div>${p.compareAtPrice ? `<s>${money(p.compareAtPrice, sym)}</s> ` : ''}<b>${money(p.price, sym)}</b></div>
+    <p class="mute" style="font-size:13px">${esc((p.description || '').slice(0, 90))}</p>${action}</div>`;
+  }).join('');
   const chips = cats.length > 1 ? `<div class="chips"><a href="?" class="${!category ? 'on' : ''}">All</a>${cats.map((c) => `<a href="?category=${encodeURIComponent(c.id)}" class="${category === c.id ? 'on' : ''}">${esc(c.title)}</a>`).join('')}</div>` : '';
-  return page(S.business.name, `<div class="card"><header>${S.business.logoUrl ? `<img src="${esc(S.business.logoUrl)}" alt="">` : ''}<div><h1>${esc(S.business.name)}</h1><div class="mute">${esc(S.business.tagline || 'Order in a few taps on WhatsApp')}</div></div></header>
-    ${number ? `<p><a class="btn" href="${esc(waLink(number, 'Hi'))}">💬 Chat & order on WhatsApp</a></p>` : '<p class="mute">(Set the business WhatsApp number in Settings to enable ordering buttons.)</p>'}
+  const O = S.ordering || {};
+  const cfg = { tenant: tenant.id, sym, fulfilment: O.fulfilment || ['delivery'], payments: (O.paymentMethods || ['cod']).filter((m) => m !== 'payment_link' || store.type !== 'manual' || S.payments?.stripe?.secretKey || O.paymentLinkUrl), slots: !!O.slots?.enabled, promos: (O.promoCodes || []).length > 0, pickupAddress: O.pickupAddress || '' };
+  const cartUi = mode !== 'cart' ? '' : `
+  <button id="cartbar" class="btn" hidden>🛒 <span id="cartn">0</span> · <span id="cartt"></span> — Checkout</button>
+  <div id="co" class="card" hidden>
+    <h2>Your basket</h2><div id="lines"></div>
+    <form id="cof">
+      <label>Name<input name="name" required autocomplete="name"></label>
+      <label>WhatsApp / mobile number<input name="phone" required inputmode="tel" autocomplete="tel" placeholder="07700 900123"></label>
+      ${cfg.fulfilment.length > 1 ? `<div class="seg">${cfg.fulfilment.map((f, i) => `<label><input type="radio" name="fulfilment" value="${f}" ${i ? '' : 'checked'}> ${f === 'pickup' ? '🏬 Collection' : '🚚 Delivery'}</label>`).join('')}</div>` : `<input type="hidden" name="fulfilment" value="${cfg.fulfilment[0]}">`}
+      <label id="addrw">Delivery address (incl. postcode)<textarea name="address" autocomplete="street-address"></textarea></label>
+      ${cfg.slots ? '<label>Time<select name="slot" id="slot"></select></label>' : ''}
+      ${cfg.promos ? '<label>Promo code<input name="promoCode" autocapitalize="characters"></label>' : ''}
+      <label>Note (optional)<input name="note" placeholder="Gift message, instructions…"></label>
+      <label>Payment<select name="paymentMethod">${cfg.payments.map((m) => `<option value="${m}">${{ payment_link: '💳 Pay online by card', cod: '💵 Cash on delivery / collection', bank_transfer: '🏦 Bank transfer' }[m] || m}</option>`).join('')}</select></label>
+      <label class="chk"><input type="checkbox" name="optIn"> Send me offers on WhatsApp</label>
+      <div id="tot" class="tot"></div><p id="err" class="err"></p>
+      <button class="btn" type="submit" style="width:100%">Place order</button>
+    </form>
+  </div>
+  <div id="done" class="card" hidden></div>
+  <script>
+  (function(){
+    var C=${JSON.stringify(cfg).replace(/</g, '\\u003c')}, K='wa-cart-'+C.tenant, cart=[];
+    try{cart=JSON.parse(localStorage.getItem(K)||'[]')}catch(e){}
+    var $=function(s){return document.querySelector(s)}, m=function(n){return C.sym+Number(n).toFixed(2)};
+    function save(){try{localStorage.setItem(K,JSON.stringify(cart))}catch(e){} draw()}
+    function draw(){
+      var n=cart.reduce(function(a,i){return a+i.quantity},0), t=cart.reduce(function(a,i){return a+i.price*i.quantity},0);
+      $('#cartbar').hidden=!n; $('#cartn').textContent=n; $('#cartt').textContent=m(t);
+      $('#lines').innerHTML=cart.map(function(i,k){return '<div class="line"><span>'+esc(i.title)+'</span><span><button type="button" data-k="'+k+'" data-d="-1">−</button> '+i.quantity+' <button type="button" data-k="'+k+'" data-d="1">+</button> '+m(i.price*i.quantity)+'</span></div>'}).join('')||'<p class="mute">Empty</p>';
+    }
+    function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+    document.querySelectorAll('.add').forEach(function(b){b.onclick=function(){
+      var sel=b.parentNode.querySelector('.var'), vid=sel?sel.value:b.dataset.vid, opt=sel?sel.selectedOptions[0]:null;
+      var title=b.dataset.title+(sel&&sel.options.length>1?' ('+opt.textContent.split(' – ')[0]+')':''), price=Number(opt?opt.dataset.price:b.dataset.price);
+      var ex=cart.find(function(i){return i.productId===b.dataset.id&&i.variantId===vid});
+      if(ex)ex.quantity++;else cart.push({productId:b.dataset.id,variantId:vid,title:title,price:price,quantity:1});
+      save(); b.textContent='✓ Added'; setTimeout(function(){b.textContent='Add to basket'},1200);
+    }});
+    $('#lines').onclick=function(e){var k=e.target.dataset.k;if(k===undefined)return;cart[k].quantity+=Number(e.target.dataset.d);if(cart[k].quantity<1)cart.splice(k,1);save();requote()};
+    $('#cartbar').onclick=function(){$('#co').hidden=false;$('#co').scrollIntoView({behavior:'smooth'});requote()};
+    var f=$('#cof'), qt;
+    function body(){var d=Object.fromEntries(new FormData(f));d.optIn=!!f.optIn&&f.optIn.checked;d.items=cart.map(function(i){return{productId:i.productId,variantId:i.variantId,quantity:i.quantity}});return d}
+    function fx(){var fl=(f.querySelector('[name=fulfilment]:checked')||f.fulfilment).value;$('#addrw').hidden=fl!=='delivery'}
+    function requote(){clearTimeout(qt);qt=setTimeout(function(){fx();if(!cart.length)return;
+      fetch('/s/'+C.tenant+'/quote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body())}).then(function(r){return r.json()}).then(function(q){
+        if(q.error){$('#tot').textContent=q.error;return}
+        $('#tot').innerHTML='Subtotal '+m(q.subtotal)+(q.discount?'<br>Discount −'+m(q.discount):'')+(q.deliveryFee||q.zone?'<br>Delivery '+(q.deliveryFee?m(q.deliveryFee):'FREE'):'')+'<br><b>Total '+m(q.total)+'</b>'+(q.error==='no_zone'?'<br>⚠️ We don\\'t deliver to that postcode yet':'')+(q.promoError?'<br>⚠️ '+esc(q.promoError):'');
+        var s=$('#slot');if(s&&!s.options.length)s.innerHTML=(q.slots||[]).map(function(x){return '<option value="'+x.id+'">'+x.label+'</option>'}).join('');
+      })},300)}
+    f.addEventListener('input',requote);f.addEventListener('change',requote);
+    f.onsubmit=function(e){e.preventDefault();$('#err').textContent='';var btn=f.querySelector('[type=submit]');btn.disabled=true;
+      fetch('/s/'+C.tenant+'/order',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body())}).then(function(r){return r.json()}).then(function(r){
+        btn.disabled=false;if(!r.ok){$('#err').textContent=r.error||'Something went wrong';return}
+        cart=[];save();$('#co').hidden=true;var d=$('#done');d.hidden=false;
+        d.innerHTML='<h2>✅ Order '+esc(r.order)+' placed!</h2><p>Total '+m(r.total)+'</p>'+(r.payUrl?'<p><a class="btn" href="'+r.payUrl+'">💳 Pay now</a></p>':'')+(r.whatsappUrl?'<p><a class="btn" href="'+r.whatsappUrl+'">💬 Send order on WhatsApp</a></p><p class="mute">Tap to confirm with us on WhatsApp and get updates there.</p>':'')+'<p><a href="'+r.receiptUrl+'">View receipt</a></p>';
+        d.scrollIntoView({behavior:'smooth'});
+      }).catch(function(){btn.disabled=false;$('#err').textContent='Network error – please try again'})};
+    draw();fx();
+  })();
+  </script>`;
+  return page(S.business.name, `<div class="card"><header>${S.business.logoUrl ? `<img src="${esc(S.business.logoUrl)}" alt="">` : ''}<div><h1>${esc(S.business.name)}</h1><div class="mute">${esc(S.business.tagline || (mode === 'cart' ? 'Order online in a few taps' : 'Order in a few taps on WhatsApp'))}</div></div></header>
+    ${number ? `<p><a class="btn ${mode === 'cart' ? 'ghost' : ''}" href="${esc(waLink(number, 'Hi'))}">💬 Chat with us on WhatsApp</a></p>` : mode === 'chat' ? '<p class="mute">(Set the business WhatsApp number in Settings to enable ordering buttons.)</p>' : ''}
     <form><input name="q" value="${esc(q || '')}" placeholder="Search products…" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)"></form>${chips}</div>
-    <div class="grid">${grid || '<p class="mute">No products found.</p>'}</div>`, { description: S.business.tagline || `Order from ${S.business.name} on WhatsApp`, image: products[0]?.image || S.business.logoUrl });
+    <div class="grid">${grid || '<p class="mute">No products found.</p>'}</div>${cartUi}`, { description: S.business.tagline || `Order from ${S.business.name}`, image: products[0]?.image || S.business.logoUrl, brand: S.storefront?.brandColor });
 }
 
 export function renderReceipt(tenant, o, { justPaid } = {}) {

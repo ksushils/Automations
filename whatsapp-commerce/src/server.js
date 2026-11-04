@@ -10,6 +10,7 @@ import { adminRouter } from './routes/admin.js';
 import { storeWebhookRouter } from './routes/storeWebhooks.js';
 import { startJobs } from './jobs.js';
 import { publicRouter, customDomainMiddleware } from './routes/public.js';
+import { webRouter } from './routes/web.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,6 +24,7 @@ export function createApp() {
   app.get('/health', (req, res) => res.json({ ok: true }));
   app.use(customDomainMiddleware());
   app.use(publicRouter());
+  app.use(webRouter());
   app.use('/webhooks/whatsapp', whatsappRouter());
   app.use('/webhooks/store', storeWebhookRouter());
   app.use('/tools', toolsRouter());
