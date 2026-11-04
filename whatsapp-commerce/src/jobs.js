@@ -75,7 +75,7 @@ export function startJobs() {
   const daily = setInterval(() => {
     runWinBack().catch((e) => console.error('[jobs]', e));
     try { const n = enforceTrials(); if (n) console.log(`[billing] paused ${n} expired trial(s)`); } catch (e) { console.error('[jobs]', e); }
-    try { const n = applyRetention(); if (n) console.log(`[retention] deleted ${n} old message(s)`); } catch (e) { console.error('[jobs]', e); }
+    try { const r = applyRetention(); if (Object.values(r).some(Boolean)) console.log('[retention]', JSON.stringify(r)); } catch (e) { console.error('[jobs]', e); }
   }, 3600000);
   timer.unref();
   daily.unref();

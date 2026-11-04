@@ -28,6 +28,7 @@ import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
 import { recordConsent, consentHistory, HAS_CONSENT_SQL } from '../consent.js';
+import { createTopupCheckout } from '../platform.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
 import { systemStatus, backup, alert } from '../ops.js';
@@ -201,6 +202,9 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS }));
   r.post('/tenants/:tenantId/billing/checkout', requireTenant, requireOwner, wrap(async (req, res) => {
     try { res.json({ url: await createSubscriptionCheckout(req.tenant, req.body?.plan) }); } catch (e) { res.status(400).json({ error: e.message }); }
+  }));
+  r.post('/tenants/:tenantId/billing/topup', requireTenant, requireOwner, wrap(async (req, res) => {
+    try { res.json({ url: await createTopupCheckout(req.tenant, Number(req.body?.usd) || 10) }); } catch (e) { res.status(400).json({ error: e.message }); }
   }));
   r.post('/tenants/:tenantId/billing/portal', requireTenant, requireOwner, wrap(async (req, res) => {
     try { res.json({ url: await createBillingPortal(req.tenant) }); } catch (e) { res.status(400).json({ error: e.message }); }
@@ -397,6 +401,7 @@ export function adminRouter() {
     const patch = req.body || {};
     delete patch.storeWebhookSecret;
     if (!req.isSuper) delete patch.difyAllowed; // only the platform operator can grant Dify
+    if (!req.isSuper && patch.ai) delete patch.ai.budgetUsd; // spend caps are set by the plan / operator, not the shop
     if (!req.isSuper && patch.ai?.provider === 'dify' && !difyAllowed(req.tenant)) return res.status(403).json({ error: 'The Dify engine is not available for this shop – use the built-in (Direct) AI.' });
     if (patch.store?.type && !STORE_TYPES.includes(patch.store.type)) return res.status(400).json({ error: 'invalid store type' });
     if (!req.isSuper && patch.store?.type && !(PLANS[req.tenant.plan]?.storeTypes || []).includes(patch.store.type)) return res.status(403).json({ error: 'store type not in plan' });

@@ -1,7 +1,7 @@
 import { getStore } from '../stores/index.js';
 import { difyChat } from '../dify/client.js';
 import { createSessionToken } from '../session.js';
-import { withinLimit, bumpUsage } from '../tenants.js';
+import { withinLimit, bumpUsage, aiBudgetUsed } from '../tenants.js';
 import { getConversation, saveConversation, upsertCustomer, updateCustomer } from './state.js';
 import { addToCart, removeFromCart, subtotal, money, formatCart } from './cart.js';
 import { placeOrder, listOrders, paymentLabel, STATUS_TEXT, findOrderByReceipt, receiptUrl } from './orders.js';
@@ -537,6 +537,7 @@ async function handleText(ctx, raw) {
   // Free text → AI (if configured) or knowledge base + catalogue search
   const D = ctx.S.dify || {};
   if (aiAvailable(ctx) && !withinLimit(ctx.tenant, 'ai')) ownerNotice(ctx.tenant, 'ai', ctx.rawSend);
+  else if (aiAvailable(ctx) && (aiBudgetUsed(ctx.tenant) ?? 0) >= 0.8) ownerNotice(ctx.tenant, 'ai80', ctx.rawSend, { monthly: true });
   if (aiAvailable(ctx) && withinLimit(ctx.tenant, 'ai')) {
     try {
       return aiProvider(ctx) === 'direct' ? await askDirect(ctx, text) : await askAi(ctx, text);
@@ -687,11 +688,11 @@ async function askDirect(ctx, text) {
 }
 
 /** Tell the shop owner (once a day per kind) that a plan limit was reached. */
-function ownerNotice(tenant, kind, send) {
-  const key = `notice:${tenant.id}:${kind}:${new Date().toISOString().slice(0, 10)}`;
+function ownerNotice(tenant, kind, send, { monthly = false } = {}) {
+  const key = `notice:${tenant.id}:${kind}:${new Date().toISOString().slice(0, monthly ? 7 : 10)}`;
   if (getDb().prepare('SELECT 1 FROM kv WHERE key = ?').get(key)) return;
   getDb().prepare('INSERT OR IGNORE INTO kv (key, value) VALUES (?, ?)').run(key, '1');
-  const text = kind === 'ai' ? `⚠️ ${tenant.settings.business.name}: this month's AI replies are used up – the bot now answers with keyword search only. Upgrade on the Billing tab to restore AI replies.` : `⚠️ ${tenant.settings.business.name}: this month's message limit is reached – new chats are handed to your team instead of the bot. Upgrade on the Billing tab.`;
+  const text = kind === 'ai80' ? `ℹ️ ${tenant.settings.business.name}: 80% of this month's AI budget is used. When it runs out the bot keeps answering with keyword search. Buy a top-up or upgrade on the Billing tab.` : kind === 'ai' ? `⚠️ ${tenant.settings.business.name}: this month's AI budget is used up – the bot now answers with keyword search and product search only (customers still get replies). Buy a top-up or upgrade on the Billing tab.` : `⚠️ ${tenant.settings.business.name}: this month's message limit is reached – new chats are handed to your team instead of the bot. Upgrade on the Billing tab.`;
   for (const s of tenant.settings.notifications?.staffWaIds || []) staffAlert(tenant, String(s).replace(/\D/g, ''), text, send);
   alert(`Plan limit (${kind}) reached for ${tenant.id}`, { key: `limit:${tenant.id}:${kind}` });
 }

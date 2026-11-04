@@ -1,5 +1,6 @@
 import { getDb, json, encryptSettings } from './db.js';
-import { sha256, needsRotation, encrypt, decrypt } from './crypto.js';
+import crypto from 'node:crypto';
+import { needsRotation, encrypt, decrypt } from './crypto.js';
 import { listTenants, getTenant } from './tenants.js';
 
 // ---------------- audit log ----------------
@@ -12,7 +13,20 @@ export const listAudit = (tenantId, { limit = 200 } = {}) =>
   getDb().prepare(`SELECT * FROM audit_log WHERE ${tenantId ? 'tenant_id = ?' : '1 = 1'} ORDER BY id DESC LIMIT ?`).all(...(tenantId ? [tenantId, limit] : [limit])).map((r) => ({ ...r, detail: json(r.detail, null) }));
 
 // ---------------- data subject requests ----------------
-export const hashedWa = (tenantId, waId) => 'h:' + sha256(`${tenantId}:${waId}`).slice(0, 32);
+/*
+ * Suppression / anonymisation hashes are HMACs with a server secret (a plain hash of a phone number can be
+ * brute-forced, so it would still be personal data). The secret is generated once, stored encrypted in kv and
+ * survives encryption-key rotation (kv values are re-encrypted, the secret itself doesn't change).
+ */
+function suppressionSecret() {
+  const d = getDb();
+  const row = d.prepare("SELECT value FROM kv WHERE key = 'suppression_secret'").get();
+  if (row) return decrypt(row.value);
+  const s = crypto.randomBytes(32).toString('base64url');
+  d.prepare("INSERT OR IGNORE INTO kv (key, value) VALUES ('suppression_secret', ?)").run(encrypt(s));
+  return decrypt(d.prepare("SELECT value FROM kv WHERE key = 'suppression_secret'").get().value);
+}
+export const hashedWa = (tenantId, waId) => 'h:' + crypto.createHmac('sha256', suppressionSecret()).update(`${tenantId}:${waId}`).digest('hex').slice(0, 40);
 
 /** Everything we hold about one person (Article 15 access request). */
 export function exportPerson(tenantId, waId) {
@@ -53,14 +67,26 @@ export function isSuppressed(tenantId, waId) {
   return r?.status === 'withdrawn';
 }
 
-/** Retention: delete chat messages older than the shop's retention period (default 24 months). */
+/**
+ * Retention (what the privacy page promises):
+ *  - chat messages (incl. imported WhatsApp Business app history): shop setting, default 24 months
+ *  - consent ledger: 6 years after the person's last consent event / last contact
+ *  - audit log: IP addresses removed after 90 days, entries deleted after 24 months
+ */
 export function applyRetention() {
+  const d = getDb();
   let removed = 0;
   for (const t of listTenants()) {
     const months = Math.max(1, Number(t.settings.privacy?.retentionMonths) || 24);
-    removed += getDb().prepare("DELETE FROM messages WHERE tenant_id = ? AND created_at < datetime('now', ?)").run(t.id, `-${months} months`).changes;
+    removed += d.prepare("DELETE FROM messages WHERE tenant_id = ? AND created_at < datetime('now', ?)").run(t.id, `-${months} months`).changes;
   }
-  return removed;
+  const consents = d.prepare(`DELETE FROM consents WHERE (tenant_id, wa_id) IN (
+      SELECT k.tenant_id, k.wa_id FROM consents k GROUP BY k.tenant_id, k.wa_id
+      HAVING MAX(k.created_at) < datetime('now', '-6 years')
+         AND NOT EXISTS (SELECT 1 FROM customers c WHERE c.tenant_id = k.tenant_id AND c.wa_id = k.wa_id AND c.last_seen_at > datetime('now', '-6 years')))`).run().changes;
+  const auditIps = d.prepare("UPDATE audit_log SET ip = NULL WHERE ip IS NOT NULL AND created_at < datetime('now', '-90 days')").run().changes;
+  const audit = d.prepare("DELETE FROM audit_log WHERE created_at < datetime('now', '-24 months')").run().changes;
+  return { messages: removed, consents, auditIps, audit };
 }
 
 // ---------------- encryption key rotation ----------------

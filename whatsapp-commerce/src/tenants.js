@@ -209,6 +209,16 @@ export function getUsage(tenantId, p = period()) {
   return getDb().prepare('SELECT * FROM usage WHERE tenant_id = ? AND period = ?').get(tenantId, p) || { tenant_id: tenantId, period: p, inbound: 0, outbound: 0, ai_calls: 0, orders: 0 };
 }
 
+/** Share of this month's AI budget used (0..1+), including top-ups; null when uncapped. */
+export function aiBudgetUsed(tenant) {
+  const plan = PLANS[tenant.plan] || PLANS.starter;
+  const budget = tenant.settings?.ai?.budgetUsd ?? plan.aiBudgetUsd;
+  if (budget == null) return null;
+  const u = getUsage(tenant.id);
+  const extra = Number(getDb().prepare('SELECT value FROM kv WHERE key = ?').get(`topup:${tenant.id}:${u.period}`)?.value || 0);
+  return (u.ai_cost_micro || 0) / (budget * 1e6 + extra);
+}
+
 export function withinLimit(tenant, kind) {
   const plan = PLANS[tenant.plan] || PLANS.starter;
   const u = getUsage(tenant.id);
@@ -216,7 +226,8 @@ export function withinLimit(tenant, kind) {
   // AI: both a reply count and a hard monthly spend cap (long chats + big knowledge bases cost more per reply)
   if (kind === 'ai') {
     const budget = tenant.settings?.ai?.budgetUsd ?? plan.aiBudgetUsd;
-    const spentOk = budget == null || (u.ai_cost_micro || 0) < budget * 1e6;
+    const extra = Number(getDb().prepare('SELECT value FROM kv WHERE key = ?').get(`topup:${tenant.id}:${u.period}`)?.value || 0); // bought top-ups
+    const spentOk = budget == null || (u.ai_cost_micro || 0) < budget * 1e6 + extra;
     return (plan.aiCalls == null || u.ai_calls < plan.aiCalls) && spentOk;
   }
   return true;

@@ -56,6 +56,30 @@ export async function createSubscriptionCheckout(tenant, plan) {
   return session.url;
 }
 
+/** One-off AI top-up for the current month (so hitting the cap isn't a dead end). Price: TOPUP_GBP_PER_USD x amount. */
+export const TOPUP_OPTIONS = [5, 10, 25, 50];
+export async function createTopupCheckout(tenant, usd) {
+  if (!billingConfigured()) throw new Error('Billing is not configured on this server');
+  if (!TOPUP_OPTIONS.includes(usd)) throw new Error(`Choose one of $${TOPUP_OPTIONS.join(', $')}`);
+  const pence = Math.round(usd * (Number(process.env.TOPUP_GBP_PER_USD) || 1) * 100);
+  const row = getDb().prepare('SELECT stripe_customer_id, owner_email FROM tenants WHERE id = ?').get(tenant.id);
+  const s = await stripe('POST', '/checkout/sessions', {
+    mode: 'payment',
+    client_reference_id: tenant.id,
+    ...(row.stripe_customer_id ? { customer: row.stripe_customer_id } : row.owner_email ? { customer_email: row.owner_email } : {}),
+    line_items: { 0: { quantity: 1, price_data: { currency: 'gbp', unit_amount: pence, product_data: { name: `Extra AI budget ($${usd}) – ${new Date().toISOString().slice(0, 7)}` } } } },
+    metadata: { tenant_id: tenant.id, kind: 'ai_topup', usd: String(usd), period: new Date().toISOString().slice(0, 7) },
+    success_url: `${config.publicUrl}/admin/?topup=success`,
+    cancel_url: `${config.publicUrl}/admin/?topup=cancelled`,
+  });
+  return s.url;
+}
+
+/** Extra AI budget bought this month (micro-USD). */
+export function topupMicro(tenantId, period = new Date().toISOString().slice(0, 7)) {
+  return Number(getDb().prepare('SELECT value FROM kv WHERE key = ?').get(`topup:${tenantId}:${period}`)?.value || 0);
+}
+
 export async function createBillingPortal(tenant) {
   const row = getDb().prepare('SELECT stripe_customer_id FROM tenants WHERE id = ?').get(tenant.id);
   if (!row?.stripe_customer_id) throw new Error('No subscription yet – choose a plan first');
@@ -71,6 +95,15 @@ export function handlePlatformStripeEvent(rawBody, signature) {
   const ev = JSON.parse(rawBody);
   const o = ev.data?.object || {};
   const d = getDb();
+  if (ev.type === 'checkout.session.completed' && o.mode === 'payment' && o.metadata?.kind === 'ai_topup' && o.payment_status === 'paid') {
+    const tid = o.metadata.tenant_id;
+    const key = `topup:${tid}:${o.metadata.period}`;
+    const done = `topup-session:${o.id}`;
+    if (tid && getTenant(tid) && !d.prepare('SELECT 1 FROM kv WHERE key = ?').get(done)) {
+      d.prepare("INSERT INTO kv (key, value) VALUES (?, '1')").run(done);
+      d.prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + excluded.value').run(key, String(Math.round(Number(o.metadata.usd) * 1e6)));
+    }
+  }
   if (ev.type === 'checkout.session.completed' && o.mode === 'subscription') {
     const tid = o.client_reference_id || o.metadata?.tenant_id;
     if (tid && getTenant(tid)) {
