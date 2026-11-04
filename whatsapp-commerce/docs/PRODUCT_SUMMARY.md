@@ -109,7 +109,18 @@ Customer (WhatsApp)  ──►  Meta WhatsApp Cloud API  ──webhook──► 
 - **`custom`:** a documented 6-endpoint JSON contract for any other site on the operator's VPS.
 - **`manual`:** built-in catalogue with JSON editing or CSV import, variants and stock.
 
-### 3.4 AI chatbot (Dify) and knowledge base (RAG)
+### 3.4 AI chatbot and knowledge base (RAG)
+
+There are two interchangeable engines, chosen per shop:
+- **Direct (default):** any OpenAI-compatible API (OpenRouter by default).
+  - Conversation history and the shop's instructions are sent with each question.
+  - Retrieved knowledge and catalogue text are wrapped as `<shop_data>`, marked as data and not instructions (a prompt-injection guard).
+  - Local retrieval uses SQLite FTS5 with stemming, BM25 ranking and optional embeddings, combined by reciprocal-rank fusion.
+  - Text is extracted from PDF, DOCX, PPTX and XLSX with no dependencies.
+  - Agent mode uses in-process function calling with the same 9 store tools.
+  - OpenRouter routing uses zero data retention and a provider allowlist.
+  - Token usage is metered.
+- **Dify:** the original engine, which needs a commercial licence from Dify for multi-tenant SaaS use. Details below.
 - **Automatic setup per shop:**
   - creates a Dify app with generated instructions: tone, about, FAQ, shop facts such as fees and payment options, and hand-off rules;
   - creates the app's API key and switches AI on;

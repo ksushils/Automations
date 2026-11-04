@@ -6,6 +6,11 @@ import { encrypt, decrypt } from './crypto.js';
 import { getTenant, updateTenantSettings, PLANS } from './tenants.js';
 import { DifyConsole, consoleConfigured } from './dify/console.js';
 import { stripHtml } from './stores/http.js';
+import { extractText } from './ai/extract.js';
+import { indexDoc, removeDocIndex } from './ai/rag.js';
+
+// keep the local search index (direct AI mode + fallback) in step with every document change
+const reindex = (id) => { const doc = getDb().prepare('SELECT id, tenant_id, name, text FROM knowledge_docs WHERE id = ?').get(id); if (doc) indexDoc(doc).catch((e) => console.warn('[index]', e.message)); };
 
 /*
  * Knowledge base (RAG) per shop.
@@ -38,10 +43,12 @@ export function addTextDoc(tenantId, { name, text, source = 'text', url = null }
   const existing = getDb().prepare("SELECT id FROM knowledge_docs WHERE tenant_id = ? AND status != 'deleted' AND ((url IS NOT NULL AND url = ?) OR (source = ? AND name = ?))").get(tenantId, url, source, String(name));
   if (existing) {
     getDb().prepare("UPDATE knowledge_docs SET text = ?, size = ?, status = 'pending', error = NULL, updated_at = datetime('now') WHERE id = ?").run(clean, Buffer.byteLength(clean), existing.id);
+    reindex(existing.id);
     return mapDoc(getDb().prepare('SELECT * FROM knowledge_docs WHERE id = ?').get(existing.id));
   }
   checkLimit(tenantId);
   const info = getDb().prepare('INSERT INTO knowledge_docs (tenant_id, name, source, url, mime, text, size) VALUES (?, ?, ?, ?, ?, ?, ?)').run(tenantId, String(name || 'Untitled').slice(0, 120), source, url, 'text/plain', clean, Buffer.byteLength(clean));
+  reindex(Number(info.lastInsertRowid));
   return mapDoc(getDb().prepare('SELECT * FROM knowledge_docs WHERE id = ?').get(info.lastInsertRowid));
 }
 
@@ -51,12 +58,17 @@ export function addFileDoc(tenantId, { filename, mime, buffer }) {
   if (!ALLOWED_EXT.test(filename || '')) throw Object.assign(new Error('Supported files: PDF, Word, Excel, PowerPoint, TXT, Markdown, CSV, HTML'), { status: 400 });
   checkLimit(tenantId);
   // keep a text copy for the built-in search when the file is plain text
-  const text = TEXT_TYPES.test(mime || '') || /\.(txt|md|markdown|csv|json|xml)$/i.test(filename) ? buffer.toString('utf8') : /\.html?$/i.test(filename) ? htmlToText(buffer.toString('utf8')).text : null;
-  const info = getDb().prepare('INSERT INTO knowledge_docs (tenant_id, name, source, mime, text, file, size) VALUES (?, ?, ?, ?, ?, ?, ?)').run(tenantId, String(filename).slice(0, 120), 'file', mime || 'application/octet-stream', text, buffer, buffer.length);
+  // text copy for local search / direct AI (PDF, Word, PowerPoint, Excel extracted without Dify)
+  let text = TEXT_TYPES.test(mime || '') || /\.(txt|md|markdown|csv|json|xml)$/i.test(filename) ? buffer.toString('utf8') : /\.html?$/i.test(filename) ? htmlToText(buffer.toString('utf8')).text : extractText(filename, buffer);
+  if (text && text.replace(/\s/g, '').length < 20) text = null;
+  const note = text ? null : /\.(pdf|docx|pptx|xlsx)$/i.test(filename) ? 'No readable text found (scanned image?) – it can still be used by Dify, or paste the text instead.' : null;
+  const info = getDb().prepare('INSERT INTO knowledge_docs (tenant_id, name, source, mime, text, file, size, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(tenantId, String(filename).slice(0, 120), 'file', mime || 'application/octet-stream', text || null, buffer, buffer.length, note);
+  if (text) reindex(Number(info.lastInsertRowid));
   return mapDoc(getDb().prepare('SELECT * FROM knowledge_docs WHERE id = ?').get(info.lastInsertRowid));
 }
 
 export function removeDoc(tenantId, id) {
+  removeDocIndex(Number(id));
   const r = getDb().prepare("UPDATE knowledge_docs SET status = CASE WHEN dify_document_id IS NULL THEN 'deleted' ELSE 'to_delete' END, updated_at = datetime('now') WHERE tenant_id = ? AND id = ?").run(tenantId, Number(id));
   return r.changes > 0;
 }

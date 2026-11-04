@@ -12,7 +12,7 @@ import { getDb } from '../db.js';
 import { alert } from '../ops.js';
 import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 import { recordConsent, defaultWording } from '../consent.js';
-import { directConfigured } from '../ai/direct.js';
+import { directConfigured, directTurn } from '../ai/direct.js';
 
 const consentWording = (ctx) => ctx.S.notifications?.consentWording || defaultWording(ctx.S.business.name);
 
@@ -530,7 +530,7 @@ async function handleText(ctx, raw) {
   if (aiAvailable(ctx) && !withinLimit(ctx.tenant, 'ai')) ownerNotice(ctx.tenant, 'ai', ctx.rawSend);
   if (aiAvailable(ctx) && withinLimit(ctx.tenant, 'ai')) {
     try {
-      return await askAi(ctx, text);
+      return aiProvider(ctx) === 'direct' ? await askDirect(ctx, text) : await askAi(ctx, text);
     } catch (e) {
       console.error(`[dify] tenant=${ctx.tenant.id}`, e.message);
     }
@@ -646,11 +646,33 @@ export async function handleInbound(tenant, event, send) {
   return replies;
 }
 
+/** Which AI engine serves this shop: explicit setting, else Dify if the shop has a Dify app, else direct. */
+function aiProvider(ctx) {
+  const p = ctx.S.ai?.provider;
+  if (p === 'direct' || p === 'dify') return p;
+  return ctx.S.dify?.enabled && ctx.S.dify?.apiKey ? 'dify' : 'direct';
+}
+
 /** Is an AI engine configured for this shop (Dify app or direct provider)? */
 function aiAvailable(ctx) {
   const D = ctx.S.dify || {};
-  if ((ctx.S.ai?.provider || 'dify') === 'direct') return !!(ctx.S.ai?.enabled !== false && directConfigured());
+  if (aiProvider(ctx) === 'direct') return !!(ctx.S.ai?.enabled !== false && directConfigured());
   return !!(D.enabled && D.apiKey);
+}
+
+/** Direct AI mode (OpenRouter / OpenAI-compatible, local knowledge search, in-process store tools). */
+async function askDirect(ctx, text) {
+  saveConversation(ctx.conv); // agent tools read/write the cart in the DB
+  const { answer, products } = await directTurn(ctx, text);
+  const fresh = getConversation(ctx.tenant.id, ctx.conv.waId);
+  Object.assign(ctx.conv, { cart: fresh.cart, data: fresh.data, state: fresh.state, humanHandover: fresh.humanHandover });
+  const out = toWhatsAppFormatting(answer);
+  if (/\[HANDOVER\]/i.test(out)) {
+    ctx.reply({ type: 'text', text: out.replace(/\[HANDOVER\]/gi, '').trim() || 'Let me get a team member for you.' });
+    return handover(ctx);
+  }
+  if (products.length && !ctx.conv.humanHandover) ctx.reply(productList(ctx, products, out || 'Here are some products you might like:'));
+  else ctx.reply({ type: 'text', text: out || "Sorry, I didn't catch that. Type *menu* to see options." });
 }
 
 /** Tell the shop owner (once a day per kind) that a plan limit was reached. */

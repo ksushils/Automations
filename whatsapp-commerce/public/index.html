@@ -223,28 +223,41 @@ async function ai() {
   const modelOpts = (info.models || []).map((m) => { const v = m.provider + '|' + m.name; return `<option value="${esc(v)}" ${a.model === v ? 'selected' : ''}>${esc(m.providerLabel)} · ${esc(m.label)}</option>`; }).join('');
   $('#app').innerHTML = `
     <div class="card"><h2>🤖 AI chatbot</h2>
+      <div class="row"><div><label>AI engine</label><select id="aiprov">
+        <option value="direct" ${info.provider === 'direct' ? 'selected' : ''}>Direct – OpenRouter / OpenAI (built in)${info.direct.configured ? '' : ' – not configured on server'}</option>
+        <option value="dify" ${info.provider === 'dify' ? 'selected' : ''}>Dify app${info.configured ? '' : ' – console not configured'}</option></select></div>
+        ${info.provider === 'direct' ? `<div><label>Model (blank = server default <code>${esc(info.direct.defaultModel)}</code>)</label><input data-a="directModel" value="${esc(a.directModel || '')}" placeholder="${esc(info.direct.defaultModel)}"></div>` : ''}</div>
+      ${info.provider === 'direct' ? `<p>${info.direct.configured ? '✅ Built-in AI ready' : '<span class="pill warn">Set AI_API_KEY (and optionally AI_MODEL) on the server</span>'} · knowledge base searched in-app${info.direct.embeddings ? ' (semantic + keyword)' : ' (keyword)'}${info.direct.zeroRetention && /openrouter/.test(info.direct.baseUrl) ? ' · zero data retention routing' : ''}${info.direct.providers.length ? ' · providers: ' + esc(info.direct.providers.join(', ')) : ''}</p>` : ''}
+      <div ${info.provider === 'direct' ? 'hidden' : ''}>
       ${d.managed && d.appId ? `<p>✅ Live in Dify (${d.mode === 'agent' ? 'Agent – takes orders itself' : 'Assistant'}) · model <code>${esc(d.model || '')}</code> · last synced ${esc(d.syncedAt || '')} · <a href="${esc(location.protocol)}//${esc(new URL(d.baseUrl || location.href).host)}/app/${esc(d.appId)}/configuration" target="_blank" rel="noopener">open in Dify</a></p>`
         : d.enabled && d.apiKey ? '<p>✅ Using a Dify app key entered manually (Settings → AI).</p>' : '<p>⬜ No AI chatbot yet. Fill in the details below and press <b>Create AI chatbot</b> – it is created in your Dify automatically.</p>'}
       ${/^https:/.test(info.publicUrl || '') ? '' : `<p class="mute">Agent mode needs this server on a public HTTPS URL (PUBLIC_URL) so Dify can call the store tools.</p>`}
       ${info.configured ? '' : `<p class="pill warn">Server is not connected to the Dify console${info.error ? ': ' + esc(info.error) : ''}. Set DIFY_ADMIN_API_KEY + DIFY_WORKSPACE_ID (or DIFY_CONSOLE_EMAIL + DIFY_CONSOLE_PASSWORD) in .env.</p>`}
+      </div>
       <div class="row">
         <div><label>Assistant name</label><input data-a="assistantName" value="${esc(a.assistantName || '')}"></div>
         <div><label>Tone</label><select data-a="tone">${tones.map(([k, l]) => `<option value="${k}" ${a.tone === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-        <div><label>AI model (from your Dify)</label><select data-a="model"><option value="">Dify default${info.default ? ' (' + esc(info.default.name) + ')' : ''}</option>${modelOpts}</select></div>
-        <div><label>Mode</label><select id="aimode"><option value="assist" ${d.mode !== 'agent' ? 'selected' : ''}>Assistant – AI answers, customer taps to order</option><option value="agent" ${d.mode === 'agent' ? 'selected' : ''}>Agent – AI takes the whole order itself</option></select></div>
+        <div ${info.provider === 'direct' ? 'hidden' : ''}><label>AI model (from your Dify)</label><select data-a="model"><option value="">Dify default${info.default ? ' (' + esc(info.default.name) + ')' : ''}</option>${modelOpts}</select></div>
+        <div><label>Mode</label><select id="aimode"><option value="assist" ${(info.provider === 'direct' ? a.mode : d.mode) !== 'agent' ? 'selected' : ''}>Assistant – AI answers, customer taps to order</option><option value="agent" ${(info.provider === 'direct' ? a.mode : d.mode) === 'agent' ? 'selected' : ''}>Agent – AI takes the whole order itself</option></select></div>
         <div><label>Creativity (0 = precise, 1 = creative)</label><input data-a="temperature" type="number" min="0" max="1" step="0.1" value="${esc(a.temperature ?? 0.4)}"></div>
       </div>
       <label>About the shop (what you sell, who for, what makes you special)</label><textarea data-a="about">${esc(a.about || '')}</textarea>
       <label>FAQ & policies – delivery times, returns, sizing, opening hours… (the bot answers from this)</label><textarea data-a="faq" style="min-height:160px">${esc(a.faq || '')}</textarea>
       <label>Extra instructions (optional)</label><textarea data-a="instructions">${esc(a.instructions || '')}</textarea>
-      <p><button class="btn" id="aisave">${d.managed ? 'Save & update AI chatbot' : 'Save & create AI chatbot'}</button> <button class="btn ghost" id="aitest">Try it in Test bot →</button></p>
+      <p><button class="btn" id="aisave">${info.provider === 'direct' ? 'Save' : d.managed ? 'Save & update AI chatbot' : 'Save & create AI chatbot'}</button> <button class="btn ghost" id="aitest">Try it in Test bot →</button></p>
       <pre id="aires" class="mute" style="white-space:pre-wrap"></pre>
     </div>
-    <div class="card"><h2>Generated instructions (sent to Dify)</h2><pre style="white-space:pre-wrap" class="mute">${esc(info.prompt)}</pre></div>`;
+    <div class="card"><h2>Generated instructions (sent to the AI)</h2><pre style="white-space:pre-wrap" class="mute">${esc(info.prompt)}</pre></div>`;
   $('#aitest').onclick = () => { S.tab = 'simulator'; render(); };
+  $('#aiprov').onchange = async () => { S.tenant = (await api(T('/settings?sync=0'), { method: 'PATCH', body: { ai: { provider: $('#aiprov').value } } })).tenant; ai(); };
   $('#aisave').onclick = async () => {
     const patch = { ai: {} };
     $('#app').querySelectorAll('[data-a]').forEach((el) => (patch.ai[el.dataset.a] = el.dataset.a === 'temperature' ? Number(el.value) : el.value));
+    if ($('#aiprov').value === 'direct') {
+      patch.ai.provider = 'direct'; patch.ai.mode = $('#aimode').value; patch.ai.enabled = true;
+      try { S.tenant = (await api(T('/settings?sync=0'), { method: 'PATCH', body: patch })).tenant; toast('Saved – try it in Test bot'); ai(); } catch (e) { $('#aires').textContent = e.message; }
+      return;
+    }
     $('#aires').textContent = 'Saving and setting up the chatbot in Dify…';
     try {
       S.tenant = (await api(T('/settings?sync=0'), { method: 'PATCH', body: patch })).tenant;
@@ -574,7 +587,7 @@ async function knowledge() {
   const kb = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
   $('#app').innerHTML = `<div class="card"><h2>📚 Knowledge base</h2>
       <p class="mute">Everything your AI chatbot should know: delivery & returns policies, FAQs, size guides, product manuals, opening hours… It is searched automatically for every customer question.</p>
-      <p>${k.docs.length} / ${k.limit} documents · ${k.aiConnected ? (k.attached ? '✅ Connected to your AI chatbot' : '🔄 Will connect to your AI chatbot after the next sync') : '<span class="pill warn">AI not connected on the server – documents are saved and the built-in search answers simple questions</span>'}
+      <p>${k.docs.length} / ${k.limit} documents · ${k.provider === 'direct' ? '✅ Searched in-app by your AI chatbot (direct mode)' : k.aiConnected ? (k.attached ? '✅ Connected to your AI chatbot' : '🔄 Will connect to your AI chatbot after the next sync') : '<span class="pill warn">AI not connected on the server – documents are saved and the built-in search answers simple questions</span>'}
       ${owner && k.aiConnected ? ' <button class="btn ghost" id="ksync">Sync now</button>' : ''}</p></div>
     ${owner ? `<div class="row">
       <div class="card"><h2>🌐 From your website</h2><label>Page addresses (one per line)</label><textarea id="kurls" placeholder="https://yourshop.co.uk/pages/faq\nhttps://yourshop.co.uk/policies/refund-policy"></textarea>

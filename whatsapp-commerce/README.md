@@ -147,7 +147,22 @@ link, and the order is marked paid automatically. Alternatives: a static payment
 Set *Public WhatsApp number* (plus optional tagline, logo and custom domain) in Settings. The link-in-bio page is at
 `https://<PUBLIC_URL>/s/<tenantId>`. For a custom domain, point a CNAME at the server and add the domain to your HTTPS proxy.
 
-### 3. AI chatbot (created automatically in dify.rcshopper.com)
+### 3. AI engine: Direct (built in) or Dify
+
+**Direct mode (recommended, no Dify needed).** Set:
+- `AI_API_KEY` (OpenRouter by default; any OpenAI-compatible API via `AI_BASE_URL`);
+- optionally `AI_MODEL`;
+- optionally `EMBEDDINGS_MODEL`, for semantic knowledge search.
+
+In this mode:
+- The knowledge base is indexed inside the app: SQLite FTS5 with stemming, plus embeddings when configured. PDF, Word, PowerPoint and Excel text is extracted without extra libraries.
+- Agent mode runs the same 9 store tools in-process. Each tool call is bound to the customer in that chat by the server, never chosen by the model.
+- With OpenRouter, requests are routed with `data_collection: deny` and zero data retention, and only to the providers in `AI_PROVIDER_ORDER`. List those providers as your sub-processors.
+- Shops choose the engine on the **AI assistant** tab. New shops use Direct automatically when no Dify app exists.
+
+> **Dify licence note:** Dify's licence forbids operating a multi-tenant service without written permission from Dify (business@dify.ai). Direct mode avoids the question entirely; use the Dify mode below only with a licence or for your own shops.
+
+### 3a. Dify mode (created automatically in dify.rcshopper.com)
 
 The system creates and maintains each client's AI chatbot in your Dify. You don't build anything in Dify by hand.
 

@@ -156,6 +156,16 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
 );
 CREATE INDEX IF NOT EXISTS idx_kdocs_tenant ON knowledge_docs(tenant_id, status);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  doc_id INTEGER NOT NULL,
+  idx INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  embedding BLOB
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_tenant ON knowledge_chunks(tenant_id, doc_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(text, tenant_id UNINDEXED, chunk_id UNINDEXED, tokenize = 'porter unicode61');
 CREATE TABLE IF NOT EXISTS consents (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id TEXT NOT NULL,
@@ -185,6 +195,7 @@ const MIGRATIONS = {
   customers: { last_inbound_at: 'TEXT', winback_sent_at: 'TEXT', tags: "TEXT NOT NULL DEFAULT '[]'", attributes: "TEXT NOT NULL DEFAULT '{}'", source: 'TEXT' },
   conversations: { assigned_to: 'TEXT' },
   messages: { processed: 'INTEGER NOT NULL DEFAULT 1', attempts: 'INTEGER NOT NULL DEFAULT 0' },
+  usage: { ai_tokens: 'INTEGER NOT NULL DEFAULT 0' },
   tenants: { owner_email: 'TEXT', stripe_customer_id: 'TEXT', subscription_id: 'TEXT', subscription_status: 'TEXT', trial_ends_at: 'TEXT' },
 };
 

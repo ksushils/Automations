@@ -189,7 +189,7 @@ export function authenticateToolKey(tenantId, key) {
 const period = () => new Date().toISOString().slice(0, 7);
 
 export function bumpUsage(tenantId, field, n = 1) {
-  if (!['inbound', 'outbound', 'ai_calls', 'orders'].includes(field)) return;
+  if (!['inbound', 'outbound', 'ai_calls', 'orders', 'ai_tokens'].includes(field)) return;
   getDb()
     .prepare(`INSERT INTO usage (tenant_id, period, ${field}) VALUES (?, ?, ?) ON CONFLICT(tenant_id, period) DO UPDATE SET ${field} = ${field} + excluded.${field}`)
     .run(tenantId, period(), n);

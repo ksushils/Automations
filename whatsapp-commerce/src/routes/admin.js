@@ -19,8 +19,9 @@ import { analytics } from '../analytics.js';
 import { listFlows, getFlow, saveFlow, deleteFlow, validateFlow, getContact, updateContact } from '../bot/flows.js';
 import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaignStats } from '../campaigns.js';
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile } from '../templates.js';
-import { fetchMedia } from '../whatsapp/cloudApi.js';
+import { fetchMedia, logMessage } from '../whatsapp/cloudApi.js';
 import { parseCsv } from '../csv.js';
+import { directConfigured } from '../ai/direct.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
 import { recordConsent, consentHistory, HAS_CONSENT_SQL } from '../consent.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
@@ -129,7 +130,8 @@ export function adminRouter() {
   const kbErr = (res, e) => res.status(e.status || 400).json({ error: e.message });
   r.get('/tenants/:tenantId/knowledge', requireTenant, (req, res) => {
     const d = req.tenant.settings.dify || {};
-    res.json({ docs: listDocs(req.tenant.id), limit: PLANS[req.tenant.plan]?.knowledgeDocs ?? 20, aiConnected: consoleConfigured(), datasetId: d.datasetId || null, attached: !!d.datasetAttached && d.datasetAttached === d.datasetId });
+    const prov = req.tenant.settings.ai?.provider || (d.enabled && d.apiKey ? 'dify' : 'direct');
+    res.json({ provider: prov, docs: listDocs(req.tenant.id), limit: PLANS[req.tenant.plan]?.knowledgeDocs ?? 20, aiConnected: consoleConfigured(), datasetId: d.datasetId || null, attached: !!d.datasetAttached && d.datasetAttached === d.datasetId });
   });
   r.post('/tenants/:tenantId/knowledge/text', requireTenant, requireOwner, (req, res) => {
     try { res.status(201).json({ doc: addTextDoc(req.tenant.id, { name: req.body?.name, text: req.body?.text }) }); kbChanged(req.tenant.id); } catch (e) { kbErr(res, e); }
@@ -363,7 +365,10 @@ export function adminRouter() {
   // ----- AI assistant (Dify) -----
   r.get('/tenants/:tenantId/ai', requireTenant, requireOwner, wrap(async (req, res) => {
     const models = await listDifyModels().catch((e) => ({ configured: consoleConfigured(), models: [], error: e.message }));
-    res.json({ ...models, prompt: req.tenant.settings.dify?.mode === 'agent' ? buildAgentPrompt(req.tenant) : buildPrompt(req.tenant), dify: redactSettings(req.tenant.settings).dify, publicUrl: config.publicUrl });
+    const a = req.tenant.settings.ai || {};
+    const provider = a.provider === 'direct' || a.provider === 'dify' ? a.provider : req.tenant.settings.dify?.enabled && req.tenant.settings.dify?.apiKey ? 'dify' : 'direct';
+    const agent = (provider === 'direct' ? a.mode : req.tenant.settings.dify?.mode) === 'agent';
+    res.json({ ...models, provider, direct: { configured: directConfigured(), defaultModel: config.aiModel, baseUrl: config.aiBaseUrl, embeddings: !!config.embeddingsModel, zeroRetention: config.aiZeroRetention, providers: config.aiProviderOrder }, prompt: agent ? buildAgentPrompt(req.tenant) : buildPrompt(req.tenant), dify: redactSettings(req.tenant.settings).dify, publicUrl: config.publicUrl });
   }));
   r.post('/tenants/:tenantId/ai/provision', requireTenant, requireOwner, wrap(async (req, res) => {
     try {
@@ -398,6 +403,7 @@ export function adminRouter() {
       ? { waId, kind: 'action', id: String(req.body.actionId), text: '' }
       : { waId, kind: 'text', text: String(req.body?.text || ''), profileName: 'Test Customer' };
     const sink = [];
+    logMessage(req.tenant.id, waId, 'in', { type: ev.kind, text: ev.kind === 'text' ? ev.text : `[${ev.id}]`, simulated: true }); // history for the AI, like real chats
     const send = createSender(req.tenant, { sink });
     const realSend = createSender(req.tenant);
     await enqueue(`${req.tenant.id}:${waId}`, () => handleInbound(req.tenant, ev, (to, m) => (to === waId ? send(to, m) : realSend(to, m))));

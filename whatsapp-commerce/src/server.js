@@ -55,6 +55,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   initDb();
   installCrashAlerts();
   startJobs();
+  // build the local knowledge index for documents added before it existed
+  import('./ai/rag.js').then(async ({ reindexTenant }) => { for (const r of getDb().prepare('SELECT id FROM tenants').all()) await reindexTenant(r.id).catch(() => {}); });
   // daily backup (and one at start-up)
   const doBackup = () => { try { const b = backup(); if (b) console.log('[backup]', b.file); } catch (e) { alert(`Backup failed: ${e.message}`); } };
   setTimeout(doBackup, 30000).unref();
