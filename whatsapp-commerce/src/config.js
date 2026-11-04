@@ -21,6 +21,8 @@ export const config = {
   databasePath: env.DATABASE_PATH || './data/whatsapp-commerce.db',
   encryptionKey: env.ENCRYPTION_KEY || '',
   superAdminKey: env.SUPER_ADMIN_KEY || '',
+  // extra super-admin keys (comma separated) – lets you rotate SUPER_ADMIN_KEY without downtime
+  superAdminKeysExtra: String(env.SUPER_ADMIN_KEYS_EXTRA || '').split(',').map((s) => s.trim()).filter(Boolean),
   difyBaseUrl: (env.DIFY_BASE_URL || 'https://dify.rcshopper.com/v1').replace(/\/$/, ''),
   graphVersion: env.WHATSAPP_GRAPH_VERSION || 'v21.0',
   shopifyApiVersion: env.SHOPIFY_API_VERSION || '2025-07',

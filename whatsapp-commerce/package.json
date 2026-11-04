@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.js",
     "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
+    "rotate-keys": "node --disable-warning=ExperimentalWarning -e \"import('./src/db.js').then(async (db) => { db.initDb(); const p = await import('./src/privacy.js'); console.log(p.rotateEncryption()); })\"",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
   },
   "dependencies": {

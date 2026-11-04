@@ -156,6 +156,19 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
 );
 CREATE INDEX IF NOT EXISTS idx_kdocs_tenant ON knowledge_docs(tenant_id, status);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT,
+  actor TEXT,
+  role TEXT,
+  action TEXT NOT NULL,
+  target TEXT,
+  detail TEXT,
+  ip TEXT,
+  status INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id, id);
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id TEXT NOT NULL,

@@ -96,6 +96,7 @@ export function defaultSettings(name) {
       // Templates used automatically when a customer/staff member is outside the 24h window
       templates: { orderUpdate: '', paymentReminder: '', staffAlert: '' },
     },
+    privacy: { retentionMonths: 24 }, // chat transcripts older than this are deleted automatically
     storeWebhookSecret: randomToken(18),
   };
 }

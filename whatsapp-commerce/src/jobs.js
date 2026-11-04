@@ -11,6 +11,7 @@ import { enqueue, recoverUnprocessed } from './whatsapp/webhook.js';
 import { runAbandonedCheckouts } from './routes/storeWebhooks.js';
 import { enforceTrials } from './platform.js';
 import { HAS_CONSENT_SQL } from './consent.js';
+import { applyRetention } from './privacy.js';
 
 /** Scheduled work: flow delays and campaigns. */
 export async function runScheduled() {
@@ -74,6 +75,7 @@ export function startJobs() {
   const daily = setInterval(() => {
     runWinBack().catch((e) => console.error('[jobs]', e));
     try { const n = enforceTrials(); if (n) console.log(`[billing] paused ${n} expired trial(s)`); } catch (e) { console.error('[jobs]', e); }
+    try { const n = applyRetention(); if (n) console.log(`[retention] deleted ${n} old message(s)`); } catch (e) { console.error('[jobs]', e); }
   }, 3600000);
   timer.unref();
   daily.unref();

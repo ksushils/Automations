@@ -473,7 +473,15 @@ async function contacts(q = '', tag = '') {
     ${contacts.slice(0, 500).map((c) => `<tr><td>${esc(c.name || '')}</td><td>+${esc(c.wa_id)}</td><td>${c.tags.map((t) => `<span class="pill">${esc(t)}</span>`).join(' ')}</td>
       <td class="mute">${[c.email, ...Object.entries(c.attributes).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).map(esc).join('<br>')}</td>
       <td class="mute">${c.source ? esc(c.source.source_type === 'ad' ? '📣 Ad ' + (c.source.headline || c.source.source_id || '') : c.source.source_type || 'link') : ''}</td>
-      <td>${c.opted_in_marketing ? '✅' : '—'}</td><td><button class="btn ghost" data-tag="${esc(c.wa_id)}">+ Tag</button></td></tr>`).join('')}</table></div></div>`;
+      <td>${c.opted_in_marketing ? '✅' : '—'}</td><td><button class="btn ghost" data-tag="${esc(c.wa_id)}">+ Tag</button>${owner ? ` <button class="btn ghost" data-dsar="${esc(c.wa_id)}" title="Download everything held about this person">Export</button> <button class="btn ghost" data-erase="${esc(c.wa_id)}">Erase</button>` : ''}</td></tr>`).join('')}</table></div></div>`;
+  $('#app').querySelectorAll('[data-dsar]').forEach((b) => (b.onclick = async () => {
+    const r = await fetch('/api' + T(`/contacts/${b.dataset.dsar}/export`), { headers: { Authorization: 'Bearer ' + S.key } });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob()); a.download = `data-export-${b.dataset.dsar}.json`; a.click();
+  }));
+  $('#app').querySelectorAll('[data-erase]').forEach((b) => (b.onclick = async () => {
+    if (prompt(`Type ERASE to permanently delete all data for +${b.dataset.erase} (orders are anonymised, opt-out kept)`) !== 'ERASE') return;
+    try { await api(T(`/contacts/${b.dataset.erase}/erase`), { method: 'POST', body: { confirm: true } }); toast('Erased'); contacts(q, tag); } catch (e) { toast(e.message); }
+  }));
   $('#cq').onchange = () => contacts($('#cq').value, $('#ct').value);
   $('#ct').onchange = () => contacts($('#cq').value, $('#ct').value);
   $('#app').querySelector('[data-csv]').onclick = () => downloadCsv('customers');
@@ -764,7 +772,9 @@ async function team() {
   const { staff } = await api(T('/staff'));
   $('#app').innerHTML = `<div class="card"><h2>Team logins</h2><p class="mute"><b>Staff</b> can see orders, inbox, analytics and the test bot. <b>Owner</b> can also change settings, AI, broadcasts and the team. Each person signs in with the tenant ID <code>${esc(S.tenantId)}</code> and their own key.</p>
     <div class="row"><div><label>Name</label><input id="sn"></div><div><label>Role</label><select id="sr"><option value="staff">Staff</option><option value="owner">Owner</option></select></div><div style="align-self:end"><button class="btn" id="sa">Add team member</button></div></div><div id="skey"></div></div>
+    <div class="card"><h2>Activity log</h2><div class="tablewrap" style="max-height:320px;overflow:auto"><table id="audit"><tr><td class="mute">Loading…</td></tr></table></div></div>
     <div class="card"><table><tr><th>Name</th><th>Role</th><th>Added</th><th></th></tr>${staff.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.role)}</td><td>${esc(m.created_at)}</td><td><button class="btn ghost" data-del="${m.id}">Remove</button></td></tr>`).join('') || '<tr><td colspan="4" class="mute">No team members yet</td></tr>'}</table></div>`;
+  api(T('/audit')).then((r) => { $('#audit').innerHTML = '<tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Result</th></tr>' + r.audit.map((x) => `<tr><td class="mute">${esc(x.created_at)}</td><td>${esc(x.actor)}</td><td><code>${esc(x.action)}</code></td><td>${esc(x.status)}</td></tr>`).join(''); }).catch(() => {});
   $('#sa').onclick = async () => {
     try { const r = await api(T('/staff'), { method: 'POST', body: { name: $('#sn').value, role: $('#sr').value } }); await team(); $('#skey').innerHTML = `<p>✅ Key for ${esc($('#sn').value || 'member')} (shown once): <code>${esc(r.key)}</code></p>`; } catch (e) { toast(e.message); }
   };

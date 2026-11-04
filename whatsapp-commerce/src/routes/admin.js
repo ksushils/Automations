@@ -21,6 +21,8 @@ import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaig
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile, templateWarnings, cachedTemplates } from '../templates.js';
 import { fetchMedia, logMessage } from '../whatsapp/cloudApi.js';
 import { parseCsv } from '../csv.js';
+import { audit, listAudit, exportPerson, erasePerson, isSuppressed, rotateEncryption } from '../privacy.js';
+import { currentKeyId } from '../crypto.js';
 import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
@@ -32,7 +34,7 @@ import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, build
 import { listDocs, addTextDoc, addFileDoc, removeDoc, importUrl, onboardFromWebsite, searchKnowledge } from '../knowledge.js';
 
 const bearer = (req) => (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-const isSuper = (req) => !!config.superAdminKey && safeEqual(bearer(req), config.superAdminKey);
+const isSuper = (req) => [config.superAdminKey, ...(config.superAdminKeysExtra || [])].filter((k) => k && k.length >= 16).some((k) => safeEqual(bearer(req), k));
 
 function requireSuper(req, res, next) {
   if (!isSuper(req)) return res.status(401).json({ error: 'super admin key required' });
@@ -73,6 +75,28 @@ const view = (t) => ({ id: t.id, name: t.name, plan: t.plan, active: t.active, c
 export function adminRouter() {
   const r = express.Router();
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+  // ----- audit trail: every change and every data export (values are not stored, only which fields) -----
+  r.use((req, res, next) => {
+    const auditable = req.method !== 'GET' || /\/export\/|\/contacts\/[^/]+\/export|\/media\//.test(req.path);
+    if (!auditable || /\/simulate$|^\/signup$/.test(req.path)) return next();
+    res.on('finish', () => {
+      const m = req.path.match(/^\/tenants\/([^/]+)/);
+      try {
+        audit({
+          tenantId: m?.[1] || null,
+          actor: req.staff?.name || (req.isSuper ? 'super-admin' : req.role === 'owner' ? 'owner' : 'unknown'),
+          role: req.isSuper ? 'super' : req.role || null,
+          action: `${req.method} ${req.path.replace(/^\/tenants\/[^/]+/, '/tenants/:id')}`,
+          target: req.path,
+          detail: req.body && typeof req.body === 'object' ? { fields: Object.keys(req.body).slice(0, 30) } : null,
+          ip: req.ip,
+          status: res.statusCode,
+        });
+      } catch (e) { console.warn('[audit]', e.message); }
+    });
+    next();
+  });
 
   r.get('/plans', (req, res) => res.json({ plans: PLANS, storeTypes: STORE_TYPES, signupEnabled: config.signupEnabled, billing: billingConfigured(), trialDays: config.trialDays, productName: config.productName, supportEmail: config.supportEmail }));
   r.get('/meta/config', (req, res) => res.json({ enabled: embeddedSignupConfigured(), appId: config.metaAppId || null, configId: config.metaConfigId || null, graphVersion: config.graphVersion }));
@@ -121,6 +145,8 @@ export function adminRouter() {
   });
   r.post('/tenants/:tenantId/rotate-keys', requireSuper, (req, res) => res.json(rotateKeys(req.params.tenantId)));
   r.get('/system/status', requireSuper, (req, res) => res.json(systemStatus()));
+  r.get('/system/audit', requireSuper, (req, res) => res.json({ audit: listAudit(null, { limit: 500 }) }));
+  r.post('/system/rotate-encryption', requireSuper, (req, res) => res.json({ ok: true, keyId: currentKeyId(), ...rotateEncryption() }));
   r.get('/system/dead-letters', requireSuper, (req, res) => res.json({ messages: getDb().prepare("SELECT tenant_id, wa_id, wa_message_id, attempts, created_at, body FROM messages WHERE direction = 'in' AND processed = -1 ORDER BY id DESC LIMIT 200").all().map((m) => ({ ...m, body: json(m.body, {}) })) }));
   r.post('/system/dead-letters/retry', requireSuper, (req, res) => res.json({ requeued: getDb().prepare("UPDATE messages SET processed = 0, attempts = 0, created_at = datetime('now', '-1 minute') WHERE direction = 'in' AND processed = -1").run().changes }));
   r.post('/system/backup', requireSuper, (req, res) => { try { res.json(backup() || { skipped: 'in-memory database' }); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -254,7 +280,8 @@ export function adminRouter() {
       getDb().prepare(`INSERT INTO customers (tenant_id, wa_id, name, email) VALUES (?, ?, ?, ?)
         ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = COALESCE(excluded.name, customers.name), email = COALESCE(excluded.email, customers.email)`)
         .run(req.tenant.id, wa, name || null, email || null);
-      if (/^(y|yes|true|1)$/i.test(opt_in || '') && declared) {
+      if (/^(y|yes|true|1)$/i.test(opt_in || '') && declared && isSuppressed(req.tenant.id, wa)) { errors.push(`line ${i + 2}: ${r.phone} previously opted out / asked to be erased – not opted in`); }
+      else if (/^(y|yes|true|1)$/i.test(opt_in || '') && declared) {
         recordConsent(req.tenant.id, wa, { status: 'granted', source: `import:${String(consent_source || decl.source).slice(0, 60)}`, wording: decl.wording, evidence: `CSV import ${new Date().toISOString().slice(0, 10)}${consent_date ? `; consented ${consent_date}` : ''}`, actor: req.staff?.name || 'owner' });
         consented++;
       }
@@ -262,6 +289,14 @@ export function adminRouter() {
       imported++;
     });
     res.json({ imported, consented, errors: errors.slice(0, 20), note: declared ? `${consented} contact(s) opted in with your consent declaration recorded.` : 'Contacts were imported WITHOUT marketing consent. To import opt-ins, confirm where the consent came from and the wording people agreed to.' });
+  });
+  r.get('/tenants/:tenantId/audit', requireTenant, requireOwner, (req, res) => res.json({ audit: listAudit(req.tenant.id) }));
+  r.get('/tenants/:tenantId/contacts/:waId/export', requireTenant, requireOwner, (req, res) => {
+    res.attachment(`data-export-${req.params.waId}.json`).json(exportPerson(req.tenant.id, req.params.waId));
+  });
+  r.post('/tenants/:tenantId/contacts/:waId/erase', requireTenant, requireOwner, (req, res) => {
+    if (req.body?.confirm !== true) return res.status(400).json({ error: 'Send {"confirm": true} to permanently erase this person\'s data' });
+    res.json({ ok: true, erased: erasePerson(req.tenant.id, req.params.waId), note: 'Chats and contact deleted, orders anonymised (kept for accounting), consent kept as a hashed suppression record.' });
   });
   r.get('/tenants/:tenantId/contacts/:waId/consent', requireTenant, (req, res) => res.json({ history: consentHistory(req.tenant.id, req.params.waId) }));
   r.get('/tenants/:tenantId/export/consent.csv', requireTenant, requireOwner, (req, res) => {
