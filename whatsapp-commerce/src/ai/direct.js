@@ -21,11 +21,18 @@ export function providerPrefs() {
   return Object.keys(p).length ? p : undefined;
 }
 
+/** Cost of one call in micro-USD: provider-reported (OpenRouter usage.cost) or tokens x configured prices. */
+export function costMicro(usage = {}) {
+  if (Number.isFinite(Number(usage.cost))) return Math.round(Number(usage.cost) * 1e6);
+  const inT = Number(usage.prompt_tokens) || 0, outT = Number(usage.completion_tokens) || 0;
+  return Math.round(inT * config.aiPriceInPerMTok + outT * config.aiPriceOutPerMTok);
+}
+
 export async function chatCompletion({ messages, tools, model, temperature = 0.4, maxTokens = 600 }) {
   const res = await fetch(`${config.aiBaseUrl}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.aiApiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': config.publicUrl, 'X-Title': config.productName },
-    body: JSON.stringify({ model: model || config.aiModel, messages, temperature, max_tokens: maxTokens, ...(tools ? { tools, tool_choice: 'auto' } : {}), ...(providerPrefs() ? { provider: providerPrefs() } : {}) }),
+    body: JSON.stringify({ model: model || config.aiModel, messages, temperature, max_tokens: maxTokens, ...(tools ? { tools, tool_choice: 'auto' } : {}), ...(providerPrefs() ? { provider: providerPrefs() } : {}), ...(/openrouter\.ai/.test(config.aiBaseUrl) ? { usage: { include: true } } : {}) }),
     signal: AbortSignal.timeout(60000),
   });
   const data = await res.json().catch(() => ({}));
@@ -85,6 +92,7 @@ export async function directTurn(ctx, text) {
   for (let step = 0; step < 6; step++) {
     const res = await chatCompletion({ messages, model, temperature, tools: agent ? TOOL_DEFS : undefined });
     bumpUsage(ctx.tenant.id, 'ai_tokens', Number(res.usage?.total_tokens) || 0);
+    bumpUsage(ctx.tenant.id, 'ai_cost_micro', costMicro(res.usage));
     const msg = res.choices?.[0]?.message || {};
     if (agent && msg.tool_calls?.length) {
       messages.push({ role: 'assistant', content: msg.content || null, tool_calls: msg.tool_calls });

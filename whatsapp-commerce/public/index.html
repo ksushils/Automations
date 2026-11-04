@@ -168,7 +168,7 @@ async function overview() {
   $('#app').innerHTML = `<div class="row">
       <div class="card"><div class="mute">Messages in (month)</div><div class="stat">${t.usage.inbound}${lim.monthlyConversationsIn ? ` / ${lim.monthlyConversationsIn}` : ''}</div></div>
       <div class="card"><div class="mute">Orders (month)</div><div class="stat">${t.usage.orders}</div></div>
-      <div class="card"><div class="mute">AI replies (month)</div><div class="stat">${t.usage.ai_calls}${lim.aiCalls ? ` / ${lim.aiCalls}` : ''}</div></div>
+      <div class="card"><div class="mute">AI replies (month)</div><div class="stat">${t.usage.ai_calls}${lim.aiCalls ? ` / ${lim.aiCalls}` : ''}</div><div class="mute">AI spend $${((t.usage.ai_cost_micro || 0) / 1e6).toFixed(2)}${lim.aiBudgetUsd != null ? ` of $${(s.ai?.budgetUsd ?? lim.aiBudgetUsd)} cap` : ''}</div></div>
       <div class="card"><div class="mute">Plan</div><div class="stat">${esc(lim.label || t.plan)}</div></div>
       <div class="card"><div class="mute">Est. Meta fees (month)</div><div class="stat" id="metacost">…</div><div class="mute" id="metafree"></div></div></div>
     <div class="card" id="wizard"><h2>Get your WhatsApp shop live</h2><div class="mute">Loading…</div></div>
@@ -225,7 +225,7 @@ async function ai() {
     <div class="card"><h2>🤖 AI chatbot</h2>
       <div class="row"><div><label>AI engine</label><select id="aiprov">
         <option value="direct" ${info.provider === 'direct' ? 'selected' : ''}>Direct – OpenRouter / OpenAI (built in)${info.direct.configured ? '' : ' – not configured on server'}</option>
-        <option value="dify" ${info.provider === 'dify' ? 'selected' : ''}>Dify app${info.configured ? '' : ' – console not configured'}</option></select></div>
+        ${info.difyAllowed ? `<option value="dify" ${info.provider === 'dify' ? 'selected' : ''}>Dify app${info.configured ? '' : ' – console not configured'}</option>` : ''}</select></div>
         ${info.provider === 'direct' ? `<div><label>Model (blank = server default <code>${esc(info.direct.defaultModel)}</code>)</label><input data-a="directModel" value="${esc(a.directModel || '')}" placeholder="${esc(info.direct.defaultModel)}"></div>` : ''}</div>
       ${info.provider === 'direct' ? `<p>${info.direct.configured ? '✅ Built-in AI ready' : '<span class="pill warn">Set AI_API_KEY (and optionally AI_MODEL) on the server</span>'} · knowledge base searched in-app${info.direct.embeddings ? ' (semantic + keyword)' : ' (keyword)'}${info.direct.zeroRetention && /openrouter/.test(info.direct.baseUrl) ? ' · zero data retention routing' : ''}${info.direct.providers.length ? ' · providers: ' + esc(info.direct.providers.join(', ')) : ''}</p>` : ''}
       <div ${info.provider === 'direct' ? 'hidden' : ''}>
@@ -497,7 +497,7 @@ async function campaigns() {
     <p class="mute">Campaigns use approved WhatsApp templates and go to opted-in contacts. Schedule up to 2 months ahead; retarget people who didn't read or reply.</p>
     <div class="row">
       <div><label>Name</label><input id="cn" placeholder="Black Friday"></div>
-      <div><label>Template</label>${approved.length ? `<select id="ctpl">${approved.map((t) => `<option value="${esc(t.name)}|${esc(t.language)}">${esc(t.name)} (${esc(t.language)})</option>`).join('')}</select>` : '<input id="ctpl" placeholder="template_name|en_GB">'}</div>
+      <div><label>Template</label>${approved.length ? `<select id="ctpl">${approved.map((t) => `<option value="${esc(t.name)}|${esc(t.language)}">${esc(t.name)} (${esc(t.language)}) · ${esc(t.category)}</option>`).join('')}</select>` : '<input id="ctpl" placeholder="template_name|en_GB">'}</div>
       <div><label>Body variables (comma; use {{name}} for first name)</label><input id="cv" placeholder="{{name}}, 20% off"></div>
       <div><label>Send at (empty = now)</label><input id="cwhen" type="datetime-local"></div></div>
     <h3>Audience</h3><div class="row">
@@ -516,9 +516,9 @@ async function campaigns() {
     hasOrdered: $('#aord').value === '' ? null : $('#aord').value === 'true', lastOrderOlderThanDays: Number($('#alast').value) || 0,
     retarget: $('#art').value ? { campaignId: Number($('#art').value), status: $('#arts').value } : undefined,
   });
-  $('#cprev').onclick = async () => { const r = await api(T('/campaigns/preview'), { method: 'POST', body: { audience: audience() } }); $('#cinfo').textContent = `${r.recipients} recipients · estimated Meta cost ≈ £${r.cost.estimatedGbp.toFixed(2)} (billed by Meta)`; };
+  $('#cprev').onclick = async () => { const r = await api(T('/campaigns/preview'), { method: 'POST', body: { audience: audience(), template: $('#ctpl').value.split('|')[0] } }); $('#cinfo').textContent = `${r.recipients} recipients · estimated Meta cost ≈ £${r.cost.estimatedGbp.toFixed(2)} (billed by Meta)`; };
   $('#cgo').onclick = async () => {
-    const pv = await api(T('/campaigns/preview'), { method: 'POST', body: { audience: audience() } });
+    const pv = await api(T('/campaigns/preview'), { method: 'POST', body: { audience: audience(), template: $('#ctpl').value.split('|')[0] } });
     if (!confirm(`Send to ${pv.recipients} opted-in contacts?\nEstimated Meta cost ≈ £${pv.cost.estimatedGbp.toFixed(2)} (billed to your Meta account).`)) return;
     const [template, language = 'en_GB'] = $('#ctpl').value.split('|');
     const vars = $('#cv').value.split(',').map((x) => x.trim()).filter(Boolean);
@@ -542,8 +542,8 @@ async function templates() {
       <label>Footer (optional)</label><input id="tf"><label>Quick-reply buttons (comma, max 3)</label><input id="tq" placeholder="Shop now, Stop offers">
       <p><button class="btn" id="tgo">Submit for approval</button></p></div>
     <div class="card"><h2>Your templates</h2><div class="tablewrap"><table><tr><th>Name</th><th>Language</th><th>Category</th><th>Status</th><th></th></tr>
-    ${(r.templates || []).map((t) => `<tr><td><code>${esc(t.name)}</code></td><td>${esc(t.language)}</td><td>${esc(t.category)}</td><td>${t.status === 'APPROVED' ? '✅ ' : t.status === 'REJECTED' ? '❌ ' : '⏳ '}${esc(t.status)}${t.rejected_reason && t.rejected_reason !== 'NONE' ? ` <span class="mute">${esc(t.rejected_reason)}</span>` : ''}</td><td><button class="btn ghost" data-deltpl="${esc(t.name)}">Delete</button></td></tr>`).join('') || '<tr><td colspan="5" class="mute">None yet</td></tr>'}</table></div></div>`;
-  const submit = async (t) => { try { await api(T('/templates'), { method: 'POST', body: t }); toast('Submitted to Meta – approval usually takes minutes'); templates(); } catch (e) { toast(e.message); } };
+    ${(r.templates || []).map((t) => `<tr><td><code>${esc(t.name)}</code></td><td>${esc(t.language)}</td><td>${esc(t.category)}</td><td>${t.status === 'APPROVED' ? '✅ ' : t.status === 'REJECTED' ? '❌ ' : '⏳ '}${esc(t.status)}${t.rejected_reason && t.rejected_reason !== 'NONE' ? ` <span class="mute">${esc(t.rejected_reason)}</span>` : ''}${t.previous_category ? ` <span class="pill warn">Meta changed category ${esc(t.previous_category)} → ${esc(t.category)}</span>` : ''}</td><td><button class="btn ghost" data-deltpl="${esc(t.name)}">Delete</button></td></tr>`).join('') || '<tr><td colspan="5" class="mute">None yet</td></tr>'}</table></div></div>`;
+  const submit = async (t) => { try { const r = await api(T('/templates'), { method: 'POST', body: t }); toast((r.warnings || []).length ? '⚠️ ' + r.warnings.join(' ') : 'Submitted to Meta – approval usually takes minutes'); templates(); } catch (e) { toast(e.message); } };
   $('#app').querySelectorAll('[data-lib]').forEach((b) => (b.onclick = () => submit(r.library[+b.dataset.lib])));
   $('#tgo').onclick = () => submit({ name: $('#tn').value.trim(), category: $('#tc').value, language: $('#tl').value, header: $('#th').value, body: $('#tb').value, footer: $('#tf').value, examples: $('#tx').value.split(',').map((x) => x.trim()), buttons: $('#tq').value.split(',').map((x) => x.trim()).filter(Boolean).map((text) => ({ text })) });
   $('#app').querySelectorAll('[data-deltpl]').forEach((b) => (b.onclick = async () => { if (confirm('Delete template ' + b.dataset.deltpl + '?')) { await api(T('/templates/' + b.dataset.deltpl), { method: 'DELETE' }).catch((e) => toast(e.message)); templates(); } }));

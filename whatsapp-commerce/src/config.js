@@ -78,4 +78,10 @@ Object.assign(config, {
   embeddingsBaseUrl: (env.EMBEDDINGS_BASE_URL || env.AI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
   embeddingsApiKey: env.EMBEDDINGS_API_KEY || env.AI_API_KEY || '',
   embeddingsModel: env.EMBEDDINGS_MODEL || '', // e.g. text-embedding-3-small – empty = keyword (FTS) search only
+  // Fallback prices (USD per million tokens) when the provider doesn't report cost (OpenRouter does)
+  // Dify's licence forbids running it as a multi-tenant service without written permission.
+  // Only set DIFY_LICENSED=true if you hold that permission; otherwise Dify is limited to shops you mark difyAllowed.
+  difyLicensed: env.DIFY_LICENSED === 'true',
+  aiPriceInPerMTok: Number(env.AI_PRICE_INPUT_PER_MTOK || 0.15),
+  aiPriceOutPerMTok: Number(env.AI_PRICE_OUTPUT_PER_MTOK || 0.6),
 });

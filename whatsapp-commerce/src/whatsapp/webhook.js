@@ -35,6 +35,12 @@ async function processStored(tenant, ev, waMessageId, send) {
  * Only recent ones (< 2h) and at most 3 attempts, so a poison message can't loop forever.
  */
 export async function recoverUnprocessed({ olderThanSec = 20 } = {}) {
+  // Give up after 3 attempts: park as dead-letter (processed = -1) and alert, so nothing vanishes silently
+  const dead = getDb().prepare("SELECT tenant_id, wa_id, wa_message_id FROM messages WHERE direction = 'in' AND processed = 0 AND attempts >= 3").all();
+  if (dead.length) {
+    getDb().prepare("UPDATE messages SET processed = -1 WHERE direction = 'in' AND processed = 0 AND attempts >= 3").run();
+    alert(`${dead.length} inbound message(s) failed 3 times and were moved to dead-letter: ${dead.slice(0, 5).map((d) => `${d.tenant_id}/${d.wa_id}`).join(', ')}`, { key: 'dead-letter' });
+  }
   const rows = getDb().prepare(`SELECT tenant_id, wa_id, wa_message_id, body FROM messages WHERE direction = 'in' AND processed = 0 AND attempts < 3
      AND created_at < datetime('now', ?) AND created_at > datetime('now', '-2 hours') ORDER BY id LIMIT 200`).all(`-${olderThanSec} seconds`);
   let n = 0;

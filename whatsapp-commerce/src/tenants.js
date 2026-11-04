@@ -4,9 +4,9 @@ import { config } from './config.js';
 
 /** Plans you sell. Limits are per calendar month. null = unlimited. */
 export const PLANS = {
-  starter: { label: 'Starter', priceGbp: 29, monthlyConversationsIn: 1000, aiCalls: 300, knowledgeDocs: 20, broadcasts: false, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
-  growth: { label: 'Growth', priceGbp: 79, monthlyConversationsIn: 5000, aiCalls: 3000, knowledgeDocs: 100, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
-  pro: { label: 'Pro', priceGbp: 199, monthlyConversationsIn: null, aiCalls: 20000, knowledgeDocs: 500, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
+  starter: { label: 'Starter', priceGbp: 29, monthlyConversationsIn: 1000, aiCalls: 300, aiBudgetUsd: 5, knowledgeDocs: 20, broadcasts: false, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
+  growth: { label: 'Growth', priceGbp: 79, monthlyConversationsIn: 5000, aiCalls: 3000, aiBudgetUsd: 20, knowledgeDocs: 100, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
+  pro: { label: 'Pro', priceGbp: 199, monthlyConversationsIn: null, aiCalls: 20000, aiBudgetUsd: 80, knowledgeDocs: 500, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
 };
 
 export function defaultSettings(name) {
@@ -197,7 +197,7 @@ export function authenticateToolKey(tenantId, key) {
 const period = () => new Date().toISOString().slice(0, 7);
 
 export function bumpUsage(tenantId, field, n = 1) {
-  if (!['inbound', 'outbound', 'ai_calls', 'orders', 'ai_tokens'].includes(field)) return;
+  if (!['inbound', 'outbound', 'ai_calls', 'orders', 'ai_tokens', 'ai_cost_micro'].includes(field)) return;
   getDb()
     .prepare(`INSERT INTO usage (tenant_id, period, ${field}) VALUES (?, ?, ?) ON CONFLICT(tenant_id, period) DO UPDATE SET ${field} = ${field} + excluded.${field}`)
     .run(tenantId, period(), n);
@@ -211,6 +211,11 @@ export function withinLimit(tenant, kind) {
   const plan = PLANS[tenant.plan] || PLANS.starter;
   const u = getUsage(tenant.id);
   if (kind === 'inbound') return plan.monthlyConversationsIn == null || u.inbound < plan.monthlyConversationsIn;
-  if (kind === 'ai') return plan.aiCalls == null || u.ai_calls < plan.aiCalls;
+  // AI: both a reply count and a hard monthly spend cap (long chats + big knowledge bases cost more per reply)
+  if (kind === 'ai') {
+    const budget = tenant.settings?.ai?.budgetUsd ?? plan.aiBudgetUsd;
+    const spentOk = budget == null || (u.ai_cost_micro || 0) < budget * 1e6;
+    return (plan.aiCalls == null || u.ai_calls < plan.aiCalls) && spentOk;
+  }
   return true;
 }

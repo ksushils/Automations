@@ -160,3 +160,63 @@ test('coexistence webhooks: contacts sync, history import, account offboarding, 
   await processWebhookBody({ entry: [{ id: 'WABAH', changes: [{ field: 'account_update', value: { event: 'PARTNER_REMOVED' } }] }] });
   assert.equal(tenants.getTenant(t.id).settings.whatsapp.numberStatus, 'offboarded');
 });
+
+test('Dify gate: tenants cannot switch to the shared Dify without a licence/grant; own Dify is fine', () => withServer(async (base) => {
+  const { difyAllowed } = await import('../src/ai/gate.js');
+  const { config } = await import('../src/config.js');
+  const { tenant, adminKey } = tenants.createTenant({ name: 'Gate Shop' });
+  const H = { Authorization: 'Bearer ' + adminKey, 'Content-Type': 'application/json' };
+  assert.equal(difyAllowed(tenants.getTenant(tenant.id)), false);
+  let r = await fetch(`${base}/api/tenants/${tenant.id}/settings`, { method: 'PATCH', headers: H, body: JSON.stringify({ ai: { provider: 'dify' } }) });
+  assert.equal(r.status, 403);
+  r = await fetch(`${base}/api/tenants/${tenant.id}/settings`, { method: 'PATCH', headers: H, body: JSON.stringify({ difyAllowed: true }) });
+  assert.equal(tenants.getTenant(tenant.id).settings.difyAllowed, undefined); // owners can't grant themselves
+  assert.equal((await fetch(`${base}/api/tenants/${tenant.id}/ai/provision`, { method: 'POST', headers: H })).status, 403);
+  // super admin grant
+  await fetch(`${base}/api/tenants/${tenant.id}/settings`, { method: 'PATCH', headers: { ...H, Authorization: 'Bearer super-admin-test-key' }, body: JSON.stringify({ difyAllowed: true }) });
+  assert.equal(difyAllowed(tenants.getTenant(tenant.id)), true);
+  // a shop using its OWN Dify (different host) is not our multi-tenant use
+  const { tenant: t2 } = tenants.createTenant({ name: 'Own Dify' });
+  tenants.updateTenantSettings(t2.id, { dify: { apiKey: 'app-own', baseUrl: 'https://dify.ownshop.example/v1' } });
+  assert.equal(difyAllowed(tenants.getTenant(t2.id)), true);
+  tenants.updateTenantSettings(t2.id, { dify: { baseUrl: config.difyConsoleUrl + '/v1' } });
+  assert.equal(difyAllowed(tenants.getTenant(t2.id)), false);
+}));
+
+test('marketing templates always get an opt-out; promo "utility" templates are flagged; campaigns refuse templates without opt-out', () => withServer(async (base) => {
+  const { buildTemplate, templateWarnings, cacheTemplates, TEMPLATE_LIBRARY, hasOptOut } = await import('../src/templates.js');
+  const p = buildTemplate({ name: 'flash_sale', category: 'MARKETING', body: '20% off today, {{1}}!', examples: ['Jo'] });
+  assert.equal(p.components.at(-1).buttons.at(-1).text, 'Stop offers');
+  assert.equal(buildTemplate({ name: 'x', category: 'MARKETING', body: 'Sale on! Reply STOP to opt out' }).components.some((c) => c.type === 'BUTTONS'), false);
+  assert.match(templateWarnings({ category: 'UTILITY', body: 'Your order shipped – use code SAVE10 for 10% off next time' })[0], /recategorise it as MARKETING/);
+  assert.equal(templateWarnings({ category: 'UTILITY', body: 'Your order {{1}} has shipped' }).length, 0);
+  for (const t of TEMPLATE_LIBRARY.filter((x) => x.category === 'MARKETING')) assert.ok(hasOptOut(buildTemplate(t).components), t.name);
+  const { tenant, adminKey } = tenants.createTenant({ name: 'Tpl Shop', plan: 'pro' });
+  cacheTemplates(tenant.id, [{ name: 'old_promo', category: 'MARKETING', components: [{ type: 'BODY', text: 'Big sale!' }] }, { name: 'order_update', category: 'UTILITY', components: [{ type: 'BODY', text: 'Order update' }] }]);
+  const H = { Authorization: 'Bearer ' + adminKey, 'Content-Type': 'application/json' };
+  let r = await fetch(`${base}/api/tenants/${tenant.id}/campaigns`, { method: 'POST', headers: H, body: JSON.stringify({ template: 'old_promo' }) });
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).error, /no opt-out/);
+  r = await fetch(`${base}/api/tenants/${tenant.id}/campaigns/preview`, { method: 'POST', headers: H, body: JSON.stringify({ template: 'order_update', audience: { optedInOnly: false } }) });
+  assert.equal((await r.json()).cost.category, 'utility');
+}));
+
+test('dead-letter: after 3 failed attempts a message is parked and alerted, and can be re-queued', async () => {
+  const { recoverUnprocessed } = await import('../src/whatsapp/webhook.js');
+  const t = makeTenant();
+  getDb().prepare("INSERT INTO messages (tenant_id, wa_id, direction, type, body, wa_message_id, processed, attempts, created_at) VALUES (?, '4477009', 'in', 'text', '{}', 'wamid.poison', 0, 3, datetime('now','-5 minutes'))").run(t.id);
+  await recoverUnprocessed();
+  assert.equal(getDb().prepare("SELECT processed FROM messages WHERE wa_message_id = 'wamid.poison'").get().processed, -1);
+  const { systemStatus } = await import('../src/ops.js');
+  assert.ok(systemStatus().deadLetters >= 1);
+});
+
+test('AI hard spend cap blocks AI even with replies left', async () => {
+  const t = makeTenant();
+  tenants.updateTenantMeta(t.id, { plan: 'starter' });
+  getDb().prepare("INSERT INTO usage (tenant_id, period, ai_calls, ai_cost_micro) VALUES (?, ?, 10, 6000000) ON CONFLICT(tenant_id, period) DO UPDATE SET ai_cost_micro = 6000000").run(t.id, new Date().toISOString().slice(0, 7));
+  assert.equal(tenants.withinLimit(tenants.getTenant(t.id), 'ai'), false); // $6 spent > $5 Starter cap
+  const { costMicro } = await import('../src/ai/direct.js');
+  assert.equal(costMicro({ cost: 0.0012 }), 1200);
+  assert.equal(costMicro({ prompt_tokens: 1000000, completion_tokens: 0 }), 150000);
+});

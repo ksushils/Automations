@@ -13,6 +13,7 @@ import { alert } from '../ops.js';
 import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 import { recordConsent, defaultWording } from '../consent.js';
 import { directConfigured, directTurn } from '../ai/direct.js';
+import { difyAllowed } from '../ai/gate.js';
 
 const consentWording = (ctx) => ctx.S.notifications?.consentWording || defaultWording(ctx.S.business.name);
 
@@ -649,8 +650,10 @@ export async function handleInbound(tenant, event, send) {
 /** Which AI engine serves this shop: explicit setting, else Dify if the shop has a Dify app, else direct. */
 function aiProvider(ctx) {
   const p = ctx.S.ai?.provider;
-  if (p === 'direct' || p === 'dify') return p;
-  return ctx.S.dify?.enabled && ctx.S.dify?.apiKey ? 'dify' : 'direct';
+  if (p === 'direct') return 'direct';
+  const difyReady = ctx.S.dify?.enabled && ctx.S.dify?.apiKey && difyAllowed(ctx.tenant);
+  if (p === 'dify') return difyReady ? 'dify' : 'direct';
+  return difyReady ? 'dify' : 'direct';
 }
 
 /** Is an AI engine configured for this shop (Dify app or direct provider)? */

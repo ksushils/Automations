@@ -39,12 +39,23 @@ export function estimateCampaign(recipients, category = 'marketing') {
 export function monthEstimate(tenantId) {
   const d = getDb();
   const since = "datetime('now', 'start of month')";
-  const out = d.prepare(`SELECT wa_id, type FROM messages WHERE tenant_id = ? AND direction = 'out' AND created_at >= ${since}`).all(tenantId);
+  const out = d.prepare(`SELECT wa_id, type, body FROM messages WHERE tenant_id = ? AND direction = 'out' AND created_at >= ${since}`).all(tenantId);
+  let cats = {};
+  try { cats = JSON.parse(d.prepare('SELECT value FROM kv WHERE key = ?').get(`tpl:${tenantId}`)?.value || '{}'); } catch {}
+  let unknownCategory = 0;
   const campaignIds = new Set(d.prepare(`SELECT wa_id || ':' || campaign_id AS k FROM message_status WHERE tenant_id = ? AND campaign_id IS NOT NULL AND updated_at >= ${since}`).all(tenantId).map((r) => r.k));
   let service = 0, serviceCost = 0, templates = 0, templateCost = 0;
   const serviceRows = [];
   for (const m of out) {
-    if (m.type === 'template') { templates++; templateCost += rateFor(m.wa_id, 'marketing'); } else { service++; serviceRows.push(m.wa_id); }
+    if (m.type === 'template') {
+      // priced by the template's actual Meta category (falls back to marketing = upper bound when unknown)
+      let name = null;
+      try { name = JSON.parse(m.body || '{}').name; } catch {}
+      const cat = String(cats[name]?.category || '').toLowerCase();
+      if (!cat) unknownCategory++;
+      templates++;
+      templateCost += rateFor(m.wa_id, ['utility', 'authentication', 'marketing'].includes(cat) ? cat : 'marketing');
+    } else { service++; serviceRows.push(m.wa_id); }
   }
   for (const w of serviceRows.slice(FREE_SERVICE_PER_MONTH)) serviceCost += rateFor(w, 'service');
   return {
@@ -53,7 +64,8 @@ export function monthEstimate(tenantId) {
     freeServiceLeft: Math.max(0, FREE_SERVICE_PER_MONTH - service),
     serviceGbp: Math.round(serviceCost * 100) / 100,
     templateMessages: templates,
-    templateGbp: Math.round(templateCost * 100) / 100, // assumes marketing rate (upper bound)
+    templateGbp: Math.round(templateCost * 100) / 100,
+    templatesWithUnknownCategory: unknownCategory, // priced at the marketing rate until the Templates tab is opened once
     totalGbp: Math.round((serviceCost + templateCost) * 100) / 100,
     campaignsTracked: campaignIds.size,
     note: 'Estimate only – Meta bills you directly using its current rate card.',

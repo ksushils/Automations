@@ -195,7 +195,7 @@ const MIGRATIONS = {
   customers: { last_inbound_at: 'TEXT', winback_sent_at: 'TEXT', tags: "TEXT NOT NULL DEFAULT '[]'", attributes: "TEXT NOT NULL DEFAULT '{}'", source: 'TEXT' },
   conversations: { assigned_to: 'TEXT' },
   messages: { processed: 'INTEGER NOT NULL DEFAULT 1', attempts: 'INTEGER NOT NULL DEFAULT 0' },
-  usage: { ai_tokens: 'INTEGER NOT NULL DEFAULT 0' },
+  usage: { ai_tokens: 'INTEGER NOT NULL DEFAULT 0', ai_cost_micro: 'INTEGER NOT NULL DEFAULT 0' }, // micro-USD
   tenants: { owner_email: 'TEXT', stripe_customer_id: 'TEXT', subscription_id: 'TEXT', subscription_status: 'TEXT', trial_ends_at: 'TEXT' },
 };
 

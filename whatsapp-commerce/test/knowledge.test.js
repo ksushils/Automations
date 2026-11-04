@@ -95,7 +95,7 @@ test('NEW SHOP JOURNEY: sign up with website → catalogue + knowledge base + AI
   const difyUrl = await listen(dify);
 
   const prev = { ...config };
-  Object.assign(config, { difyConsoleUrl: difyUrl, difyAdminApiKey: 'ADMIN', difyWorkspaceId: 'ws', allowPrivateFetch: true });
+  Object.assign(config, { difyConsoleUrl: difyUrl, difyAdminApiKey: 'ADMIN', difyWorkspaceId: 'ws', allowPrivateFetch: true, difyLicensed: true }); // operator holds a Dify licence
   const app = createApp().listen(0);
   await new Promise((r) => app.once('listening', r));
   const base = `http://127.0.0.1:${app.address().port}`;

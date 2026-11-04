@@ -18,10 +18,11 @@ import { toCsv, productsFromCsv } from '../csv.js';
 import { analytics } from '../analytics.js';
 import { listFlows, getFlow, saveFlow, deleteFlow, validateFlow, getContact, updateContact } from '../bot/flows.js';
 import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaignStats } from '../campaigns.js';
-import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile } from '../templates.js';
+import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile, templateWarnings, cachedTemplates } from '../templates.js';
 import { fetchMedia, logMessage } from '../whatsapp/cloudApi.js';
 import { parseCsv } from '../csv.js';
 import { directConfigured } from '../ai/direct.js';
+import { difyAllowed } from '../ai/gate.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
 import { recordConsent, consentHistory, HAS_CONSENT_SQL } from '../consent.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
@@ -91,7 +92,7 @@ export function adminRouter() {
     const website = String(req.body?.website || '').trim();
     (async () => {
       if (website) await onboardFromWebsite(tenant.id, website).catch((e) => console.warn('[signup onboarding]', e.message));
-      if (consoleConfigured()) await provisionDifyBot(tenant.id).catch((e) => console.warn('[signup ai]', e.message));
+      if (consoleConfigured() && config.difyLicensed) await provisionDifyBot(tenant.id).catch((e) => console.warn('[signup ai]', e.message));
     })();
     let checkoutUrl = null;
     if (billingConfigured() && config.stripePrices[plan]) checkoutUrl = await createSubscriptionCheckout(getTenant(tenant.id), plan).catch((e) => { console.warn('[signup billing]', e.message); return null; });
@@ -108,7 +109,8 @@ export function adminRouter() {
     const { tenant, adminKey, toolKey } = createTenant({ name: String(req.body.name).slice(0, 80), plan: req.body.plan });
     // Automatically create the client's AI chatbot in Dify (if console access is configured)
     let ai = { created: false, reason: 'Dify console access not configured on the server' };
-    if (consoleConfigured() && req.body.createAiBot !== false) {
+    if (consoleConfigured() && req.body.createAiBot !== false && (config.difyLicensed || req.body.difyAllowed)) {
+      if (req.body.difyAllowed) updateTenantSettings(tenant.id, { difyAllowed: true });
       ai = await provisionDifyBot(tenant.id).then((r) => ({ created: true, ...r }), (e) => ({ created: false, reason: e.message }));
     }
     res.status(201).json({ tenant: view(getTenant(tenant.id)), adminKey, toolKey, ai, note: 'Store these keys now – they are not shown again.' });
@@ -119,6 +121,8 @@ export function adminRouter() {
   });
   r.post('/tenants/:tenantId/rotate-keys', requireSuper, (req, res) => res.json(rotateKeys(req.params.tenantId)));
   r.get('/system/status', requireSuper, (req, res) => res.json(systemStatus()));
+  r.get('/system/dead-letters', requireSuper, (req, res) => res.json({ messages: getDb().prepare("SELECT tenant_id, wa_id, wa_message_id, attempts, created_at, body FROM messages WHERE direction = 'in' AND processed = -1 ORDER BY id DESC LIMIT 200").all().map((m) => ({ ...m, body: json(m.body, {}) })) }));
+  r.post('/system/dead-letters/retry', requireSuper, (req, res) => res.json({ requeued: getDb().prepare("UPDATE messages SET processed = 0, attempts = 0, created_at = datetime('now', '-1 minute') WHERE direction = 'in' AND processed = -1").run().changes }));
   r.post('/system/backup', requireSuper, (req, res) => { try { res.json(backup() || { skipped: 'in-memory database' }); } catch (e) { res.status(500).json({ error: e.message }); } });
   r.delete('/tenants/:tenantId', requireSuper, (req, res) => { deleteTenant(req.params.tenantId); res.json({ ok: true }); });
 
@@ -269,13 +273,16 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/campaigns', requireTenant, (req, res) => res.json({ campaigns: listCampaigns(req.tenant.id) }));
   r.post('/tenants/:tenantId/campaigns/preview', requireTenant, (req, res) => {
     const list = resolveAudience(req.tenant.id, req.body?.audience || {});
-    res.json({ recipients: list.length, cost: estimateCampaign(list, req.body?.category === 'UTILITY' ? 'utility' : 'marketing') });
+    const cat = cachedTemplates(req.tenant.id)[req.body?.template]?.category || req.body?.category || 'MARKETING';
+    res.json({ recipients: list.length, cost: estimateCampaign(list, String(cat).toLowerCase() === 'utility' ? 'utility' : 'marketing') });
   });
   r.get('/tenants/:tenantId/meta-costs', requireTenant, (req, res) => res.json(monthEstimate(req.tenant.id)));
   r.post('/tenants/:tenantId/campaigns', requireTenant, requireOwner, (req, res) => {
     if (!PLANS[req.tenant.plan]?.broadcasts && !req.isSuper) return res.status(403).json({ error: 'Campaigns are not included in this plan' });
     if (!req.body?.template) return res.status(400).json({ error: 'template required' });
-    try { res.status(201).json({ campaign: createCampaign(req.tenant.id, req.body) }); } catch (e) { res.status(400).json({ error: e.message }); }
+    const tpl = cachedTemplates(req.tenant.id)[req.body.template];
+    if (tpl && tpl.category === 'MARKETING' && !tpl.optOut) return res.status(400).json({ error: `Template "${req.body.template}" has no opt-out. Marketing messages must include a "Stop offers" button or "Reply STOP" (UK PECR). Add one and resubmit the template.` });
+    try { res.status(201).json({ campaign: createCampaign(req.tenant.id, req.body), category: tpl?.category || 'unknown' }); } catch (e) { res.status(400).json({ error: e.message }); }
   });
   r.post('/tenants/:tenantId/campaigns/:cid/cancel', requireTenant, requireOwner, (req, res) => res.json({ ok: cancelCampaign(req.tenant.id, req.params.cid) }));
   r.get('/tenants/:tenantId/campaigns/:cid', requireTenant, (req, res) => res.json({ stats: campaignStats(req.tenant.id, req.params.cid) }));
@@ -285,7 +292,7 @@ export function adminRouter() {
     try { res.json({ templates: await listTemplates(req.tenant), library: TEMPLATE_LIBRARY }); } catch (e) { res.json({ templates: [], library: TEMPLATE_LIBRARY, error: e.message }); }
   }));
   r.post('/tenants/:tenantId/templates', requireTenant, requireOwner, wrap(async (req, res) => {
-    try { res.json({ ok: true, result: await createTemplate(req.tenant, req.body || {}) }); } catch (e) { res.status(400).json({ error: e.message }); }
+    try { res.json({ ok: true, warnings: templateWarnings(req.body || {}), result: await createTemplate(req.tenant, req.body || {}) }); } catch (e) { res.status(400).json({ error: e.message }); }
   }));
   r.delete('/tenants/:tenantId/templates/:name', requireTenant, requireOwner, wrap(async (req, res) => {
     try { res.json({ ok: true, result: await deleteTemplate(req.tenant, req.params.name) }); } catch (e) { res.status(400).json({ error: e.message }); }
@@ -352,6 +359,8 @@ export function adminRouter() {
   r.patch('/tenants/:tenantId/settings', requireTenant, requireOwner, (req, res) => {
     const patch = req.body || {};
     delete patch.storeWebhookSecret;
+    if (!req.isSuper) delete patch.difyAllowed; // only the platform operator can grant Dify
+    if (!req.isSuper && patch.ai?.provider === 'dify' && !difyAllowed(req.tenant)) return res.status(403).json({ error: 'The Dify engine is not available for this shop – use the built-in (Direct) AI.' });
     if (patch.store?.type && !STORE_TYPES.includes(patch.store.type)) return res.status(400).json({ error: 'invalid store type' });
     if (!req.isSuper && patch.store?.type && !(PLANS[req.tenant.plan]?.storeTypes || []).includes(patch.store.type)) return res.status(403).json({ error: 'store type not in plan' });
     const updated = updateTenantSettings(req.tenant.id, patch);
@@ -366,11 +375,12 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/ai', requireTenant, requireOwner, wrap(async (req, res) => {
     const models = await listDifyModels().catch((e) => ({ configured: consoleConfigured(), models: [], error: e.message }));
     const a = req.tenant.settings.ai || {};
-    const provider = a.provider === 'direct' || a.provider === 'dify' ? a.provider : req.tenant.settings.dify?.enabled && req.tenant.settings.dify?.apiKey ? 'dify' : 'direct';
+    const provider = (a.provider === 'dify' || (!a.provider && req.tenant.settings.dify?.enabled && req.tenant.settings.dify?.apiKey)) && difyAllowed(req.tenant) ? 'dify' : 'direct';
     const agent = (provider === 'direct' ? a.mode : req.tenant.settings.dify?.mode) === 'agent';
-    res.json({ ...models, provider, direct: { configured: directConfigured(), defaultModel: config.aiModel, baseUrl: config.aiBaseUrl, embeddings: !!config.embeddingsModel, zeroRetention: config.aiZeroRetention, providers: config.aiProviderOrder }, prompt: agent ? buildAgentPrompt(req.tenant) : buildPrompt(req.tenant), dify: redactSettings(req.tenant.settings).dify, publicUrl: config.publicUrl });
+    res.json({ ...models, difyAllowed: difyAllowed(req.tenant), provider, direct: { configured: directConfigured(), defaultModel: config.aiModel, baseUrl: config.aiBaseUrl, embeddings: !!config.embeddingsModel, zeroRetention: config.aiZeroRetention, providers: config.aiProviderOrder }, prompt: agent ? buildAgentPrompt(req.tenant) : buildPrompt(req.tenant), dify: redactSettings(req.tenant.settings).dify, publicUrl: config.publicUrl });
   }));
   r.post('/tenants/:tenantId/ai/provision', requireTenant, requireOwner, wrap(async (req, res) => {
+    if (!req.isSuper && !difyAllowed(req.tenant)) return res.status(403).json({ ok: false, error: 'The Dify engine is not available for this shop – use the built-in (Direct) AI.' });
     try {
       const mode = ['assist', 'agent'].includes(req.body?.mode) ? req.body.mode : undefined;
       res.json({ ok: true, ...(await provisionDifyBot(req.tenant.id, { mode })), tenant: view(getTenant(req.tenant.id)) });

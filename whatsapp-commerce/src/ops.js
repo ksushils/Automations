@@ -62,6 +62,7 @@ export function systemStatus() {
     messagesToday: one("SELECT COUNT(*) FROM messages WHERE created_at > datetime('now', '-1 day')"),
     pendingJobs: one("SELECT COUNT(*) FROM scheduled WHERE done = 0"),
     overdueJobs: one("SELECT COUNT(*) FROM scheduled WHERE done = 0 AND run_at < datetime('now', '-10 minutes')"),
+    deadLetters: one("SELECT COUNT(*) FROM messages WHERE direction = 'in' AND processed = -1"),
     backups: listBackups().slice(0, 5),
   };
 }
