@@ -2,6 +2,7 @@ import express from 'express';
 import { config } from '../config.js';
 import { getDb, redactSettings, json } from '../db.js';
 import { safeEqual, sha256 } from '../crypto.js';
+import { onboardingStatus } from '../onboarding.js';
 import { setupStatus, savePlatformSetup, testAi, autoSetupStripe } from '../platformSetup.js';
 import {
   PLANS, createTenant, getTenant, listTenants, updateTenantSettings, updateTenantMeta, rotateKeys, deleteTenant,
@@ -174,6 +175,9 @@ export function adminRouter() {
 
   // ----- tenant scoped -----
   r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant), role: req.role, staffName: req.staff?.name || null, banner: billingBanner(req.tenant.id) }));
+
+  // ----- the shop owner's step-by-step guide -----
+  r.get('/tenants/:tenantId/onboarding', requireTenant, requireOwner, (req, res) => res.json(onboardingStatus(req.tenant)));
 
   // ----- knowledge base (RAG) -----
   const kbChanged = (id) => knowledgeChanged(id).catch((e) => console.warn('[knowledge sync]', e.message));

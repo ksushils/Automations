@@ -63,8 +63,14 @@ document.getElementById('f').onsubmit = async (e) => {
   e.target.hidden = true;
   const ok = document.getElementById('ok');
   ok.hidden = false;
-  ok.innerHTML = `<h2>🎉 You're in!</h2><p>Save your login details (they are not shown again):</p><p>Shop ID: <code>${r.tenantId}</code></p><p>Admin key: <code>${r.adminKey}</code></p>
-    <p><a class="btn" style="display:block;text-align:center;text-decoration:none" href="${r.checkoutUrl || '/admin/'}">${r.checkoutUrl ? 'Confirm my plan & open dashboard' : 'Open my dashboard'}</a></p>`;
+  ok.innerHTML = `<h2>🎉 You're in!</h2>
+    <p><b>Save your login key now.</b> It's the only thing you need to sign in, and we can't show it again. Keep it in your password manager or somewhere safe.</p>
+    <div style="display:flex;gap:6px"><input id="key" readonly value="${r.adminKey.replace(/"/g, '&quot;')}"><button type="button" class="btn" id="copy" style="width:auto;margin:0">Copy</button></div>
+    <label class="chk" style="margin-top:14px"><input type="checkbox" id="saved"> I've saved my key</label>
+    <p><a class="btn" id="go" style="display:block;text-align:center;text-decoration:none;opacity:.5;pointer-events:none" href="/admin/">Open my dashboard →</a></p>
+    <p class="mute">Your dashboard shows you what to do first, step by step.${r.checkoutUrl ? ` You can <a href="${r.checkoutUrl}">add your card now</a> or later; you won't be charged until your free trial ends.` : ''}</p>`;
+  document.getElementById('copy').onclick = () => navigator.clipboard?.writeText(r.adminKey).then(() => (document.getElementById('copy').textContent = 'Copied ✓'), () => document.getElementById('key').select());
+  document.getElementById('saved').onchange = (ev) => { const g = document.getElementById('go'); g.style.opacity = ev.target.checked ? 1 : 0.5; g.style.pointerEvents = ev.target.checked ? 'auto' : 'none'; };
 };
 </script>
 </body>

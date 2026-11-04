@@ -11,7 +11,7 @@ const LINKS = {
   payment: 'https://business.facebook.com/billing_hub/payment_settings',
   manager: 'https://business.facebook.com/wa/manage/phone-numbers/',
 };
-const REQUIRED_TEMPLATES = ['order_update', 'staff_alert', 'payment_reminder'];
+import { REQUIRED_TEMPLATES } from './onboarding.js';
 
 export async function goLiveChecklist(tenant) {
   const W = tenant.settings.whatsapp || {};

@@ -135,10 +135,13 @@ function render() {
   if (!tabs.find((t) => t[0] === S.tab)) S.tab = tabs[0][0];
   document.querySelector('main').style.maxWidth = '';
   $('#banner').innerHTML = S.banner ? `<div style="max-width:1100px;margin:12px auto 0;padding:0 16px"><div class="card" style="margin:0;border-color:${S.banner.level === 'warn' ? 'var(--warn)' : 'var(--line)'}">${S.banner.level === 'warn' ? '⚠️' : '⏳'} ${esc(S.banner.text)} ${S.role === 'owner' ? '<a href="#" id="bgo">Choose a plan →</a>' : ''}</div></div>` : '';
+  if (S.fromGuide && S.tab !== 'overview') $('#banner').insertAdjacentHTML('beforeend', `<div style="max-width:1100px;margin:12px auto 0;padding:0 16px"><a href="#" id="backguide">← Back to your steps</a></div>`);
+  else S.fromGuide = false;
+  if ($('#backguide')) $('#backguide').onclick = (e) => { e.preventDefault(); S.fromGuide = false; S.tab = 'overview'; store.set('wc_tab', 'overview'); render(); };
   if ($('#bgo')) $('#bgo').onclick = (e) => { e.preventDefault(); S.tab = 'billing'; render(); };
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('') + (hasMore ? `<button id="moretabs">${showAll ? '‹ Fewer' : 'More ›'}</button>` : '');
-  $('#nav').querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
+  $('#nav').querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => { S.fromGuide = false; S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
   if ($('#moretabs')) $('#moretabs').onclick = () => { store.set('wc_alltabs', showAll ? null : '1'); if (showAll && !MAIN_TABS.has(S.tab)) S.tab = 'overview'; render(); };
   ({ setup, tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
@@ -276,39 +279,30 @@ async function overview() {
   const t = (S.tenant = (await api(T(''))).tenant);
   const lim = t.planLimits || {};
   const s = t.settings;
-  const checks = [
-    ['WhatsApp connected', s.whatsapp.phoneNumberId && s.whatsapp.accessToken],
-    ['Store connected', s.store.type === 'manual' ? (s.store.manual.products || []).length > 0 : true],
-    ['AI chatbot on', aiLive(s)],
-    ['Staff alerts', (s.notifications.staffWaIds || []).length || s.notifications.webhookUrl],
-  ];
-  $('#app').innerHTML = `<div class="row">
+  $('#app').innerHTML = `${S.role === 'owner' ? '<div id="guide"><div class="card"><h2>Loading your steps…</h2></div></div>' : ''}<div class="row">
       <div class="card"><div class="mute">Messages in (month)</div><div class="stat">${t.usage.inbound}${lim.monthlyConversationsIn ? ` / ${lim.monthlyConversationsIn}` : ''}</div></div>
       <div class="card"><div class="mute">Orders (month)</div><div class="stat">${t.usage.orders}</div></div>
       <div class="card"><div class="mute">AI replies (month)</div><div class="stat">${t.usage.ai_calls}${lim.aiCalls ? ` / ${lim.aiCalls}` : ''}</div><div class="mute">AI spend $${((t.usage.ai_cost_micro || 0) / 1e6).toFixed(2)}${lim.aiBudgetUsd != null ? ` of $${(s.ai?.budgetUsd ?? lim.aiBudgetUsd)} cap` : ''}</div></div>
       <div class="card"><div class="mute">Plan</div><div class="stat">${esc(lim.label || t.plan)}</div></div>
       <div class="card"><div class="mute">Est. Meta fees (month)</div><div class="stat" id="metacost">…</div><div class="mute" id="metafree"></div></div></div>
-    <div class="card" id="wizard"><h2>Get your WhatsApp shop live</h2><div class="mute">Loading…</div></div>
-    <div class="card" id="golive"><h2>WhatsApp go-live checklist</h2><div class="mute">Checking…</div></div>
-    <div class="card"><h2>Setup checklist</h2>${checks.map(([l, ok]) => `<div>${ok ? '✅' : '⬜'} ${l}</div>`).join('')}
-      ${S.role === 'owner' ? `<p id="esu"></p>` : ''}</div>
-    <div class="card"><h2>Connection details</h2>
+    <details class="card"><summary><b>Full WhatsApp go-live checklist</b></summary><div id="golive" style="margin-top:8px"><div class="mute">Checking…</div></div></details>
+    <details class="card"><summary><b>Technical details</b> <span class="mute">(only if your developer or support asks)</span></summary>
+    <h3>Connection details</h3>
       <label>WhatsApp webhook callback URL (Meta App → WhatsApp → Configuration)</label><code>${esc(t.urls.whatsappWebhook)}</code>
       <label>Webhook verify token</label><code>${esc(s.whatsapp.verifyToken)}</code>
       <label>Store order webhook (Shopify / WooCommerce order update notifications)</label><code>${esc(t.urls.storeWebhook)}</code>
       <label>Dify custom tool schema URL (Agent mode)</label><code>${esc(location.origin)}/dify/store-tools.openapi.json</code>
       <label>Storefront / link-in-bio page (share on Instagram, Google, QR codes)</label><code><a href="${esc(t.urls.storefront)}" target="_blank" rel="noopener">${esc(t.urls.storefront)}</a></code>
       <label>Stripe webhook (Stripe → Developers → Webhooks, event checkout.session.completed)</label><code>${esc(t.urls.stripeWebhook)}</code>
-      <label>Tenant ID</label><code>${esc(t.id)}</code></div>
-    <div class="card"><h2>Test connections</h2><div class="row">
+      <label>Shop ID</label><code>${esc(t.id)}</code>
+    <h3>Test connections</h3><div class="row">
       <div><button class="btn ghost" data-test="store">Test store</button></div>
       <div><button class="btn ghost" data-test="dify">Test Dify</button></div>
-      <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></div>`;
-  embeddedSignupButton(s);
-  setupWizard(t);
+      <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></details>`;
+  if (S.role === 'owner') shopGuide(t).catch((e) => { if ($('#guide')) $('#guide').innerHTML = `<div class="card"><p class="pill warn">${esc(e.message)}</p></div>`; });
   api(T('/whatsapp/checklist')).then((c) => {
     const icon = (d) => (d === true ? '✅' : d === false ? '⬜' : '❔');
-    $('#golive').innerHTML = `<h2>WhatsApp go-live checklist ${c.ready ? '<span class="pill">ready ✅</span>' : ''}</h2><p class="mute">❔ = we can't check this automatically – please confirm in Meta.</p>` +
+    $('#golive').innerHTML = `${c.ready ? '<p><span class="pill">ready ✅</span></p>' : ''}<p class="mute">❔ = we can't check this automatically – please confirm in Meta.</p>` +
       c.steps.map((x) => `<div style="display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line)"><span style="font-size:18px">${icon(x.done)}</span><div style="flex:1"><b>${esc(x.title)}</b>${x.value ? ` <span class="pill">${esc(x.value)}</span>` : ''}<div class="mute">${esc(x.help)}</div></div>${x.link ? `<a class="btn ghost" href="${esc(x.link)}" target="_blank" rel="noopener">Open in Meta ↗</a>` : ''}</div>`).join('');
   }).catch(() => {});
   api(T('/meta-costs')).then((m) => { $('#metacost').textContent = '£' + m.totalGbp.toFixed(2); $('#metafree').textContent = `${m.freeServiceLeft} of 1,000 free replies left · billed by Meta`; }).catch(() => {});
@@ -477,13 +471,46 @@ async function catalogue() {
     return;
   }
   const m = s.store.manual;
-  $('#app').innerHTML = `<div class="card"><h2>Built-in catalogue</h2><p class="mute">For sellers without Shopify/WooCommerce. One product per line in JSON. Fields: id, title, price, description, image, category, variants [{id,title,price}].</p>
-    <label>Categories (JSON)</label><textarea id="cats" style="min-height:90px">${esc(JSON.stringify(m.categories || [], null, 2))}</textarea>
-    <label>Products (JSON)</label><textarea id="prods" style="min-height:320px;font-family:monospace">${esc(JSON.stringify(m.products || [], null, 2))}</textarea>
-    <p><button class="btn" id="savecat">Save catalogue</button> <button class="btn ghost" id="sample">Load sample products</button></p></div>
+  const sym = s.business.currencySymbol || '£';
+  const prods = m.products || [], cats = m.categories || [];
+  $('#app').innerHTML = `<div class="card"><h2>Your products (${prods.length})</h2>
+    <div class="tablewrap"><table><tr><th>Product</th><th>Price</th><th>Category</th><th>Stock</th><th></th></tr>
+    ${prods.map((p, i) => `<tr><td>${p.image ? `<img src="${esc(p.image)}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:6px;vertical-align:middle;margin-right:6px">` : ''}<b>${esc(p.title)}</b><div class="mute">${esc((p.description || '').slice(0, 80))}</div></td><td>${sym}${Number(p.price || 0).toFixed(2)}</td><td>${esc(cats.find((c) => c.id === p.category)?.title || '')}</td><td>${p.stock == null || p.stock === '' ? '–' : esc(p.stock)}</td><td><button class="btn ghost" data-pdel="${i}">Remove</button></td></tr>`).join('') || '<tr><td colspan="5" class="mute">No products yet. Add your first one below.</td></tr>'}</table></div></div>
+    <div class="card"><h2>➕ Add a product</h2><div class="row">
+      <div><label>Name</label><input id="pn" placeholder="Lavender candle"></div>
+      <div><label>Price (${esc(sym)})</label><input id="pp" type="number" min="0" step="0.01" placeholder="12.50"></div>
+      <div><label>Category</label><select id="pc">${cats.map((c) => `<option value="${esc(c.id)}">${esc(c.title)}</option>`).join('')}<option value="__new">+ New category…</option></select><input id="pcn" placeholder="New category name" style="margin-top:6px;display:none"></div>
+      <div><label>Stock (empty = unlimited)</label><input id="pst" type="number" min="0" step="1"></div></div>
+      <label>Description (optional)</label><input id="pd" placeholder="Hand-poured soy wax, burns for 40 hours">
+      <label>Photo link (optional, starts with https://)</label><input id="pi" placeholder="https://…/photo.jpg">
+      <p><button class="btn" id="padd">Add product</button></p></div>
+    <details class="card"><summary><b>Advanced: edit everything as JSON</b></summary><p class="mute">Fields: id, title, price, description, image, category, variants [{id,title,price}].</p>
+    <label>Categories (JSON)</label><textarea id="cats" style="min-height:90px">${esc(JSON.stringify(cats, null, 2))}</textarea>
+    <label>Products (JSON)</label><textarea id="prods" style="min-height:320px;font-family:monospace">${esc(JSON.stringify(prods, null, 2))}</textarea>
+    <p><button class="btn" id="savecat">Save catalogue</button> <button class="btn ghost" id="sample">Load sample products</button></p></details>
     <div class="card"><h2>Import products from CSV</h2><p class="mute">Columns: <code>id,title,price,compare_at_price,category,description,image,stock,options</code> — options like <code>Small:15:10|Large:16:4</code> (name:price:stock). Rows with an existing id are updated. Leave stock empty for unlimited.</p>
     <input type="file" id="csvf" accept=".csv,text/csv"> <label><input type="checkbox" id="csvreplace" style="width:auto"> Replace whole catalogue</label>
     <p><button class="btn" id="csvgo">Import CSV</button></p><pre id="csvres" class="mute" style="white-space:pre-wrap"></pre></div>`;
+  const saveProducts = async (products, categories = cats) => { S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { store: { manual: { categories, products } } } })).tenant; catalogue(); };
+  $('#pc').onchange = () => { $('#pcn').style.display = $('#pc').value === '__new' ? '' : 'none'; };
+  $('#padd').onclick = async () => {
+    const title = $('#pn').value.trim(), price = Number($('#pp').value);
+    if (!title) return toast('Type the product name');
+    if (!(price >= 0) || $('#pp').value === '') return toast('Type the price');
+    let category = $('#pc').value, categories = cats;
+    if (category === '__new') {
+      const name = $('#pcn').value.trim(); if (!name) return toast('Type the new category name');
+      category = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'cat-' + Date.now();
+      if (!cats.find((c) => c.id === category)) categories = [...cats, { id: category, title: name }];
+    }
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'item';
+    const id = prods.some((p) => p.id === slug) ? `${slug}-${Date.now().toString(36)}` : slug;
+    const p = { id, title, price, category, description: $('#pd').value.trim() };
+    if ($('#pi').value.trim()) p.image = $('#pi').value.trim();
+    if ($('#pst').value !== '') p.stock = Number($('#pst').value);
+    try { await saveProducts([...prods, p], categories); toast('Added ' + title); } catch (e) { toast(e.message); }
+  };
+  $('#app').querySelectorAll('[data-pdel]').forEach((b) => (b.onclick = async () => { const p = prods[+b.dataset.pdel]; if (confirm(`Remove ${p.title}?`)) { try { await saveProducts(prods.filter((_, i) => i !== +b.dataset.pdel)); } catch (e) { toast(e.message); } } }));
   $('#csvgo').onclick = async () => {
     const f = $('#csvf').files[0]; if (!f) return toast('Choose a CSV file');
     try { const r = await api(T('/catalogue/import'), { method: 'POST', body: { csv: await f.text(), replace: $('#csvreplace').checked } }); S.tenant = r.tenant; toast(`Imported ${r.imported} products`); catalogue(); }
@@ -680,35 +707,135 @@ async function templates() {
   $('#app').querySelectorAll('[data-deltpl]').forEach((b) => (b.onclick = async () => { if (confirm('Delete template ' + b.dataset.deltpl + '?')) { await api(T('/templates/' + b.dataset.deltpl), { method: 'DELETE' }).catch((e) => toast(e.message)); templates(); } }));
 }
 
-// ---------- setup wizard ----------
-const aiLive = (s) => !!(s.dify.enabled && s.dify.apiKey) || (s.ai?.provider !== 'dify' && s.ai?.enabled !== false); // matches the bot engine: built-in AI unless switched off
-async function setupWizard(t) {
-  const s = t.settings;
-  const kb = await api(T('/knowledge')).catch(() => ({ docs: [] }));
-  const products = s.store.type !== 'manual' || (s.store.manual.products || []).length > 0;
-  const steps = [
-    ['🌐', 'Tell us your website', 'We read your shop, products and policies automatically.', !!s.business.website, 'site'],
-    ['🛍️', 'Products connected', s.store.type === 'manual' ? 'Add products or connect Shopify / WooCommerce.' : `Connected: ${s.store.type.replace('_public', ' (website)')}`, products, 'catalogue'],
-    ['📚', 'Knowledge base', `${kb.docs.length} document${kb.docs.length === 1 ? '' : 's'} – policies, FAQs, guides`, kb.docs.length > 0, 'knowledge'],
-    ['🤖', 'AI chatbot', aiLive(s) ? 'Live' + (kb.docs.length ? ' with your knowledge base' : '') : 'Turn it on in AI assistant', aiLive(s), 'ai'],
-    ['📱', 'Connect WhatsApp', s.whatsapp.phoneNumberId ? 'Connected' : 'Link your business number', !!s.whatsapp.phoneNumberId, 'overview'],
-    ['💬', 'Test your bot', 'Chat with it like a customer would', false, 'simulator'],
-  ];
-  const done = steps.filter((x) => x[3]).length;
-  const el = $('#wizard');
+// ---------- shop owner: step-by-step guide (top of Overview) ----------
+const STORE_NAMES = { manual: 'your own product list', shopify_public: 'your Shopify shop', shopify: 'your Shopify shop', woocommerce: 'your WooCommerce shop', custom: 'your shop system' };
+async function shopGuide(t) {
+  const el = $('#guide');
   if (!el) return;
-  el.innerHTML = `<h2>Get your WhatsApp shop live <span class="mute" style="font-weight:400">${done}/${steps.length - 1}</span></h2>
-    ${!s.business.website && S.role === 'owner' ? `<div class="row" style="margin-bottom:10px"><div><label>Your website – we'll set everything up from it</label><input id="wsite" placeholder="yourshop.co.uk"></div><div style="align-self:end"><button class="btn" id="wgo">Set up from my website</button></div></div><pre id="wres" class="mute" style="white-space:pre-wrap"></pre>` : ''}
-    ${steps.map(([i, title, sub, ok, tab]) => `<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)"><span style="font-size:20px">${ok ? '✅' : i}</span><div style="flex:1"><b>${title}</b><div class="mute">${esc(sub)}</div></div>${tab !== 'site' && tab !== 'overview' ? `<button class="btn ghost" data-go="${tab}">${ok ? 'Open' : 'Start'}</button>` : ''}</div>`).join('')}`;
-  el.querySelectorAll('[data-go]').forEach((b) => (b.onclick = () => { S.tab = b.dataset.go; render(); }));
-  if ($('#wgo')) $('#wgo').onclick = async () => {
-    $('#wres').textContent = 'Reading your website… (this can take 20–40 seconds)';
-    try {
-      const r = await api(T('/onboarding/website'), { method: 'POST', body: { url: $('#wsite').value } });
-      $('#wres').textContent = `✅ Found ${r.site.name || r.site.domain} (${r.site.platform})${r.store ? ' – catalogue connected' : ''}. Imported ${r.imported.length} page(s): ${r.imported.map((x) => x.name).join(', ')}`;
-      S.tenant = r.tenant; setTimeout(overview, 2500);
-    } catch (e) { $('#wres').textContent = '⚠️ ' + e.message; }
+  const g = await api(T('/onboarding'));
+  const s = t.settings;
+  const open = S.guideOpen || g.next;
+  const allDone = g.done === g.total;
+  if (allDone && !S.guideShowAll) {
+    el.innerHTML = `<div class="card"><h2>🎉 Your shop is live</h2><p class="mute">Every step is done. <a href="#" id="gshow">Show the steps</a></p></div>`;
+    $('#gshow').onclick = (e) => { e.preventDefault(); S.guideShowAll = true; shopGuide(t); };
+    return;
+  }
+  const nextStep = g.steps.find((x) => x.key === g.next);
+  const num = (k) => g.steps.findIndex((x) => x.key === k) + 1;
+  const body = (st) => {
+    const d = st.data || {};
+    const skip = st.done ? '' : `<button class="btn ghost" data-gskip="${st.key}">${st.key === 'whatsapp' || st.key === 'golive' ? 'Do this later' : 'Skip this step'}</button>`;
+    switch (st.key) {
+      case 'shop': return `<p>Type your website address. We read it and fill in your shop name, currency, products (Shopify) and your policy and FAQ pages, so you don't have to type them.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="g-site" style="flex:1;min-width:200px" placeholder="yourshop.co.uk" value="${esc(d.website)}"><button class="btn" id="g-sitego">Set up from my website</button></div>
+        <div id="g-res" class="mute" style="margin-top:8px"></div><p class="mute">No website? That's fine. ${skip}</p>`;
+      case 'products': return st.done
+        ? `<p>✅ Products come from <b>${esc(STORE_NAMES[d.storeType] || d.storeType)}</b>${d.products != null ? ` (${d.products} products)` : ''}.</p><p><button class="btn ghost" id="g-store">Check my products</button> <span id="g-res" class="mute"></span></p>`
+        : `<p>Pick the one that fits you:</p>
+          <div class="row">
+            <div class="card" style="margin:0"><b>🟢 I use Shopify</b><p class="mute">Just type your shop address. Nothing to install.</p><input id="g-shop" placeholder="yourshop.co.uk or yourshop.myshopify.com"><p><button class="btn" id="g-shopgo">Connect Shopify</button></p></div>
+            <div class="card" style="margin:0"><b>🟣 I use WooCommerce</b><p class="mute">In WordPress go to WooCommerce → Settings → Advanced → REST API → Add key (Read). Paste the two keys.</p><input id="g-wurl" placeholder="https://yourshop.co.uk"><input id="g-wck" placeholder="Consumer key ck_…" style="margin-top:6px"><input id="g-wcs" type="password" placeholder="Consumer secret cs_…" style="margin-top:6px"><p><button class="btn" id="g-woogo">Connect WooCommerce</button></p></div>
+            <div class="card" style="margin:0"><b>✍️ Neither</b><p class="mute">Add your products here, one by one or from a spreadsheet (CSV).</p><p><button class="btn" data-gtab="catalogue">Add products</button></p></div>
+          </div><div id="g-res" class="mute" style="margin-top:8px"></div>`;
+      case 'assistant': return `<p>Your assistant answers from what you write here. Short and plain is best.</p>
+        ${d.aiReady ? '' : '<p class="pill warn">The AI isn\'t switched on for this platform yet, so answers will use keyword search for now.</p>'}
+        <label>What do you sell, and who to?</label><textarea id="g-about" placeholder="Handmade candles and gifts, delivered across the UK.">${esc(s.ai?.about || '')}</textarea>
+        <label>Questions customers ask: delivery, returns, opening hours, payment…</label><textarea id="g-faq" style="min-height:120px" placeholder="Delivery: 2–3 working days, £3.50, free over £40.&#10;Returns: within 30 days, unused.&#10;Open: Mon–Sat 9–5.">${esc(s.ai?.faq || '')}</textarea>
+        <div class="row"><div><label>Tone</label><select id="g-tone">${[['friendly', 'Friendly 😊'], ['professional', 'Professional'], ['playful', 'Playful 🎉'], ['luxury', 'Luxury / premium']].map(([k, l]) => `<option value="${k}" ${s.ai?.tone === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+        <p><button class="btn" id="g-aisave">Save</button> <span class="mute">${d.docs ? `${d.docs} document(s) already in your knowledge base.` : ''} You can also add PDFs and web pages in <a href="#" data-gtab="knowledge">Knowledge base</a>.</span></p>`;
+      case 'test': return `<p>Chat with your assistant exactly as a customer would. Nothing is sent to anyone.</p>
+        <p class="mute">Try: <code>hi</code> · <code>what's your returns policy?</code> · <code>do you deliver to Leeds?</code> · the name of one of your products.</p>
+        <p><button class="btn" data-gtab="simulator">Open the test chat</button></p><p class="mute">Wrong answer? Fix it in step ${num('assistant')} and try again.</p>`;
+      case 'website': {
+        const code = `<script src="${location.origin}/chat-widget/${t.id}.js" async><\/script>`;
+        return `<p>Put your assistant on your website so customers can ask questions and order today. WhatsApp isn't needed for this.</p>
+        <label>Copy this code</label><div style="display:flex;gap:6px"><input readonly value="${esc(code)}"><button class="btn ghost" data-gcopy="${esc(code)}">Copy</button></div>
+        <p><b>Where to paste it:</b></p>
+        <div class="mute">• <b>Shopify:</b> Online Store → Themes → ⋯ → Edit code → <code>theme.liquid</code>, paste just above <code>&lt;/body&gt;</code>, then Save.<br>
+        • <b>WordPress / WooCommerce:</b> install the free “WPCode” plugin → Code Snippets → Header &amp; Footer → paste in <b>Footer</b>.<br>
+        • <b>Wix / Squarespace:</b> Settings → Custom code → add to all pages, at the end of the body.</div>
+        <p style="margin-top:10px"><b>No website?</b> Share your ready-made shop page instead (Instagram bio, Google profile, QR codes):</p>
+        <div style="display:flex;gap:6px"><input readonly value="${esc(t.urls.storefront)}"><button class="btn ghost" data-gcopy="${esc(t.urls.storefront)}">Copy</button><a class="btn ghost" href="${esc(t.urls.storefront)}?chat=1" target="_blank" rel="noopener">Open</a></div>
+        <p class="mute">This step ticks itself once the first customer chats on your website. ${skip}</p>`;
+      }
+      case 'whatsapp': return `<p>Now let customers order inside WhatsApp. Before you start, have these ready:</p>
+        <div class="mute">• A <b>phone number</b> that can get a text or call. You can keep using the <b>WhatsApp Business app</b> on it, or use a new number.<br>
+        • Your <b>Facebook</b> login. Meta will ask you to create or choose your business.<br>
+        • A <b>card</b> to add in Meta later. Meta charges small fees per message; the first 1,000 customer chats a month are free.</div>
+        ${d.oneClick ? '<p id="esu" style="margin-top:12px"></p>' : '<p class="pill warn" style="margin-top:12px">One-click WhatsApp connect isn\'t switched on yet by your provider. You\'ll be able to connect here soon. Carry on with the other steps meanwhile.</p>'}
+        ${d.pending ? `<p class="mute">Meta is still checking your number${d.numberStatus ? ` (${esc(d.numberStatus)})` : ''}. Press <b>Refresh number</b> once you've verified it.</p>` : ''}<p>${skip}</p>`;
+      case 'golive': return `<p>Three things so WhatsApp keeps working smoothly:</p>
+        ${stepNo('a', `<b>Message templates</b> ${d.templates.length === d.required.length ? '✅' : `(${d.templates.length}/${d.required.length})`}<div class="mute">WhatsApp needs pre-approved messages for order updates, payment reminders and staff alerts. Approval usually takes minutes.</div>${d.templates.length === d.required.length ? '' : '<p><button class="btn" id="g-tpl">Submit them for me</button></p>'}`)}
+        ${stepNo('b', `<b>Who gets new-order alerts?</b> ${d.staff ? '✅' : ''}<div style="display:flex;gap:6px;margin-top:6px"><input id="g-staff" placeholder="Your mobile, e.g. 447700900123" value="${esc((s.notifications?.staffWaIds || []).join(', '))}"><button class="btn ghost" id="g-staffgo">Save</button></div>`)}
+        ${stepNo('c', `<b>Send “hi” to your business number</b> from your own phone ${d.inbound ? '✅' : ''}<div class="mute">It should appear in the <a href="#" data-gtab="inbox">Inbox</a> within seconds. This step ticks itself.</div>`)}
+        <div id="g-res" class="mute"></div><p>${skip}</p>`;
+      case 'plan': return d.billing
+        ? `<p>${d.status === 'trialing' && d.trialEndsAt ? `Your free trial ends on <b>${new Date(d.trialEndsAt + 'Z').toLocaleDateString('en-GB')}</b>. ` : ''}Choose a plan to keep your shop running after that. You can change or cancel any time.</p><p><button class="btn" data-gtab="billing">Choose my plan</button></p>`
+        : '<p class="mute">Your provider will send you an invoice. Nothing to do here.</p>';
+    }
+    return '';
   };
+  el.innerHTML = `<div class="card">
+    <h2>${nextStep ? `👉 Next: ${esc(nextStep.title)}` : '🎉 All done'} <span class="mute" style="font-weight:400">· ${g.done} of ${g.total} steps done</span></h2>
+    <div style="height:8px;background:var(--bg);border-radius:99px;overflow:hidden;margin-bottom:8px"><div style="height:100%;width:${(g.done / g.total) * 100}%;background:var(--brand)"></div></div>
+    ${g.phases.map((ph) => {
+      const steps = g.steps.filter((x) => x.phase === ph.key);
+      return `<h3>${esc(ph.title)} <span style="text-transform:none;letter-spacing:0;font-weight:400">· ${esc(ph.time)}</span></h3>` + steps.map((st) => {
+        const isOpen = st.key === open;
+        const icon = st.done ? '✅' : st.key === g.next ? '👉' : st.skipped ? '⏭️' : '⬜';
+        return `<div style="border:1px solid ${isOpen ? 'var(--brand)' : 'var(--line)'};border-radius:10px;margin:6px 0">
+          <div data-gopen="${st.key}" style="display:flex;gap:10px;align-items:center;padding:10px;cursor:pointer"><span style="font-size:18px">${icon}</span>
+            <div style="flex:1"><b>${num(st.key)}. ${esc(st.title)}</b><div class="mute">${esc(st.why)}</div></div><span class="mute">${isOpen ? '▾' : '▸'}</span></div>
+          ${isOpen ? `<div style="padding:0 12px 12px 40px">${body(st)}</div>` : ''}</div>`;
+      }).join('');
+    }).join('')}</div>`;
+
+  const reload = async (keepOpen) => { S.tenant = (await api(T(''))).tenant; S.guideOpen = keepOpen ? open : null; shopGuide(S.tenant); };
+  const res = (h) => { if ($('#g-res')) $('#g-res').innerHTML = h; };
+  const patch = async (body) => (S.tenant = (await api(T('/settings?sync=0'), { method: 'PATCH', body })).tenant);
+  el.querySelectorAll('[data-gopen]').forEach((x) => (x.onclick = () => { S.guideOpen = x.dataset.gopen === open ? '__none' : x.dataset.gopen; shopGuide(t); }));
+  el.querySelectorAll('[data-gtab]').forEach((x) => (x.onclick = (e) => { e.preventDefault(); S.fromGuide = true; S.tab = x.dataset.gtab; store.set('wc_tab', S.tab); render(); }));
+  el.querySelectorAll('[data-gcopy]').forEach((x) => (x.onclick = () => navigator.clipboard?.writeText(x.dataset.gcopy).then(() => toast('Copied'), () => toast('Select the text and copy it'))));
+  el.querySelectorAll('[data-gskip]').forEach((x) => (x.onclick = async () => { try { await patch({ onboarding: { skipped: { [x.dataset.gskip]: true } } }); reload(false); } catch (e) { toast(e.message); } }));
+  const on = (id, fn) => { const b = $('#' + id); if (b) b.onclick = async () => { b.disabled = true; try { await fn(); } catch (e) { res('⚠️ ' + esc(e.message)); } finally { b.disabled = false; } }; };
+  on('g-sitego', async () => {
+    res('Reading your website… this can take up to a minute.');
+    const r = await api(T('/onboarding/website'), { method: 'POST', body: { url: $('#g-site').value } });
+    res(`✅ Found <b>${esc(r.site.name || r.site.domain)}</b>${r.store ? ' and connected its products' : ''}. Imported ${r.imported.length} page(s): ${esc(r.imported.map((x) => x.name).join(', ') || 'none')}`);
+    setTimeout(() => reload(false), 2500);
+  });
+  on('g-store', async () => { res('Checking…'); const r = await api(T('/test/store'), { method: 'POST', body: {} }); res(r.ok ? `✅ Connected${r.name ? ' to ' + esc(r.name) : ''}${r.products != null ? `, ${r.products} products` : ''}` : '⚠️ ' + esc(r.error)); });
+  on('g-shopgo', async () => {
+    const domain = $('#g-shop').value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    if (!domain) return res('Type your Shopify shop address first.');
+    await patch({ store: { type: 'shopify_public', shopify: { domain } }, business: { website: s.business?.website || 'https://' + domain } });
+    const r = await api(T('/test/store'), { method: 'POST', body: {} });
+    if (!r.ok) return res('⚠️ We couldn\'t read products from that address: ' + esc(r.error));
+    res(`✅ Connected${r.products != null ? `, ${r.products} products found` : ''}`); setTimeout(() => reload(false), 1500);
+  });
+  on('g-woogo', async () => {
+    await patch({ store: { type: 'woocommerce', woocommerce: { url: $('#g-wurl').value.trim(), consumerKey: $('#g-wck').value.trim(), consumerSecret: $('#g-wcs').value.trim() } } });
+    const r = await api(T('/test/store'), { method: 'POST', body: {} });
+    if (!r.ok) return res('⚠️ ' + esc(r.error) + ' Check the address and both keys.');
+    res('✅ Connected to WooCommerce'); setTimeout(() => reload(false), 1500);
+  });
+  on('g-aisave', async () => { await patch({ ai: { about: $('#g-about').value, faq: $('#g-faq').value, tone: $('#g-tone').value } }); toast('Saved'); reload(false); });
+  on('g-tpl', async () => {
+    res('Sending to Meta…');
+    const lib = (await api(T('/templates'))).library.filter((x) => g.steps.find((y) => y.key === 'golive').data.required.includes(x.name));
+    const out = [];
+    for (const tp of lib) out.push(await api(T('/templates'), { method: 'POST', body: tp }).then(() => `✅ ${tp.name}`, (e) => `⚠️ ${tp.name}: ${e.message}`));
+    await api(T('/templates')).catch(() => {}); // refreshes the saved list
+    res(out.map(esc).join('<br>')); setTimeout(() => reload(true), 2500);
+  });
+  on('g-staffgo', async () => {
+    const ids = $('#g-staff').value.split(',').map((x) => x.replace(/\D/g, '')).filter(Boolean);
+    const tp = s.notifications?.templates || {}; // also point the outside-24-hour messages at the standard templates
+    await patch({ notifications: { staffWaIds: ids, templates: { orderUpdate: tp.orderUpdate || 'order_update', paymentReminder: tp.paymentReminder || 'payment_reminder', staffAlert: tp.staffAlert || 'staff_alert' } } });
+    toast('Saved'); reload(true);
+  });
+  if ($('#esu')) embeddedSignupButton(s);
 }
 
 // ---------- knowledge base ----------
