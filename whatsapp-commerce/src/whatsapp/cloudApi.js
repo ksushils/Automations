@@ -147,6 +147,7 @@ export function createSender(tenant, { sink } = {}) {
       sink.push(msg);
       return { simulated: true };
     }
+    if (String(to).startsWith('web:')) return { web: true }; // website chat visitor: delivered by the widget's polling
     const { phoneNumberId, accessToken } = tenant.settings.whatsapp;
     if (!phoneNumberId || !accessToken) throw new Error('WhatsApp is not configured for this tenant');
     try {

@@ -9,6 +9,7 @@ import { quote, validatePromo, findPromo, upcomingSlots } from './pricing.js';
 import { findTriggeredFlow, startFlow, handleFlowButton, handleFlowAnswer, handleFlowForm, runFlow, getFlow, schedule } from './flows.js';
 import { notify } from '../whatsapp/cloudApi.js';
 import { getDb } from '../db.js';
+import { config as appConfig } from '../config.js';
 import { alert } from '../ops.js';
 import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 import { recordConsent, defaultWording } from '../consent.js';
@@ -192,6 +193,12 @@ function showCart(ctx) {
 function startCheckout(ctx) {
   const sym = ctx.S.business.currencySymbol || '£';
   if (!ctx.conv.cart.length) return ctx.reply(mainMenu(ctx, 'Your cart is empty — add something first.'));
+  // Website chat visitors have no WhatsApp number: hand the basket to the storefront checkout
+  // (Shopify URL-only shops go straight to Shopify's checkout through the normal flow).
+  if (String(ctx.conv.waId).startsWith('web:') && ctx.store.type !== 'shopify_public') {
+    const cart = Buffer.from(JSON.stringify(ctx.conv.cart.map(({ productId, variantId, quantity, title, price }) => ({ productId, variantId, quantity, title, price })))).toString('base64url');
+    return ctx.reply({ type: 'cta', text: `🛒 ${formatCart(ctx.conv.cart, sym)}\n\nTap below to choose delivery or collection and pay securely.`, buttonText: 'Checkout', url: `${appConfig.publicUrl}/s/${ctx.tenant.id}?cart=${cart}#checkout` });
+  }
   const min = Number(ctx.S.ordering.minOrder) || 0;
   if (min && subtotal(ctx.conv.cart) < min) {
     return ctx.reply({ type: 'buttons', text: `Our minimum order is ${money(min, sym)}. Your cart is ${money(subtotal(ctx.conv.cart), sym)}.`, buttons: [{ id: 'browse', title: '🛍️ Add more' }] });
@@ -412,6 +419,7 @@ async function handleAction(ctx, id) {
     case 'status': return orderStatus(ctx);
     case 'human': return handover(ctx);
     case 'subscribe':
+      if (String(ctx.conv.waId).startsWith('web:')) return ctx.reply({ type: 'text', text: ctx.S.business.whatsappNumber ? `To get offers on WhatsApp, message us “subscribe” at https://wa.me/${String(ctx.S.business.whatsappNumber).replace(/\D/g, '')}` : 'Thanks! Ask our team about offers.' });
       // Ask first, record the exact wording only when they confirm (PECR: specific, informed, unambiguous)
       return ctx.reply({ type: 'buttons', text: `🔔 ${consentWording(ctx)}\n\nWe'll send a few offers a month. Reply STOP any time to opt out.`, buttons: [{ id: 'optin:yes', title: '✅ Yes, sign me up' }, { id: 'optin:no', title: 'No thanks' }] });
     case 'optin':

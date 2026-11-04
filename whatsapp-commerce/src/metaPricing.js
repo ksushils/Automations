@@ -39,7 +39,7 @@ export function estimateCampaign(recipients, category = 'marketing') {
 export function monthEstimate(tenantId) {
   const d = getDb();
   const since = "datetime('now', 'start of month')";
-  const out = d.prepare(`SELECT wa_id, type, body FROM messages WHERE tenant_id = ? AND direction = 'out' AND created_at >= ${since}`).all(tenantId);
+  const out = d.prepare(`SELECT wa_id, type, body FROM messages WHERE tenant_id = ? AND direction = 'out' AND wa_id NOT LIKE 'web:%' AND created_at >= ${since}`).all(tenantId); // web chat isn't billed by Meta
   let cats = {};
   try { cats = JSON.parse(d.prepare('SELECT value FROM kv WHERE key = ?').get(`tpl:${tenantId}`)?.value || '{}'); } catch {}
   let unknownCategory = 0;

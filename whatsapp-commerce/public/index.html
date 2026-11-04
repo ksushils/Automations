@@ -172,6 +172,7 @@ async function overview() {
       <div class="card"><div class="mute">Plan</div><div class="stat">${esc(lim.label || t.plan)}</div></div>
       <div class="card"><div class="mute">Est. Meta fees (month)</div><div class="stat" id="metacost">…</div><div class="mute" id="metafree"></div></div></div>
     <div class="card" id="wizard"><h2>Get your WhatsApp shop live</h2><div class="mute">Loading…</div></div>
+    <div class="card" id="golive"><h2>WhatsApp go-live checklist</h2><div class="mute">Checking…</div></div>
     <div class="card"><h2>Setup checklist</h2>${checks.map(([l, ok]) => `<div>${ok ? '✅' : '⬜'} ${l}</div>`).join('')}
       ${S.role === 'owner' ? `<p id="esu"></p>` : ''}</div>
     <div class="card"><h2>Connection details</h2>
@@ -188,6 +189,11 @@ async function overview() {
       <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></div>`;
   embeddedSignupButton(s);
   setupWizard(t);
+  api(T('/whatsapp/checklist')).then((c) => {
+    const icon = (d) => (d === true ? '✅' : d === false ? '⬜' : '❔');
+    $('#golive').innerHTML = `<h2>WhatsApp go-live checklist ${c.ready ? '<span class="pill">ready ✅</span>' : ''}</h2><p class="mute">❔ = we can't check this automatically – please confirm in Meta.</p>` +
+      c.steps.map((x) => `<div style="display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line)"><span style="font-size:18px">${icon(x.done)}</span><div style="flex:1"><b>${esc(x.title)}</b>${x.value ? ` <span class="pill">${esc(x.value)}</span>` : ''}<div class="mute">${esc(x.help)}</div></div>${x.link ? `<a class="btn ghost" href="${esc(x.link)}" target="_blank" rel="noopener">Open in Meta ↗</a>` : ''}</div>`).join('');
+  }).catch(() => {});
   api(T('/meta-costs')).then((m) => { $('#metacost').textContent = '£' + m.totalGbp.toFixed(2); $('#metafree').textContent = `${m.freeServiceLeft} of 1,000 free replies left · billed by Meta`; }).catch(() => {});
   if (s.whatsapp.phoneNumberId) api(T('/whatsapp/health')).then((h) => {
     const el = document.createElement('div'); el.className = 'card';
@@ -720,6 +726,13 @@ async function grow() {
     <div class="card"><h2>Storefront / link-in-bio page</h2><p><a href="${esc(t.urls.storefront)}" target="_blank" rel="noopener">${esc(t.urls.storefront)}</a></p>
       <div class="row"><div><label>Ordering on the page</label><select id="smode">${[['auto', 'Automatic (WhatsApp chat if connected, otherwise web basket)'], ['chat', 'Buttons open WhatsApp chat'], ['cart', 'Web basket + checkout (works without WhatsApp API)']].map(([k, l]) => `<option value="${k}" ${s.storefront?.mode === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div><label>Brand colour</label><input id="scolor" type="color" value="${esc(s.storefront?.brandColor || '#128c4a')}"></div></div></div>
+    <div class="card"><h2>🤖 Website AI chat</h2><p class="mute">Your AI assistant on your own website – answers from your knowledge base, shows products and hands the basket to checkout. Works without the WhatsApp API, so you can start today. Staff can reply from the Inbox.</p>
+      <code style="display:block;padding:10px">${esc(`<script src="${origin}/chat-widget/${t.id}.js" async><\/script>`)}</code>
+      <div class="row"><div><label>Enabled</label><select id="wcen"><option value="true">Yes</option><option value="false" ${s.webchat?.enabled === false ? 'selected' : ''}>No</option></select></div>
+      <div><label>Title</label><input id="wct" value="${esc(s.webchat?.title || '')}" placeholder="${esc(s.business.name)}"></div>
+      <div><label>Subtitle</label><input id="wcs" value="${esc(s.webchat?.subtitle || '')}" placeholder="Ask us anything – we usually reply instantly"></div>
+      <div><label>Colour</label><input id="wcc" type="color" value="${esc(s.webchat?.color || s.storefront?.brandColor || '#128c4a')}"></div></div>
+      <p><a href="/s/${esc(t.id)}?chat=1" target="_blank" rel="noopener">Preview it on your storefront →</a></p></div>
     <div class="card"><h2>Website chat button</h2><p class="mute">Paste this before &lt;/body&gt; on any website (Shopify: Online Store → Themes → Edit code → theme.liquid; WordPress: a header/footer plugin).</p>
       <code style="display:block;padding:10px">${esc(snippet)}</code>
       <div class="row"><div><label>Button colour</label><input id="wcolor" type="color" value="${esc(s.widget?.color || '#25d366')}"></div><div><label>Position</label><select id="wpos"><option value="right">Bottom right</option><option value="left" ${s.widget?.position === 'left' ? 'selected' : ''}>Bottom left</option></select></div>
@@ -735,7 +748,7 @@ async function grow() {
   $('#gdl').onclick = () => { const c = $('#gqr canvas'); if (!c) return; const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = 'whatsapp-qr.png'; a.click(); };
   $('#gsave').onclick = async () => {
     try {
-      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
+      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { webchat: { enabled: $('#wcen').value === 'true', title: $('#wct').value, subtitle: $('#wcs').value, color: $('#wcc').value }, storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
       toast('Saved');
     } catch (e) { toast(e.message); }
   };

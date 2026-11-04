@@ -20,7 +20,7 @@ const page = (title, body, { description = '', image = '', brand = '' } = {}) =>
 ${/^#[0-9a-f]{3,8}$/i.test(brand) ? `:root{--brand:${brand}}` : ''}
 .btn.ghost{background:none;color:var(--brand);border:1px solid var(--line)}button.btn{border:0;cursor:pointer;font:inherit}
 .var{width:100%;margin:0 0 8px;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
-#cartbar{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:5;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100% - 32px)}
+#cartbar[hidden],#co[hidden],#done[hidden]{display:none!important}#cartbar{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:5;box-shadow:0 6px 20px rgba(0,0,0,.25);max-width:calc(100% - 32px)}
 #co label{display:block;font-size:13px;color:var(--mute);margin:10px 0 0}#co input,#co textarea,#co select{display:block;width:100%;padding:9px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;margin-top:3px}
 #co .chk input,#co .seg input{display:inline;width:auto}.seg{display:flex;gap:16px;margin-top:10px}.seg label{margin:0;color:var(--ink)}
 .line{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}.line button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:6px;width:26px;cursor:pointer}
@@ -100,6 +100,7 @@ export async function renderStorefront(tenant, { category, q } = {}) {
   (function(){
     var C=${JSON.stringify(cfg).replace(/</g, '\\u003c')}, K='wa-cart-'+C.tenant, cart=[];
     try{cart=JSON.parse(localStorage.getItem(K)||'[]')}catch(e){}
+    try{var hc=new URLSearchParams(location.search).get('cart');if(hc){var items=JSON.parse(atob(hc.replace(/-/g,'+').replace(/_/g,'/')));if(Array.isArray(items)&&items.length){cart=items.slice(0,50).map(function(i){return{productId:String(i.productId),variantId:String(i.variantId),title:String(i.title||''),price:Number(i.price)||0,quantity:Math.max(1,Math.min(99,Number(i.quantity)||1))}});try{localStorage.setItem(K,JSON.stringify(cart))}catch(e){}history.replaceState(null,'',location.pathname);setTimeout(function(){document.getElementById('cartbar').click()},300)}}}catch(e){}
     var $=function(s){return document.querySelector(s)}, m=function(n){return C.sym+Number(n).toFixed(2)};
     function save(){try{localStorage.setItem(K,JSON.stringify(cart))}catch(e){} draw()}
     function draw(){
@@ -140,7 +141,7 @@ export async function renderStorefront(tenant, { category, q } = {}) {
   return page(S.business.name, `<div class="card"><header>${S.business.logoUrl ? `<img src="${esc(S.business.logoUrl)}" alt="">` : ''}<div><h1>${esc(S.business.name)}</h1><div class="mute">${esc(S.business.tagline || (mode === 'cart' ? 'Order online in a few taps' : 'Order in a few taps on WhatsApp'))}</div></div></header>
     ${number ? `<p><a class="btn ${mode === 'cart' ? 'ghost' : ''}" href="${esc(waLink(number, 'Hi'))}">💬 Chat with us on WhatsApp</a></p>` : mode === 'chat' ? '<p class="mute">(Set the business WhatsApp number in Settings to enable ordering buttons.)</p>' : ''}
     <form><input name="q" value="${esc(q || '')}" placeholder="Search products…" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)"></form>${chips}</div>
-    <div class="grid">${grid || '<p class="mute">No products found.</p>'}</div>${cartUi}`, { description: S.business.tagline || `Order from ${S.business.name}`, image: products[0]?.image || S.business.logoUrl, brand: S.storefront?.brandColor });
+    <div class="grid">${grid || '<p class="mute">No products found.</p>'}</div>${cartUi}${S.webchat?.enabled !== false ? `<script src="/chat-widget/${esc(tenant.id)}.js" async></script>` : ''}`, { description: S.business.tagline || `Order from ${S.business.name}`, image: products[0]?.image || S.business.logoUrl, brand: S.storefront?.brandColor });
 }
 
 export function renderReceipt(tenant, o, { justPaid } = {}) {

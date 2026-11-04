@@ -89,6 +89,7 @@ export function shopifyPublicStore(settings, { currency = 'GBP' } = {}) {
         return (d.collections || [])
           .filter((c) => (c.products_count ?? 1) > 0 && !/^(all|frontpage|home)/.test(c.handle))
           .sort((a, b) => (b.products_count || 0) - (a.products_count || 0))
+          .filter((c, i, all) => all.findIndex((x) => x.title.trim().toLowerCase() === c.title.trim().toLowerCase()) === i) // shops often have duplicate collection names
           .slice(0, 30)
           .map((c) => ({ id: c.handle, title: c.title }));
       });

@@ -11,7 +11,7 @@ import { HAS_CONSENT_SQL } from './consent.js';
 export function resolveAudience(tenantId, a = {}) {
   const d = getDb();
   if (Array.isArray(a.waIds) && a.waIds.length) return [...new Set(a.waIds.map((w) => String(w).replace(/\D/g, '')).filter(Boolean))];
-  const where = ['c.tenant_id = ?'];
+  const where = ["c.tenant_id = ?", "c.wa_id NOT LIKE 'web:%'"]; // website chat visitors have no WhatsApp number
   const args = [tenantId];
   // Marketing needs recorded consent (ledger), not just a flag. optedInOnly:false is only for utility templates.
   if (a.optedInOnly !== false) where.push(`c.opted_in_marketing = 1 AND ${HAS_CONSENT_SQL}`);

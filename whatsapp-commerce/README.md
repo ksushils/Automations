@@ -72,6 +72,13 @@ See [docs/COMPETITOR_REVIEW.md](docs/COMPETITOR_REVIEW.md) for how this compares
 - **Template manager.** Create, list and delete Meta message templates, plus a one-click starter library (order confirmation, shipping update, abandoned cart, payment reminder, win-back, offers, back in stock).
 - **Website orders (Shopify / WooCommerce).** WhatsApp order-confirmation and shipping templates, plus **abandoned-checkout recovery**. Recovery respects marketing consent and stops when the order completes.
 - **Lite mode (no WhatsApp API needed).** The storefront gets a web basket and checkout. Orders land in the dashboard, and the customer taps "Send order on WhatsApp", which messages the shop's normal WhatsApp.
+- **Website AI chat widget.** Add one line to any website: `<script src="https://<PUBLIC_URL>/chat-widget/<tenantId>.js" async></script>`.
+  - It's the same bot as on WhatsApp: AI, knowledge base, products, cart, flows and hand-off to staff.
+  - No Meta account is needed, so prospects can try it before the WhatsApp onboarding.
+  - Checkout hands the basket to the storefront (or to Shopify's own checkout for URL-only shops).
+  - Staff replies from the Inbox reach the visitor through polling.
+  - Web visitors are never included in WhatsApp campaigns or Meta cost estimates.
+- **WhatsApp go-live checklist** on the Overview page: business portfolio, connection, number verified, payment method, display name, templates, quality and receiving messages. Each step is checked automatically where Meta exposes it, otherwise it links to the right Meta page.
 - **Grow tools.** wa.me link and QR-code generator, and an embeddable floating WhatsApp chat button for any website.
 - **Broadcasts.** Approved WhatsApp templates go to customers who opted in. Customers can type SUBSCRIBE or STOP.
 - **Staff alerts.** New orders go to staff WhatsApp numbers, and to a webhook for n8n, Zapier or Make.

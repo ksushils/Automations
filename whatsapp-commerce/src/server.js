@@ -11,6 +11,7 @@ import { storeWebhookRouter } from './routes/storeWebhooks.js';
 import { startJobs } from './jobs.js';
 import { publicRouter, customDomainMiddleware } from './routes/public.js';
 import { webRouter, rateLimit } from './routes/web.js';
+import { webchatRouter } from './routes/webchat.js';
 import { securityHeaders, installCrashAlerts, alert, backup } from './ops.js';
 import { getDb } from './db.js';
 
@@ -30,6 +31,7 @@ export function createApp() {
   app.use(customDomainMiddleware());
   app.use(publicRouter());
   app.use(webRouter());
+  app.use(webchatRouter());
   app.use('/webhooks/whatsapp', whatsappRouter());
   app.use('/webhooks/store', storeWebhookRouter());
   app.use('/tools', toolsRouter());

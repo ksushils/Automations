@@ -21,6 +21,7 @@ import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaig
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile, templateWarnings, cachedTemplates } from '../templates.js';
 import { fetchMedia, logMessage } from '../whatsapp/cloudApi.js';
 import { parseCsv } from '../csv.js';
+import { goLiveChecklist } from '../goLive.js';
 import { audit, listAudit, exportPerson, erasePerson, isSuppressed, rotateEncryption } from '../privacy.js';
 import { currentKeyId } from '../crypto.js';
 import { directConfigured } from '../ai/direct.js';
@@ -334,6 +335,7 @@ export function adminRouter() {
   }));
 
   // ----- WhatsApp number health, business profile, inbound media -----
+  r.get('/tenants/:tenantId/whatsapp/checklist', requireTenant, wrap(async (req, res) => res.json(await goLiveChecklist(req.tenant))));
   r.get('/tenants/:tenantId/whatsapp/health', requireTenant, wrap(async (req, res) => {
     try { res.json({ ok: true, health: await numberHealth(req.tenant) }); } catch (e) { res.json({ ok: false, error: e.message }); }
   }));
