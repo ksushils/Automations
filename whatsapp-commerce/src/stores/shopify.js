@@ -18,7 +18,7 @@ export function shopifyStore(settings) {
   const PRODUCT_FIELDS = `
     id title handle description onlineStoreUrl status totalInventory
     featuredImage { url }
-    variants(first: 20) { nodes { id title price availableForSale } }
+    variants(first: 20) { nodes { id title price compareAtPrice availableForSale } }
   `;
 
   const map = (p, currency) => ({
@@ -29,6 +29,7 @@ export function shopifyStore(settings) {
     url: p.onlineStoreUrl || `https://${domain}/products/${p.handle}`,
     currency,
     price: Number(p.variants.nodes[0]?.price || 0),
+    compareAtPrice: Number(p.variants.nodes[0]?.compareAtPrice) > Number(p.variants.nodes[0]?.price) ? Number(p.variants.nodes[0].compareAtPrice) : null,
     available: p.variants.nodes.some((v) => v.availableForSale),
     variants: p.variants.nodes.map((v) => ({ id: v.id, title: v.title === 'Default Title' ? p.title : v.title, price: Number(v.price), available: v.availableForSale })),
   });
@@ -67,7 +68,7 @@ export function shopifyStore(settings) {
       const d = await gql(`query($id: ID!) { product(id: $id) { ${PRODUCT_FIELDS} } }`, { id });
       return d.product ? map(d.product, await currency()) : null;
     },
-    async createOrder({ items, customer, paymentMethod, fulfilment, note, shippingFee = 0 }) {
+    async createOrder({ items, customer, paymentMethod, fulfilment, note, shippingFee = 0, discount = 0, promoCode }) {
       const { first, last } = splitName(customer.name);
       const input = {
         lineItems: items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
@@ -78,6 +79,7 @@ export function shopifyStore(settings) {
         ...(fulfilment === 'delivery' && customer.address
           ? { shippingAddress: { firstName: first, lastName: last, address1: customer.address.slice(0, 255), phone: '+' + customer.phone } }
           : {}),
+        ...(discount > 0 ? { appliedDiscount: { value: discount, valueType: 'FIXED_AMOUNT', title: promoCode || 'Discount', description: 'WhatsApp promo' } } : {}),
         ...(shippingFee > 0 ? { shippingLine: { title: 'Delivery', priceWithCurrency: { amount: shippingFee, currencyCode: await currency() } } } : {}),
       };
       const d = await gql(

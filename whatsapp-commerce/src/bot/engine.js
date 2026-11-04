@@ -3,8 +3,9 @@ import { difyChat } from '../dify/client.js';
 import { createSessionToken } from '../session.js';
 import { withinLimit, bumpUsage } from '../tenants.js';
 import { getConversation, saveConversation, upsertCustomer, updateCustomer } from './state.js';
-import { addToCart, removeFromCart, subtotal, money, formatCart, deliveryFee } from './cart.js';
+import { addToCart, removeFromCart, subtotal, money, formatCart } from './cart.js';
 import { placeOrder, listOrders, paymentLabel, STATUS_TEXT } from './orders.js';
+import { quote, validatePromo, findPromo, upcomingSlots } from './pricing.js';
 
 // ---------- helpers ----------
 const PAY_BUTTONS = { payment_link: '💳 Pay online', cod: '💵 Pay on delivery', bank_transfer: '🏦 Bank transfer' };
@@ -21,11 +22,12 @@ export function toWhatsAppFormatting(s) {
     .trim();
 }
 
+const wasPrice = (p, sym) => (p.compareAtPrice ? ` (was ${money(p.compareAtPrice, sym)})` : '');
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/[!?.]+$/g, '');
 
 function availablePaymentMethods(tenant, store) {
   const S = tenant.settings.ordering;
-  return (S.paymentMethods || ['cod']).filter((m) => m !== 'payment_link' || store.type !== 'manual' || S.paymentLinkUrl);
+  return (S.paymentMethods || ['cod']).filter((m) => m !== 'payment_link' || store.type !== 'manual' || S.paymentLinkUrl || tenant.settings.payments?.stripe?.secretKey);
 }
 
 // ---------- screens ----------
@@ -73,7 +75,7 @@ function productList(ctx, products, text) {
         rows: products.slice(0, 10).map((p) => ({
           id: `p:${p.id}`,
           title: p.title,
-          description: `${money(p.price, sym)}${p.available ? '' : ' · out of stock'}${p.description ? ' · ' + p.description : ''}`,
+          description: `${money(p.price, sym)}${wasPrice(p, sym)}${p.available ? '' : ' · out of stock'}${p.description ? ' · ' + p.description : ''}`,
         })),
       },
     ],
@@ -113,7 +115,8 @@ async function showProduct(ctx, productId) {
   const p = await ctx.store.getProduct(productId);
   if (!p) return ctx.reply(mainMenu(ctx, 'Sorry, that product is no longer available.'));
   const sym = ctx.S.business.currencySymbol || '£';
-  const caption = `*${p.title}*\n${money(p.price, sym)}${p.available ? '' : ' — currently out of stock'}\n\n${p.description || ''}`.trim();
+  const price = p.compareAtPrice ? `~${money(p.compareAtPrice, sym)}~ *${money(p.price, sym)}* 🔥` : money(p.price, sym);
+  const caption = `*${p.title}*\n${price}${p.available ? '' : ' — currently out of stock'}\n\n${p.description || ''}`.trim();
   if (p.image) ctx.reply({ type: 'image', url: p.image, caption });
   const variants = p.variants.filter((v) => v.available);
   if (!p.available || !variants.length) {
@@ -139,7 +142,7 @@ async function chooseVariant(ctx, productId, variantId) {
   const v = p?.variants.find((x) => String(x.id) === String(variantId));
   if (!p || !v || !v.available) return ctx.reply(mainMenu(ctx, 'Sorry, that option is no longer available.'));
   ctx.conv.state = 'awaiting_qty';
-  ctx.conv.data.pending = { productId: p.id, variantId: v.id, title: v.title === p.title ? p.title : `${p.title} (${v.title})`, price: v.price };
+  ctx.conv.data.pending = { productId: p.id, variantId: v.id, title: v.title === p.title ? p.title : `${p.title} (${v.title})`, price: v.price, stock: v.stock ?? null };
   ctx.reply({
     type: 'list',
     text: `How many *${ctx.conv.data.pending.title}* would you like? (or type a number)`,
@@ -151,7 +154,12 @@ async function chooseVariant(ctx, productId, variantId) {
 function addPending(ctx, qty) {
   const pending = ctx.conv.data.pending;
   if (!pending) return ctx.reply(mainMenu(ctx));
-  addToCart(ctx.conv.cart, { ...pending, quantity: qty });
+  if (pending.stock !== null && pending.stock !== undefined && pending.stock !== '') {
+    const inCart = ctx.conv.cart.filter((i) => i.productId === pending.productId && i.variantId === pending.variantId).reduce((n, i) => n + i.quantity, 0);
+    if (qty + inCart > Number(pending.stock)) return ctx.reply({ type: 'text', text: `Sorry, we only have ${Math.max(0, Number(pending.stock) - inCart)} more of ${pending.title} in stock. Please pick a smaller quantity.` });
+  }
+  const { stock: _stock, ...item } = pending;
+  addToCart(ctx.conv.cart, { ...item, quantity: qty });
   delete ctx.conv.data.pending;
   ctx.conv.data.reminded = false;
   ctx.conv.state = 'idle';
@@ -201,6 +209,26 @@ async function nextCheckoutStep(ctx) {
     }
     return ctx.reply({ type: 'text', text: '📍 Please send your *full name and delivery address* (including postcode) in one message — or share your location using 📎 → Location.' });
   }
+  if (co.fulfilment === 'delivery' && co.address && (O.deliveryZones || []).length) {
+    const q = quote(ctx.tenant, ctx.conv.cart, co);
+    if (q.error === 'no_zone') {
+      delete co.address;
+      ctx.conv.state = 'awaiting_address';
+      const pickup = (O.fulfilment || []).includes('pickup');
+      return ctx.reply({ type: 'buttons', text: `😔 Sorry, we don't deliver to that area yet (we cover ${(O.deliveryZones || []).map((z) => z.name).filter(Boolean).join(', ') || 'selected areas'}).\n\nSend a different address${pickup ? ' or choose collection' : ''}.`, buttons: pickup ? [{ id: 'ful:pickup', title: FUL_BUTTONS.pickup }, { id: 'cancel', title: '❌ Cancel' }] : [{ id: 'cancel', title: '❌ Cancel' }] });
+    }
+    if (q.minOrder && q.subtotal < q.minOrder) {
+      return ctx.reply({ type: 'buttons', text: `The minimum order for ${q.zone?.name || 'delivery to your area'} is ${money(q.minOrder, sym)}. Your cart is ${money(q.subtotal, sym)}.`, buttons: [{ id: 'browse', title: '🛍️ Add more' }, ...((O.fulfilment || []).includes('pickup') ? [{ id: 'ful:pickup', title: FUL_BUTTONS.pickup }] : [])] });
+    }
+  }
+  if (O.slots?.enabled && !co.slot) {
+    const slots = upcomingSlots(O.slots, { timeZone: ctx.S.business.timezone || 'Europe/London' });
+    if (slots.length) {
+      ctx.conv.state = 'checkout_slot';
+      ctx.conv.data.slotOptions = slots;
+      return ctx.reply({ type: 'list', text: `🕒 When would you like your ${co.fulfilment === 'pickup' ? 'collection' : 'delivery'}?`, button: 'Choose time', sections: [{ title: 'Available times', rows: slots.map((x) => ({ id: `slot:${x.id}`, title: x.label.split(' · ')[0], description: x.label.split(' · ')[1] })) }] });
+    }
+  }
   if (!co.paymentMethod) {
     const opts = availablePaymentMethods(ctx.tenant, ctx.store);
     if (opts.length === 1) co.paymentMethod = opts[0];
@@ -209,13 +237,20 @@ async function nextCheckoutStep(ctx) {
       return ctx.reply({ type: 'buttons', text: 'How would you like to pay?', buttons: opts.slice(0, 3).map((m) => ({ id: `pay:${m}`, title: m === 'cod' && co.fulfilment === 'pickup' ? '💵 Pay on collection' : PAY_BUTTONS[m] })) });
     }
   }
-  const sub = subtotal(ctx.conv.cart);
-  const fee = deliveryFee(O, co.fulfilment, sub);
+  return showSummary(ctx);
+}
+
+function showSummary(ctx, intro) {
+  const co = ctx.conv.data.checkout;
+  const O = ctx.S.ordering;
+  const sym = ctx.S.business.currencySymbol || '£';
+  const q = quote(ctx.tenant, ctx.conv.cart, co, { waId: ctx.conv.waId });
   ctx.conv.state = 'checkout_confirm';
+  const hints = [(O.promoCodes || []).length && !q.promo ? '🏷️ Have a promo code? Type it now.' : '', O.askNote !== false && !co.note ? '📝 Want to add a note (gift message, instructions)? Just type it.' : ''].filter(Boolean).join('\n');
   ctx.reply({
     type: 'buttons',
     header: 'Order summary',
-    text: `${formatCart(ctx.conv.cart, sym)}${co.fulfilment === 'delivery' ? `\nDelivery: ${fee ? money(fee, sym) : 'FREE'}` : ''}\n*Total: ${money(sub + fee, sym)}*\n\n${co.fulfilment === 'delivery' ? `🚚 Deliver to: ${co.address}` : `🏬 Collection${O.pickupAddress ? ` from ${O.pickupAddress}` : ''}`}\n💳 Payment: ${paymentLabel(co.paymentMethod)}`,
+    text: `${intro ? intro + '\n\n' : ''}${formatCart(ctx.conv.cart, sym)}${q.discount ? `\nDiscount (${q.promo.code}): -${money(q.discount, sym)}` : ''}${co.fulfilment === 'delivery' ? `\nDelivery: ${q.deliveryFee ? money(q.deliveryFee, sym) : 'FREE'}` : ''}\n*Total: ${money(q.total, sym)}*\n\n${co.fulfilment === 'delivery' ? `🚚 Deliver to: ${co.address}` : `🏬 Collection${O.pickupAddress ? ` from ${O.pickupAddress}` : ''}`}${co.slot ? `\n🕒 ${co.slot.label}` : ''}\n💳 Payment: ${paymentLabel(co.paymentMethod)}${co.note ? `\n📝 Note: ${co.note}` : ''}${hints ? `\n\n${hints}` : ''}`,
     buttons: [{ id: 'confirm', title: '✅ Place order' }, { id: 'cart', title: '✏️ Edit cart' }, { id: 'cancel', title: '❌ Cancel' }],
   });
 }
@@ -229,6 +264,7 @@ async function confirmOrder(ctx) {
     messages.forEach((m) => ctx.reply(m));
   } catch (e) {
     console.error(`[order] tenant=${ctx.tenant.id}`, e.message);
+    if (e.userMessage) return ctx.reply({ type: 'buttons', text: e.userMessage, buttons: [{ id: 'cart', title: '🛒 View cart' }, { id: 'human', title: '🙋 Talk to us' }] });
     ctx.reply({ type: 'buttons', text: 'Sorry, something went wrong while placing your order. Please try again, or talk to our team.', buttons: [{ id: 'confirm', title: '🔁 Try again' }, { id: 'human', title: '🙋 Talk to us' }] });
   }
 }
@@ -347,6 +383,13 @@ async function handleAction(ctx, id) {
       if (!availablePaymentMethods(ctx.tenant, ctx.store).includes(arg)) return nextCheckoutStep(ctx);
       (ctx.conv.data.checkout ||= {}).paymentMethod = arg;
       return nextCheckoutStep(ctx);
+    case 'slot': {
+      const slot = (ctx.conv.data.slotOptions || []).find((x) => x.id === arg);
+      if (!slot) return nextCheckoutStep(ctx);
+      (ctx.conv.data.checkout ||= {}).slot = slot;
+      delete ctx.conv.data.slotOptions;
+      return nextCheckoutStep(ctx);
+    }
     case 'confirm': return confirmOrder(ctx);
     case 'cancel': ctx.conv.state = 'idle'; delete ctx.conv.data.checkout; return ctx.reply(mainMenu(ctx, 'Checkout cancelled — your cart is still saved.'));
     case 'status': return orderStatus(ctx);
@@ -365,6 +408,26 @@ async function handleText(ctx, raw) {
   // State-driven input first
   if (ctx.conv.state === 'awaiting_address' && !GREETING.test(t) && !COMMANDS.has(t) && !/^(order status|track|remove \d+)/.test(t)) return setAddress(ctx, text);
   if (ctx.conv.state === 'awaiting_qty' && /^\d{1,2}$/.test(t)) return addPending(ctx, Number(t));
+  if (ctx.conv.state === 'checkout_confirm' && ctx.conv.data.checkout) {
+    const co = ctx.conv.data.checkout;
+    const O = ctx.S.ordering;
+    const explicit = t.match(/^(?:promo|code|coupon|discount)(?: code)?\s*:?\s*([a-z0-9_-]{2,30})$/);
+    const candidate = explicit ? explicit[1] : /^[a-z0-9_-]{3,30}$/.test(t) && !COMMANDS.has(t) && !['yes', 'no', 'ok', 'confirm'].includes(t) ? t : null;
+    if (candidate && (explicit || findPromo(O, candidate))) {
+      const v = validatePromo(ctx.tenant, candidate, { sub: subtotal(ctx.conv.cart), waId: ctx.conv.waId });
+      if (!v.ok) return showSummary(ctx, `❌ ${v.reason}`);
+      co.promoCode = v.promo.code;
+      return showSummary(ctx, `🎉 Code *${v.promo.code}* applied!`);
+    }
+    if (O.askNote !== false && !COMMANDS.has(t) && !GREETING.test(t) && text.split(/\s+/).length >= 2 && !/^(yes|no|ok|confirm|place order)\b/.test(t)) {
+      co.note = text.slice(0, 300);
+      return showSummary(ctx, '📝 Note added.');
+    }
+  }
+
+  // Deep link from the storefront page / ads: "… [ref:PRODUCT_ID]"
+  const ref = text.match(/\[ref:([^\]\s]{1,120})\]/i);
+  if (ref) { ctx.conv.data.greeted = true; return showProduct(ctx, ref[1]); }
 
   // Keyword commands
   if (GREETING.test(t) && t.split(/\s+/).length <= 4) {

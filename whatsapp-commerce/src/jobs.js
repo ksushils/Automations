@@ -1,5 +1,5 @@
 import { getDb, json } from './db.js';
-import { getTenant } from './tenants.js';
+import { getTenant, listTenants } from './tenants.js';
 import { getConversation, saveConversation } from './bot/state.js';
 import { createSender } from './whatsapp/cloudApi.js';
 import { formatCart } from './bot/cart.js';
@@ -32,7 +32,56 @@ export async function runAbandonedCartReminders(now = Date.now()) {
 }
 
 export function startJobs() {
-  const timer = setInterval(() => runAbandonedCartReminders().catch((e) => console.error('[jobs]', e)), 5 * 60000);
+  const timer = setInterval(() => {
+    runAbandonedCartReminders().catch((e) => console.error('[jobs]', e));
+    runPaymentReminders().catch((e) => console.error('[jobs]', e));
+  }, 5 * 60000);
+  const daily = setInterval(() => runWinBack().catch((e) => console.error('[jobs]', e)), 6 * 3600000);
   timer.unref();
+  daily.unref();
   return timer;
+}
+
+/** One reminder for unpaid online / bank-transfer orders, only inside the 24h service window. */
+export async function runPaymentReminders(now = Date.now()) {
+  const rows = getDb()
+    .prepare(`SELECT o.* FROM orders o WHERE o.payment_status = 'unpaid' AND o.status NOT IN ('cancelled', 'completed') AND o.reminded_at IS NULL
+              AND o.payment_method IN ('payment_link', 'bank_transfer') AND o.created_at > datetime('now', '-23 hours')`)
+    .all();
+  let sent = 0;
+  for (const o of rows) {
+    const tenant = getTenant(o.tenant_id);
+    const minutes = Number(tenant?.settings.ordering?.paymentReminderMinutes) || 0;
+    if (!tenant?.active || !minutes || now - Date.parse(o.created_at + 'Z') < minutes * 60000) continue;
+    getDb().prepare("UPDATE orders SET reminded_at = datetime('now') WHERE id = ?").run(o.id);
+    const sym = tenant.settings.business.currencySymbol || '£';
+    const msg = o.payment_method === 'payment_link' && o.checkout_url
+      ? { type: 'cta', text: `⏰ Friendly reminder: order *${o.store_order_name}* (${sym}${Number(o.subtotal).toFixed(2)}) is waiting for payment.`, buttonText: 'Pay now', url: o.checkout_url }
+      : { type: 'text', text: `⏰ Friendly reminder: we haven't received payment for order *${o.store_order_name}* (${sym}${Number(o.subtotal).toFixed(2)}) yet.\n${tenant.settings.ordering.bankDetails || ''}\nReference: ${o.store_order_name}\n\nAlready paid? Just send us the screenshot here 🙏` };
+    await createSender(tenant)(o.wa_id, msg).then(() => sent++, (e) => console.warn('[payment reminder]', e.message));
+  }
+  return sent;
+}
+
+/** Win-back: approved template to opted-in customers whose last order is older than N days (max once per N days). */
+export async function runWinBack() {
+  let sent = 0;
+  for (const tenant of listTenants()) {
+    const W = tenant.settings.notifications?.winBack;
+    if (!tenant.active || !W?.enabled || !W.template) continue;
+    const days = Math.max(7, Number(W.afterDays) || 30);
+    const rows = getDb()
+      .prepare(`SELECT c.wa_id FROM customers c WHERE c.tenant_id = ? AND c.opted_in_marketing = 1
+                AND (c.winback_sent_at IS NULL OR c.winback_sent_at < datetime('now', ?))
+                AND EXISTS (SELECT 1 FROM orders o WHERE o.tenant_id = c.tenant_id AND o.wa_id = c.wa_id)
+                AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.tenant_id = c.tenant_id AND o.wa_id = c.wa_id AND o.created_at > datetime('now', ?))
+                LIMIT 500`)
+      .all(tenant.id, `-${days} days`, `-${days} days`);
+    const send = createSender(tenant);
+    for (const r of rows) {
+      getDb().prepare("UPDATE customers SET winback_sent_at = datetime('now') WHERE tenant_id = ? AND wa_id = ?").run(tenant.id, r.wa_id);
+      await send(r.wa_id, { type: 'template', name: W.template, language: W.language || 'en_GB' }).then(() => sent++, (e) => console.warn('[win-back]', e.message));
+    }
+  }
+  return sent;
 }

@@ -9,7 +9,7 @@ export const cloud = await import('../src/whatsapp/cloudApi.js');
 
 export function makeTenant(overrides = {}) {
   const { tenant } = tenants.createTenant({ name: 'Test Shop', plan: 'pro' });
-  return tenants.updateTenantSettings(tenant.id, {
+  tenants.updateTenantSettings(tenant.id, {
     store: {
       type: 'manual',
       manual: {
@@ -21,8 +21,8 @@ export function makeTenant(overrides = {}) {
       },
     },
     ordering: { paymentMethods: ['cod', 'bank_transfer'], fulfilment: ['delivery', 'pickup'], deliveryFee: 3.5, freeDeliveryOver: 50, bankDetails: 'Sort 00-00-00 Acc 12345678' },
-    ...overrides,
   });
+  return tenants.updateTenantSettings(tenant.id, overrides); // deep-merged on top of the defaults
 }
 
 /** Run one inbound event through the engine and return the replies. */

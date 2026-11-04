@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>WhatsApp Commerce</title>
 <style>
-:root{--bg:#f5f7f6;--card:#fff;--ink:#17201b;--mute:#5d6b63;--line:#dfe5e1;--brand:#128c4a;--brand2:#0b6b38;--warn:#b5470b;--bubble-in:#fff;--bubble-out:#d9fdd3;--chat:#efeae2}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1512;--card:#17201b;--ink:#e7efe9;--mute:#9aaba1;--line:#2a362f;--brand:#25d366;--brand2:#1fb457;--bubble-in:#202c33;--bubble-out:#005c4b;--chat:#0b141a}}
+:root{--bg:#f5f7f6;--card:#fff;--ink:#17201b;--mute:#5d6b63;--line:#dfe5e1;--brand:#128c4a;--bar:#128c4a;--brand2:#0b6b38;--warn:#b5470b;--bubble-in:#fff;--bubble-out:#d9fdd3;--chat:#efeae2}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1512;--card:#17201b;--ink:#e7efe9;--mute:#9aaba1;--line:#2a362f;--brand:#25d366;--bar:#17a050;--brand2:#1fb457;--bubble-in:#202c33;--bubble-out:#005c4b;--chat:#0b141a}}
 *{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
 header{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2;flex-wrap:wrap}
 header h1{font-size:16px;margin:0;flex:1}nav{display:flex;gap:4px;flex-wrap:wrap}
@@ -34,6 +34,13 @@ code{background:var(--bg);padding:2px 6px;border-radius:6px;word-break:break-all
 .list-item{padding:8px;border-radius:8px;cursor:pointer;border:1px solid transparent}.list-item:hover,.list-item.on{border-color:var(--line);background:var(--bg)}
 #toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;display:none;z-index:9}
 .hidden{display:none}
+.bars{display:flex;align-items:flex-end;gap:2px;height:180px;border-bottom:1px solid var(--line);position:relative}
+.bars .bw{flex:1;height:100%;display:flex;align-items:flex-end;position:relative;cursor:default}
+.bars .bar{width:100%;background:var(--bar);border-radius:4px 4px 0 0;min-height:2px}
+.bars .bw:hover .bar{filter:brightness(1.15)}
+.bars .tip{display:none;position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--line);color:var(--ink);padding:4px 8px;border-radius:6px;font-size:12px;white-space:nowrap;z-index:3;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.bars .bw:hover .tip{display:block}
+.axis{display:flex;justify-content:space-between;font-size:12px;color:var(--mute);margin-top:4px}
 </style>
 </head>
 <body>
@@ -76,20 +83,21 @@ async function boot() {
   const who = await api('/whoami');
   S.super = who.super;
   if (!S.tenantId && !S.super) throw new Error('Invalid key');
-  if (S.tenantId) S.tenant = (await api(T(''))).tenant;
+  if (S.tenantId) { const r = await api(T('')); S.tenant = r.tenant; S.role = r.role; }
   $('#logout').style.display = '';
   render();
 }
 $('#logout').onclick = () => { store.set('wc_key', null); S.key = null; S.tenant = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['broadcast', 'Broadcast']];
+const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['broadcast', 'Broadcast'], ['team', 'Team']];
+const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders']);
 function render() {
-  const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS : [])];
+  const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [])];
   if (!tabs.find((t) => t[0] === S.tab)) S.tab = tabs[0][0];
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
-  ({ tenants, overview, ai, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ tenants, overview, analytics, team, ai, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin ----------
@@ -111,7 +119,7 @@ async function tenants() {
       $('#keys').innerHTML = `<p>✅ Created <code>${esc(r.tenant.id)}</code>. Save these now – shown once:</p><p>Admin key (give to client): <code>${esc(r.adminKey)}</code></p><p>Dify tool key: <code>${esc(r.toolKey)}</code></p><p>${r.ai.created ? `🤖 AI chatbot created in Dify (${esc(r.ai.model.name)}) – <a href="${esc(r.ai.appUrl)}" target="_blank" rel="noopener">open in Dify</a>` : `⚠️ AI chatbot not created: ${esc(r.ai.reason)}`}</p>`;
     } catch (e) { toast(e.message); }
   };
-  $('#app').querySelectorAll('[data-open]').forEach((b) => (b.onclick = async () => { S.tenantId = b.dataset.open; store.set('wc_tenant', S.tenantId); S.tenant = (await api(T(''))).tenant; S.tab = 'overview'; render(); }));
+  $('#app').querySelectorAll('[data-open]').forEach((b) => (b.onclick = async () => { S.tenantId = b.dataset.open; store.set('wc_tenant', S.tenantId); const r = await api(T('')); S.tenant = r.tenant; S.role = r.role; S.tab = 'overview'; render(); }));
   $('#app').querySelectorAll('[data-toggle]').forEach((b) => (b.onclick = async () => { await api(`/tenants/${b.dataset.toggle}/meta`, { method: 'PATCH', body: { active: b.dataset.active !== 'true' } }); tenants(); }));
 }
 
@@ -137,6 +145,8 @@ async function overview() {
       <label>Webhook verify token</label><code>${esc(s.whatsapp.verifyToken)}</code>
       <label>Store order webhook (Shopify / WooCommerce order update notifications)</label><code>${esc(t.urls.storeWebhook)}</code>
       <label>Dify custom tool schema URL (Agent mode)</label><code>${esc(location.origin)}/dify/store-tools.openapi.json</code>
+      <label>Storefront / link-in-bio page (share on Instagram, Google, QR codes)</label><code><a href="${esc(t.urls.storefront)}" target="_blank" rel="noopener">${esc(t.urls.storefront)}</a></code>
+      <label>Stripe webhook (Stripe → Developers → Webhooks, event checkout.session.completed)</label><code>${esc(t.urls.stripeWebhook)}</code>
       <label>Tenant ID</label><code>${esc(t.id)}</code></div>
     <div class="card"><h2>Test connections</h2><div class="row">
       <div><button class="btn ghost" data-test="store">Test store</button></div>
@@ -246,12 +256,13 @@ const STATUSES = ['new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivere
 async function orders() {
   const { orders } = await api(T('/orders?limit=100'));
   const sym = S.tenant.settings.business.currencySymbol || '£';
-  $('#app').innerHTML = `<div class="card"><h2>Orders</h2><div class="tablewrap"><table><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Payment</th><th></th></tr>
-    ${orders.map((o) => `<tr><td><b>${esc(o.store_order_name)}</b><div class="mute">${esc(o.created_at)}</div></td><td>${esc(o.customer_name || '')}<div class="mute">+${esc(o.wa_id)}</div><div class="mute">${esc(o.fulfilment)}${o.address ? ': ' + esc(o.address) : ''}</div></td>
-      <td>${o.items.map((i) => `${esc(i.title)} ×${i.quantity}`).join('<br>')}</td><td>${sym}${Number(o.subtotal).toFixed(2)}</td>
+  $('#app').innerHTML = `<div class="card"><h2>Orders <button class="btn ghost" data-csv="orders">⬇ Export CSV</button> <button class="btn ghost" data-csv="customers">⬇ Customers CSV</button></h2><div class="tablewrap"><table><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Payment</th><th></th></tr>
+    ${orders.map((o) => `<tr><td><b>${esc(o.store_order_name)}</b><div class="mute">${esc(o.created_at)}</div></td><td>${esc(o.customer_name || '')}<div class="mute">+${esc(o.wa_id)}</div><div class="mute">${esc(o.fulfilment)}${o.address ? ': ' + esc(o.address) : ''}</div>${o.slot ? `<div class="mute">🕒 ${esc(o.slot)}</div>` : ''}${o.notes ? `<div class="mute">📝 ${esc(o.notes)}</div>` : ''}</td>
+      <td>${o.items.map((i) => `${esc(i.title)} ×${i.quantity}`).join('<br>')}</td><td>${sym}${Number(o.subtotal).toFixed(2)}${o.promo_code ? `<div class="mute">🏷️ ${esc(o.promo_code)} -${sym}${Number(o.discount).toFixed(2)}</div>` : ''}${o.receipt_token ? `<div><a href="/r/${esc(o.receipt_token)}" target="_blank" rel="noopener">receipt</a></div>` : ''}</td>
       <td><select data-s="${o.id}">${STATUSES.map((s) => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
       <td><select data-p="${o.id}">${['unpaid', 'paid', 'refunded'].map((s) => `<option ${s === o.payment_status ? 'selected' : ''}>${s}</option>`).join('')}</select><div class="mute">${esc(o.payment_method)}</div></td>
       <td><button class="btn ghost" data-u="${o.id}">Save & notify</button></td></tr>`).join('') || '<tr><td colspan="7" class="mute">No orders yet</td></tr>'}</table></div></div>`;
+  $('#app').querySelectorAll('[data-csv]').forEach((b) => (b.onclick = () => downloadCsv(b.dataset.csv)));
   $('#app').querySelectorAll('[data-u]').forEach((b) => (b.onclick = async () => {
     const id = b.dataset.u;
     const r = await api(T('/orders/' + id), { method: 'PATCH', body: { status: $(`[data-s="${id}"]`).value, payment_status: $(`[data-p="${id}"]`).value, notify: true } });
@@ -270,7 +281,15 @@ async function catalogue() {
   $('#app').innerHTML = `<div class="card"><h2>Built-in catalogue</h2><p class="mute">For sellers without Shopify/WooCommerce. One product per line in JSON. Fields: id, title, price, description, image, category, variants [{id,title,price}].</p>
     <label>Categories (JSON)</label><textarea id="cats" style="min-height:90px">${esc(JSON.stringify(m.categories || [], null, 2))}</textarea>
     <label>Products (JSON)</label><textarea id="prods" style="min-height:320px;font-family:monospace">${esc(JSON.stringify(m.products || [], null, 2))}</textarea>
-    <p><button class="btn" id="savecat">Save catalogue</button> <button class="btn ghost" id="sample">Load sample products</button></p></div>`;
+    <p><button class="btn" id="savecat">Save catalogue</button> <button class="btn ghost" id="sample">Load sample products</button></p></div>
+    <div class="card"><h2>Import products from CSV</h2><p class="mute">Columns: <code>id,title,price,compare_at_price,category,description,image,stock,options</code> — options like <code>Small:15:10|Large:16:4</code> (name:price:stock). Rows with an existing id are updated. Leave stock empty for unlimited.</p>
+    <input type="file" id="csvf" accept=".csv,text/csv"> <label><input type="checkbox" id="csvreplace" style="width:auto"> Replace whole catalogue</label>
+    <p><button class="btn" id="csvgo">Import CSV</button></p><pre id="csvres" class="mute" style="white-space:pre-wrap"></pre></div>`;
+  $('#csvgo').onclick = async () => {
+    const f = $('#csvf').files[0]; if (!f) return toast('Choose a CSV file');
+    try { const r = await api(T('/catalogue/import'), { method: 'POST', body: { csv: await f.text(), replace: $('#csvreplace').checked } }); S.tenant = r.tenant; toast(`Imported ${r.imported} products`); catalogue(); }
+    catch (e) { $('#csvres').textContent = e.message; }
+  };
   $('#sample').onclick = () => {
     $('#cats').value = JSON.stringify([{ id: 'tees', title: 'T-shirts' }, { id: 'mugs', title: 'Mugs' }], null, 2);
     $('#prods').value = JSON.stringify([
@@ -290,12 +309,15 @@ async function catalogue() {
 
 // ---------- settings ----------
 const FIELDS = [
-  ['Business', [['business.name', 'Business name'], ['business.currency', 'Currency code (GBP)'], ['business.currencySymbol', 'Currency symbol'], ['business.welcomeMessage', 'Welcome message ({{name}} = first name)', 'textarea'], ['business.supportHours', 'Support hours'], ['business.exampleQuery', 'Example search shown to customers']]],
+  ['Business', [['business.name', 'Business name'], ['business.currency', 'Currency code (GBP)'], ['business.currencySymbol', 'Currency symbol'], ['business.welcomeMessage', 'Welcome message ({{name}} = first name)', 'textarea'], ['business.supportHours', 'Support hours'], ['business.exampleQuery', 'Example search shown to customers'], ['business.whatsappNumber', 'Public WhatsApp number (for storefront buttons, e.g. 447700900123)'], ['business.timezone', 'Timezone (e.g. Europe/London)'], ['business.tagline', 'Storefront tagline'], ['business.logoUrl', 'Logo image URL'], ['business.customDomain', 'Custom storefront domain (CNAME to this server)']]],
   ['WhatsApp Cloud API (Meta)', [['whatsapp.phoneNumberId', 'Phone number ID'], ['whatsapp.wabaId', 'WhatsApp Business Account ID'], ['whatsapp.accessToken', 'Permanent access token (System User)', 'secret'], ['whatsapp.appSecret', 'App secret (verifies webhook signatures)', 'secret'], ['whatsapp.verifyToken', 'Webhook verify token']]],
   ['Store connection', [['store.type', 'Store type', 'select', ['manual', 'shopify', 'woocommerce', 'custom']], ['store.shopify.domain', 'Shopify domain (yourshop.myshopify.com)'], ['store.shopify.adminToken', 'Shopify Admin API access token (shpat_…)', 'secret'], ['store.woocommerce.url', 'WooCommerce site URL (https://…)'], ['store.woocommerce.consumerKey', 'WooCommerce consumer key (ck_…)', 'secret'], ['store.woocommerce.consumerSecret', 'WooCommerce consumer secret (cs_…)', 'secret'], ['store.custom.baseUrl', 'Custom VPS store API base URL'], ['store.custom.apiKey', 'Custom store API key', 'secret']]],
   ['AI (Dify)', [['dify.enabled', 'Enable AI replies', 'bool'], ['dify.baseUrl', 'Dify API base URL'], ['dify.apiKey', 'Dify app API key (app-…)', 'secret'], ['dify.mode', 'Mode', 'select', ['assist', 'agent']]]],
-  ['Ordering & payment', [['ordering.paymentMethods', 'Payment methods (comma: payment_link,cod,bank_transfer)', 'csv'], ['ordering.paymentLinkUrl', 'Payment link for built-in catalogue (e.g. Stripe link; {total} {order})'], ['ordering.bankDetails', 'Bank transfer details', 'textarea'], ['ordering.fulfilment', 'Fulfilment (comma: delivery,pickup)', 'csv'], ['ordering.deliveryFee', 'Delivery fee', 'number'], ['ordering.freeDeliveryOver', 'Free delivery over (0 = never)', 'number'], ['ordering.minOrder', 'Minimum order (0 = none)', 'number'], ['ordering.pickupAddress', 'Collection address']]],
-  ['Notifications', [['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Order webhook URL (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number']]],
+  ['Ordering & payment', [['ordering.paymentMethods', 'Payment methods (comma: payment_link,cod,bank_transfer)', 'csv'], ['ordering.paymentLinkUrl', 'Payment link for built-in catalogue (e.g. Stripe link; {total} {order})'], ['ordering.bankDetails', 'Bank transfer details', 'textarea'], ['ordering.fulfilment', 'Fulfilment (comma: delivery,pickup)', 'csv'], ['ordering.deliveryFee', 'Delivery fee', 'number'], ['ordering.freeDeliveryOver', 'Free delivery over (0 = never)', 'number'], ['ordering.minOrder', 'Minimum order (0 = none)', 'number'], ['ordering.pickupAddress', 'Collection address'], ['ordering.paymentReminderMinutes', 'Remind unpaid orders after minutes (0 = off)', 'number'], ['ordering.askNote', 'Let customers add an order note', 'bool'], ['ordering.lowStockAlert', 'Low-stock alert at (built-in catalogue)', 'number']]],
+  ['Promo codes & delivery zones', [['ordering.promoCodes', 'Promo codes (JSON) – [{"code":"WELCOME10","type":"percent|fixed|free_delivery","value":10,"minSpend":0,"expires":"2026-12-31","maxUses":0,"oncePerCustomer":true}]', 'json'], ['ordering.deliveryZones', 'Delivery zones (JSON, empty = deliver anywhere) – [{"name":"Central London","postcodes":["SW1","W1","EC"],"fee":3.5,"minOrder":15,"freeOver":50}]', 'json']]],
+  ['Delivery / collection time slots', [['ordering.slots.enabled', 'Ask customers to pick a time slot', 'bool'], ['ordering.slots.times', 'Time windows (comma, e.g. 10:00-12:00,14:00-16:00)', 'csv'], ['ordering.slots.days', 'Days ahead to offer', 'number'], ['ordering.slots.leadHours', 'Minimum notice (hours)', 'number'], ['ordering.slots.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum']]],
+  ['Card payments (Stripe – built-in catalogue & custom stores)', [['payments.stripe.secretKey', 'Stripe secret key (sk_live_… / rk_live_…)', 'secret'], ['payments.stripe.webhookSecret', 'Stripe webhook signing secret (whsec_…)', 'secret']]],
+  ['Notifications', [['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Order webhook URL (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number']]],
 ];
 const getP = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
 function setP(o, p, v) { const ks = p.split('.'); let c = o; ks.slice(0, -1).forEach((k) => (c = c[k] ||= {})); c[ks.at(-1)] = v; }
@@ -305,23 +327,76 @@ async function settings() {
     const v = getP(s, p);
     let input;
     if (type === 'textarea') input = `<textarea data-f="${p}">${esc(v)}</textarea>`;
+    else if (type === 'json') input = `<textarea data-f="${p}" data-type="json" style="font-family:monospace;min-height:110px">${esc(JSON.stringify(v ?? [], null, 2))}</textarea>`;
     else if (type === 'select') input = `<select data-f="${p}">${opts.map((o) => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
     else if (type === 'bool') input = `<select data-f="${p}" data-type="bool"><option value="true" ${v ? 'selected' : ''}>Yes</option><option value="false" ${!v ? 'selected' : ''}>No</option></select>`;
-    else input = `<input data-f="${p}" data-type="${type || ''}" ${type === 'secret' ? 'type="password" placeholder="(unchanged)"' : ''} value="${esc(type === 'csv' ? (v || []).join(',') : type === 'secret' ? '' : v)}">`;
+    else input = `<input data-f="${p}" data-type="${type || ''}" ${type === 'secret' ? 'type="password" placeholder="(unchanged)"' : ''} value="${esc(type === 'csv' || type === 'csvnum' ? (v || []).join(',') : type === 'secret' ? '' : v)}">`;
     return `<div><label>${l}</label>${input}</div>`;
   }).join('')}</div></div>`).join('') + '<p><button class="btn" id="saveset">Save settings</button></p>';
   $('#saveset').onclick = async () => {
     const patch = {};
+    let bad = null;
     $('#app').querySelectorAll('[data-f]').forEach((el) => {
       const t = el.dataset.type; let v = el.value;
       if (t === 'secret' && !v) return;
+      if (t === 'json') { try { v = JSON.parse(v || '[]'); } catch { bad = el.dataset.f; return; } }
+      if (t === 'csvnum') v = v.split(',').map((x) => x.trim()).filter((x) => x !== '').map(Number);
       if (t === 'csv') v = v.split(',').map((x) => x.trim()).filter(Boolean);
       if (t === 'number') v = Number(v) || 0;
       if (t === 'bool') v = v === 'true';
       setP(patch, el.dataset.f, v);
     });
+    if (bad) return toast('Invalid JSON in ' + bad);
     try { S.tenant = (await api(T('/settings'), { method: 'PATCH', body: patch })).tenant; toast('Settings saved'); } catch (e) { toast(e.message); }
   };
+}
+
+async function downloadCsv(kind) {
+  const res = await fetch('/api' + T(`/export/${kind}.csv`), { headers: { Authorization: 'Bearer ' + S.key } });
+  if (!res.ok) return toast('Export failed');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await res.blob());
+  a.download = `${kind}-${S.tenantId}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+// ---------- analytics ----------
+async function analytics(days = Number(store.get('wc_days')) || 30) {
+  const a = await api(T(`/analytics?days=${days}`));
+  const sym = S.tenant.settings.business.currencySymbol || '£';
+  const m = (n) => sym + Number(n || 0).toFixed(2);
+  // fill every day so gaps show as zero
+  const series = [];
+  const byDay = Object.fromEntries(a.byDay.map((d) => [d.day, d]));
+  for (let i = days - 1; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10); series.push(byDay[d] || { day: d, orders: 0, revenue: 0 }); }
+  const max = Math.max(1, ...series.map((d) => d.revenue));
+  const fmtDay = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  $('#app').innerHTML = `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Period</b>${[7, 30, 90].map((d) => `<button class="btn ${d === days ? '' : 'ghost'}" data-days="${d}">Last ${d} days</button>`).join('')}</div>
+    <div class="row">
+      <div class="card"><div class="mute">Revenue (after discounts)</div><div class="stat">${m(a.revenue)}</div><div class="mute">${m(a.paid_revenue)} paid</div></div>
+      <div class="card"><div class="mute">Orders</div><div class="stat">${a.orders}</div><div class="mute">avg ${m(a.aov)}</div></div>
+      <div class="card"><div class="mute">Chats → buyers</div><div class="stat">${a.conversion}%</div><div class="mute">${a.buyers} of ${a.chats} chatting customers</div></div>
+      <div class="card"><div class="mute">Customers</div><div class="stat">${a.newCustomers}</div><div class="mute">new · ${a.repeatCustomers} repeat buyers</div></div></div>
+    <div class="card"><h2>Revenue per day</h2>
+      <div class="bars" role="img" aria-label="Revenue per day bar chart">${series.map((d) => `<div class="bw"><div class="bar" style="height:${(d.revenue / max) * 100}%"></div><div class="tip">${fmtDay(d.day)} · ${m(d.revenue)} · ${d.orders} order${d.orders === 1 ? '' : 's'}</div></div>`).join('')}</div>
+      <div class="axis"><span>${fmtDay(series[0].day)}</span><span>max ${m(max)}</span><span>${fmtDay(series.at(-1).day)}</span></div>
+      <details style="margin-top:8px"><summary class="mute">Show as table</summary><div class="tablewrap"><table><tr><th>Day</th><th>Orders</th><th>Revenue</th></tr>${series.filter((d) => d.orders).map((d) => `<tr><td>${fmtDay(d.day)}</td><td>${d.orders}</td><td>${m(d.revenue)}</td></tr>`).join('') || '<tr><td colspan="3" class="mute">No orders</td></tr>'}</table></div></details></div>
+    <div class="row"><div class="card"><h2>Top products</h2><table><tr><th>Product</th><th>Qty</th><th>Sales (before discounts)</th></tr>${a.topProducts.map((p) => `<tr><td>${esc(p.title)}</td><td>${p.quantity}</td><td>${m(p.revenue)}</td></tr>`).join('') || '<tr><td colspan="3" class="mute">No sales yet</td></tr>'}</table></div>
+      <div class="card"><h2>Promo codes</h2><table><tr><th>Code</th><th>Orders</th><th>Discount given</th></tr>${a.promos.map((p) => `<tr><td>${esc(p.code)}</td><td>${p.orders}</td><td>${m(p.discount)}</td></tr>`).join('') || '<tr><td colspan="3" class="mute">No promo orders</td></tr>'}</table></div></div>`;
+  $('#app').querySelectorAll('[data-days]').forEach((b) => (b.onclick = () => { store.set('wc_days', b.dataset.days); analytics(Number(b.dataset.days)); }));
+}
+
+// ---------- team ----------
+async function team() {
+  const { staff } = await api(T('/staff'));
+  $('#app').innerHTML = `<div class="card"><h2>Team logins</h2><p class="mute"><b>Staff</b> can see orders, inbox, analytics and the test bot. <b>Owner</b> can also change settings, AI, broadcasts and the team. Each person signs in with the tenant ID <code>${esc(S.tenantId)}</code> and their own key.</p>
+    <div class="row"><div><label>Name</label><input id="sn"></div><div><label>Role</label><select id="sr"><option value="staff">Staff</option><option value="owner">Owner</option></select></div><div style="align-self:end"><button class="btn" id="sa">Add team member</button></div></div><div id="skey"></div></div>
+    <div class="card"><table><tr><th>Name</th><th>Role</th><th>Added</th><th></th></tr>${staff.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.role)}</td><td>${esc(m.created_at)}</td><td><button class="btn ghost" data-del="${m.id}">Remove</button></td></tr>`).join('') || '<tr><td colspan="4" class="mute">No team members yet</td></tr>'}</table></div>`;
+  $('#sa').onclick = async () => {
+    try { const r = await api(T('/staff'), { method: 'POST', body: { name: $('#sn').value, role: $('#sr').value } }); await team(); $('#skey').innerHTML = `<p>✅ Key for ${esc($('#sn').value || 'member')} (shown once): <code>${esc(r.key)}</code></p>`; } catch (e) { toast(e.message); }
+  };
+  $('#app').querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => { if (confirm('Remove this team member?')) { await api(T('/staff/' + b.dataset.del), { method: 'DELETE' }); team(); } }));
 }
 
 // ---------- broadcast ----------

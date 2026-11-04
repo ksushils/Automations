@@ -17,6 +17,11 @@ export function defaultSettings(name) {
       currencySymbol: '£',
       welcomeMessage: `Hi{{name}}! 👋 Welcome to ${name}. Browse our products, ask me anything, or type *menu* at any time.`,
       supportHours: 'Mon–Fri 9am–5pm',
+      timezone: 'Europe/London',
+      whatsappNumber: '', // public number customers message, e.g. 447700900123 (used by the storefront page)
+      customDomain: '', // e.g. order.myshop.co.uk → CNAME to this server to serve the storefront
+      tagline: '',
+      logoUrl: '',
     },
     whatsapp: {
       phoneNumberId: '',
@@ -60,11 +65,25 @@ export function defaultSettings(name) {
       freeDeliveryOver: 0,
       minOrder: 0,
       pickupAddress: '',
+      // [{ name: 'Central London', postcodes: ['SW1', 'W1', 'EC'], fee: 3.5, minOrder: 15, freeOver: 50 }] – empty = deliver anywhere
+      deliveryZones: [],
+      // [{ code: 'WELCOME10', type: 'percent'|'fixed'|'free_delivery', value: 10, minSpend: 0, expires: '2026-12-31', maxUses: 0, oncePerCustomer: false }]
+      promoCodes: [],
+      slots: { enabled: false, days: 3, times: ['10:00-12:00', '14:00-16:00', '18:00-20:00'], leadHours: 2, closedDays: [] },
+      askNote: true, // customers can add a note (gift message, cutlery…) on the summary
+      paymentReminderMinutes: 60, // remind unpaid online / bank-transfer orders (0 = off)
+      lowStockAlert: 3, // built-in catalogue: alert staff when stock falls to this level
+    },
+    payments: {
+      // Stripe Checkout for the built-in catalogue / custom stores (Shopify & WooCommerce use their own checkout)
+      stripe: { secretKey: '', webhookSecret: '' },
     },
     notifications: {
       staffWaIds: [], // staff phone numbers (international, digits only) that get new-order alerts
       webhookUrl: '', // optional: POST every new order as JSON (Zapier/n8n/Make)
       abandonedCartMinutes: 120, // 0 disables reminders
+      // Win-back: approved template sent to opted-in customers who haven't ordered for N days
+      winBack: { enabled: false, template: '', language: 'en_GB', afterDays: 30 },
     },
     storeWebhookSecret: randomToken(18),
   };

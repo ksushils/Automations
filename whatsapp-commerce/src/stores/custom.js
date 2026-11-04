@@ -15,6 +15,7 @@ export function customStore(settings) {
     url: p.url || null,
     currency: p.currency || 'GBP',
     price: Number(p.price || 0),
+    compareAtPrice: Number(p.compareAtPrice) > Number(p.price) ? Number(p.compareAtPrice) : null,
     available: p.available !== false,
     variants: (p.variants?.length ? p.variants : [{ id: String(p.id), title: p.title, price: p.price, available: p.available !== false }]).map((v) => ({
       id: String(v.id), title: v.title, price: Number(v.price ?? p.price ?? 0), available: v.available !== false,

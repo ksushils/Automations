@@ -74,6 +74,14 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_orders_tenant ON orders(tenant_id, id);
+CREATE TABLE IF NOT EXISTS staff (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'staff',
+  key_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS usage (
   tenant_id TEXT NOT NULL,
   period TEXT NOT NULL,
@@ -85,11 +93,22 @@ CREATE TABLE IF NOT EXISTS usage (
 );
 `;
 
+// Columns added after v1 – applied to existing databases on start.
+const MIGRATIONS = {
+  orders: { discount: 'REAL NOT NULL DEFAULT 0', delivery_fee: 'REAL NOT NULL DEFAULT 0', promo_code: 'TEXT', slot: 'TEXT', receipt_token: 'TEXT', paid_at: 'TEXT', reminded_at: 'TEXT', stripe_session_id: 'TEXT' },
+  customers: { winback_sent_at: 'TEXT' },
+};
+
 export function initDb(file = config.databasePath) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
   db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  for (const [table, cols] of Object.entries(MIGRATIONS)) {
+    const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [col, def] of Object.entries(cols)) if (!have.has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+  }
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_receipt ON orders(receipt_token) WHERE receipt_token IS NOT NULL");
   return db;
 }
 
@@ -108,6 +127,8 @@ export const SECRET_FIELDS = [
   'store.woocommerce.consumerKey',
   'store.woocommerce.consumerSecret',
   'store.custom.apiKey',
+  'payments.stripe.secretKey',
+  'payments.stripe.webhookSecret',
 ];
 
 function walk(obj, pathStr, fn) {

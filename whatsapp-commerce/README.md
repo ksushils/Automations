@@ -38,6 +38,17 @@ See [docs/COMPETITOR_REVIEW.md](docs/COMPETITOR_REVIEW.md) for how this compares
   - `assist` (recommended to start): the service searches the store, gives Dify the matching products and the cart, then sends the AI reply with a tappable product list underneath. Works with any Dify Chatbot or Chatflow app and its knowledge base.
   - `agent`: a Dify Agent app calls this service's store tools (search, add to cart, checkout, order status, handover) through an OpenAPI custom tool. Each call is locked to the customer in the chat by a signed `session_token`.
   - If Dify fails, the bot falls back to a plain catalogue search, so customers always get an answer.
+- **Take.App-style extras.**
+  - Promo codes (percent, fixed or free delivery; min spend, expiry, usage limits).
+  - Delivery zones by postcode, each with its own fee, minimum order and free-over amount.
+  - Delivery or collection time slots.
+  - Order notes and "was" prices.
+  - Stock levels with low-stock alerts (built-in catalogue).
+  - Receipt page for every order.
+  - Stripe card payments with automatic "paid" confirmation.
+  - Payment reminders and win-back offers.
+- **Storefront / link-in-bio page** at `/s/<tenantId>` (or the client's own domain). Each "Order on WhatsApp" button opens that product in the chat.
+- **Analytics** (revenue, orders, conversion, top products, promo usage), **CSV** product import and order/customer export, and **team logins** (owner / staff).
 - **Human handover.** The customer types "human" (or the AI decides), staff get an alert, and staff reply from the dashboard **Inbox**. The bot stays quiet until handed back.
 - **Order updates.** Shopify and WooCommerce order webhooks send "confirmed / shipped / completed" updates to the customer on WhatsApp. Customers can also type "order status" or "order 1001".
 - **Abandoned-cart reminder.** One nudge after N minutes, only inside the free 24-hour window.
@@ -99,8 +110,14 @@ All of this is done in the dashboard's **Settings** tab (signed in as the client
 Implement the six small endpoints in [docs/CUSTOM_STORE_API.md](docs/CUSTOM_STORE_API.md) and choose store type `custom`.
 
 ### 2d. No website
-Use store type `manual` and enter products on the **Catalogue** tab. For online payment, set *Payment link* to a Stripe or PayPal link
-(`{total}` and `{order}` placeholders are supported); otherwise use COD or bank transfer.
+Use store type `manual` and add products on the **Catalogue** tab, either as JSON or by CSV import (`id,title,price,compare_at_price,category,description,image,stock,options`).
+For card payments, add the client's **Stripe secret key** and **webhook signing secret** in Settings, and create a Stripe webhook
+for `checkout.session.completed` pointing at the Stripe webhook URL shown on the Overview tab. Each order gets its own Stripe Checkout
+link, and the order is marked paid automatically. Alternatives: a static payment link (`{total}`/`{order}` placeholders), COD or bank transfer.
+
+### 2e. Storefront page
+Set *Public WhatsApp number* (plus optional tagline, logo and custom domain) in Settings. The link-in-bio page is at
+`https://<PUBLIC_URL>/s/<tenantId>`. For a custom domain, point a CNAME at the server and add the domain to your HTTPS proxy.
 
 ### 3. AI chatbot (created automatically in dify.rcshopper.com)
 
@@ -129,7 +146,15 @@ Make sure Dify has a model provider (OpenAI or OpenRouter) and a system default 
 5. **Publish**, then go to **API Access → API Key** and create a key (`app-…`).
 6. In Settings → AI: enable it, set Base URL `https://dify.rcshopper.com/v1`, the API key, and mode `assist`. Click **Test Dify** on the Overview tab.
 
-**Agent mode (the AI places orders itself):**
+**Agent mode (the AI places orders itself) is also automatic.** Choose *Agent* on the AI assistant tab and press Save. The system:
+- registers a custom tool in Dify for that client (`wa_store_<tenant>`), pointing at `https://<PUBLIC_URL>/tools` with a fresh tool key;
+- creates a Dify **Agent** app (function calling) with all 9 store tools enabled;
+- switches the client over.
+
+Products the agent finds are also sent as a tappable list. This needs `PUBLIC_URL` to be public HTTPS so Dify can reach the tools.
+Switching back to *Assistant* re-uses the earlier chatbot app.
+
+**Manual agent setup** (only for a Dify the server can't administer):
 1. In Dify → Tools → **Custom** → Create, import from URL `https://<PUBLIC_URL>/dify/store-tools.openapi.json`.
 2. Set Auth to *API Key*, header `X-Tool-Key`, value = the client's tool key.
 3. Create an **Agent** app, enable all the tools, and paste [dify/agent-system-prompt.md](dify/agent-system-prompt.md).

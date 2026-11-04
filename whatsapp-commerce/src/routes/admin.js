@@ -13,6 +13,9 @@ import { handleInbound } from '../bot/engine.js';
 import { enqueue } from '../whatsapp/webhook.js';
 import { setHandover } from '../bot/state.js';
 import { listOrders, updateOrder, orderUpdateMessage } from '../bot/orders.js';
+import { createStaff, listStaff, deleteStaff, authenticateStaff, ROLES } from '../staff.js';
+import { toCsv, productsFromCsv } from '../csv.js';
+import { analytics } from '../analytics.js';
 import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, buildAgentPrompt } from '../dify/provision.js';
 
 const bearer = (req) => (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
@@ -25,10 +28,21 @@ function requireSuper(req, res, next) {
 
 function requireTenant(req, res, next) {
   const id = req.params.tenantId;
-  if (!isSuper(req) && !authenticateAdminKey(id, bearer(req))) return res.status(401).json({ error: 'invalid key for this tenant' });
+  req.isSuper = isSuper(req);
+  if (req.isSuper || authenticateAdminKey(id, bearer(req))) req.role = 'owner';
+  else {
+    const staff = authenticateStaff(id, bearer(req));
+    if (!staff) return res.status(401).json({ error: 'invalid key for this tenant' });
+    req.role = staff.role;
+    req.staff = staff;
+  }
   req.tenant = getTenant(id);
   if (!req.tenant) return res.status(404).json({ error: 'tenant not found' });
-  req.isSuper = isSuper(req);
+  next();
+}
+
+function requireOwner(req, res, next) {
+  if (req.role !== 'owner') return res.status(403).json({ error: 'only the shop owner can do this' });
   next();
 }
 
@@ -37,6 +51,8 @@ const urls = (t) => ({
   difyToolsServer: `${config.publicUrl}/tools`,
   storeWebhook: `${config.publicUrl}/webhooks/store/${t.id}/${t.settings.storeWebhookSecret}`,
   dashboard: `${config.publicUrl}/admin`,
+  storefront: `${config.publicUrl}/s/${t.id}`,
+  stripeWebhook: `${config.publicUrl}/webhooks/stripe/${t.id}`,
 });
 
 const view = (t) => ({ id: t.id, name: t.name, plan: t.plan, active: t.active, createdAt: t.createdAt, settings: redactSettings(t.settings), usage: getUsage(t.id), planLimits: PLANS[t.plan], urls: urls(t) });
@@ -70,9 +86,47 @@ export function adminRouter() {
   r.delete('/tenants/:tenantId', requireSuper, (req, res) => { deleteTenant(req.params.tenantId); res.json({ ok: true }); });
 
   // ----- tenant scoped -----
-  r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant) }));
+  r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant), role: req.role, staffName: req.staff?.name || null }));
 
-  r.patch('/tenants/:tenantId/settings', requireTenant, (req, res) => {
+  // ----- team (staff logins) -----
+  r.get('/tenants/:tenantId/staff', requireTenant, requireOwner, (req, res) => res.json({ staff: listStaff(req.tenant.id), roles: ROLES }));
+  r.post('/tenants/:tenantId/staff', requireTenant, requireOwner, (req, res) => {
+    if (!req.body?.name) return res.status(400).json({ error: 'name required' });
+    res.status(201).json({ ...createStaff(req.tenant.id, req.body), note: 'Give this key to the team member – it is shown once.' });
+  });
+  r.delete('/tenants/:tenantId/staff/:staffId', requireTenant, requireOwner, (req, res) => { deleteStaff(req.tenant.id, Number(req.params.staffId)); res.json({ ok: true }); });
+
+  // ----- analytics & exports -----
+  r.get('/tenants/:tenantId/analytics', requireTenant, (req, res) => res.json(analytics(req.tenant.id, req.query.days)));
+  r.get('/tenants/:tenantId/export/orders.csv', requireTenant, (req, res) => {
+    const rows = listOrders(req.tenant.id, { limit: 100000 });
+    res.type('text/csv').attachment(`orders-${req.tenant.id}.csv`).send(toCsv(rows, [
+      { key: 'store_order_name', label: 'order' }, { key: 'created_at' }, { key: 'status' }, { key: 'payment_status' }, { key: 'payment_method' },
+      { key: 'customer_name' }, { key: 'wa_id', label: 'whatsapp' }, { key: 'fulfilment' }, { key: 'address' }, { key: 'slot' },
+      { key: 'items', get: (o) => o.items.map((i) => `${i.title} x${i.quantity}`).join('; ') }, { key: 'promo_code' }, { key: 'discount' }, { key: 'delivery_fee' }, { key: 'subtotal', label: 'total' }, { key: 'currency' }, { key: 'notes' },
+    ]));
+  });
+  r.get('/tenants/:tenantId/export/customers.csv', requireTenant, (req, res) => {
+    const rows = getDb().prepare(`SELECT c.*, (SELECT COUNT(*) FROM orders o WHERE o.tenant_id = c.tenant_id AND o.wa_id = c.wa_id AND o.status != 'cancelled') AS orders,
+      (SELECT ROUND(COALESCE(SUM(subtotal),0),2) FROM orders o WHERE o.tenant_id = c.tenant_id AND o.wa_id = c.wa_id AND o.status != 'cancelled') AS spent FROM customers c WHERE c.tenant_id = ? ORDER BY c.id`).all(req.tenant.id);
+    res.type('text/csv').attachment(`customers-${req.tenant.id}.csv`).send(toCsv(rows, [
+      { key: 'name' }, { key: 'wa_id', label: 'whatsapp' }, { key: 'email' }, { key: 'address' }, { key: 'opted_in_marketing', label: 'offers_opt_in' }, { key: 'orders' }, { key: 'spent' }, { key: 'created_at', label: 'first_seen' }, { key: 'last_seen_at', label: 'last_seen' },
+    ]));
+  });
+  r.post('/tenants/:tenantId/catalogue/import', requireTenant, requireOwner, (req, res) => {
+    const { products, errors } = productsFromCsv(req.body?.csv || '');
+    if (errors.length) return res.status(400).json({ error: 'CSV has problems', errors: errors.slice(0, 20) });
+    const existing = req.tenant.settings.store?.manual || {};
+    const merged = req.body?.replace ? products : [...(existing.products || []).filter((p) => !products.some((n) => n.id === String(p.id))), ...products];
+    const keep = req.body?.replace ? [] : existing.categories || [];
+    const cats = new Set(keep.map((c) => String(c.id)));
+    const categories = [...keep];
+    for (const p of products) if (!cats.has(p.category)) { cats.add(p.category); categories.push({ id: p.category, title: p.category.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) }); }
+    const t = updateTenantSettings(req.tenant.id, { store: { manual: { products: merged, categories } } });
+    res.json({ imported: products.length, total: merged.length, tenant: view(t) });
+  });
+
+  r.patch('/tenants/:tenantId/settings', requireTenant, requireOwner, (req, res) => {
     const patch = req.body || {};
     delete patch.storeWebhookSecret;
     if (patch.store?.type && !STORE_TYPES.includes(patch.store.type)) return res.status(400).json({ error: 'invalid store type' });
@@ -86,11 +140,11 @@ export function adminRouter() {
   });
 
   // ----- AI assistant (Dify) -----
-  r.get('/tenants/:tenantId/ai', requireTenant, wrap(async (req, res) => {
+  r.get('/tenants/:tenantId/ai', requireTenant, requireOwner, wrap(async (req, res) => {
     const models = await listDifyModels().catch((e) => ({ configured: consoleConfigured(), models: [], error: e.message }));
     res.json({ ...models, prompt: req.tenant.settings.dify?.mode === 'agent' ? buildAgentPrompt(req.tenant) : buildPrompt(req.tenant), dify: redactSettings(req.tenant.settings).dify, publicUrl: config.publicUrl });
   }));
-  r.post('/tenants/:tenantId/ai/provision', requireTenant, wrap(async (req, res) => {
+  r.post('/tenants/:tenantId/ai/provision', requireTenant, requireOwner, wrap(async (req, res) => {
     try {
       const mode = ['assist', 'agent'].includes(req.body?.mode) ? req.body.mode : undefined;
       res.json({ ok: true, ...(await provisionDifyBot(req.tenant.id, { mode })), tenant: view(getTenant(req.tenant.id)) });
@@ -181,7 +235,7 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/customers', requireTenant, (req, res) => {
     res.json({ customers: getDb().prepare('SELECT wa_id, name, email, address, opted_in_marketing, created_at, last_seen_at FROM customers WHERE tenant_id = ? ORDER BY last_seen_at DESC LIMIT 1000').all(req.tenant.id) });
   });
-  r.post('/tenants/:tenantId/broadcasts', requireTenant, wrap(async (req, res) => {
+  r.post('/tenants/:tenantId/broadcasts', requireTenant, requireOwner, wrap(async (req, res) => {
     if (!PLANS[req.tenant.plan]?.broadcasts && !req.isSuper) return res.status(403).json({ error: 'Broadcasts are not included in this plan' });
     const { template, language = 'en_GB', components, waIds } = req.body || {};
     if (!template) return res.status(400).json({ error: 'template (approved template name) required' });

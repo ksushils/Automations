@@ -4,7 +4,8 @@
  * Orders are kept in this system's dashboard only.
  */
 export function manualStore(settings, { currency = 'GBP' } = {}) {
-  const norm = (p) => ({
+  const inStock = (n) => n === undefined || n === null || n === '' || Number(n) > 0;
+  const norm = (p) => withAvail({
     id: String(p.id),
     title: p.title,
     description: p.description || '',
@@ -12,11 +13,15 @@ export function manualStore(settings, { currency = 'GBP' } = {}) {
     url: p.url || null,
     currency,
     price: Number(p.price || 0),
-    available: p.available !== false,
-    variants: (p.variants?.length ? p.variants : [{ id: String(p.id), title: p.title, price: p.price }]).map((v) => ({
-      id: String(v.id), title: v.title, price: Number(v.price ?? p.price), available: v.available !== false,
+    compareAtPrice: Number(p.compareAtPrice) > Number(p.price) ? Number(p.compareAtPrice) : null,
+    variants: (p.variants?.length ? p.variants : [{ id: String(p.id), title: p.title, price: p.price, stock: p.stock }]).map((v) => ({
+      id: String(v.id), title: v.title, price: Number(v.price ?? p.price), available: v.available !== false && inStock(v.stock ?? p.stock), stock: v.stock ?? p.stock,
     })),
   });
+  function withAvail(p) {
+    p.available = p.variants.some((v) => v.available);
+    return p;
+  }
   const products = () => (settings.products || []).filter((p) => p.available !== false).map(norm);
   const raw = () => settings.products || [];
   return {
@@ -33,7 +38,10 @@ export function manualStore(settings, { currency = 'GBP' } = {}) {
         .slice(0, limit)
         .map((x) => x.p);
     },
-    async listCategories() { return settings.categories || []; },
+    async listCategories() {
+      const used = new Set(raw().map((p) => String(p.category || 'general')));
+      return (settings.categories || []).filter((c) => used.has(String(c.id)));
+    },
     async productsInCategory(id, { limit = 10 } = {}) {
       const ids = new Set(raw().filter((p) => String(p.category || 'general') === String(id)).map((p) => String(p.id)));
       return products().filter((p) => ids.has(p.id)).slice(0, limit);

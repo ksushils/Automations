@@ -39,6 +39,7 @@ export function wooStore(settings) {
       url: p.permalink,
       currency: await currency(),
       price: Number(p.price || variants[0]?.price || 0),
+      compareAtPrice: p.on_sale && Number(p.regular_price) > Number(p.price) ? Number(p.regular_price) : null,
       available: variants.some((v) => v.available),
       variants,
     };
@@ -66,7 +67,7 @@ export function wooStore(settings) {
       const p = await api(`/products/${encodeURIComponent(id)}`).catch((e) => (e.status === 404 ? null : Promise.reject(e)));
       return p ? map(p) : null;
     },
-    async createOrder({ items, customer, paymentMethod, fulfilment, note, shippingFee = 0 }) {
+    async createOrder({ items, customer, paymentMethod, fulfilment, note, shippingFee = 0, discount = 0, promoCode }) {
       const { first, last } = splitName(customer.name);
       const pm = {
         cod: ['cod', 'Cash on delivery', 'processing'],
@@ -88,6 +89,7 @@ export function wooStore(settings) {
             ? { product_id: Number(i.productId), variation_id: Number(i.variantId), quantity: i.quantity }
             : { product_id: Number(i.productId), quantity: i.quantity })),
           shipping_lines: shippingFee > 0 ? [{ method_id: 'flat_rate', method_title: 'Delivery', total: shippingFee.toFixed(2) }] : [],
+          fee_lines: discount > 0 ? [{ name: `Discount${promoCode ? ' ' + promoCode : ''}`, total: (-discount).toFixed(2), tax_status: 'none' }] : [],
           meta_data: [{ key: '_order_source', value: 'whatsapp' }],
         },
       });
