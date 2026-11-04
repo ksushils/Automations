@@ -21,6 +21,34 @@ Everything marked **(you)** happens in someone else's dashboard and can't be don
 
 ---
 
+### Using Oracle Cloud Always Free as the VPS
+
+It works. The app is small, and the Docker image (`node:22-alpine`) runs on Oracle's Arm (Ampere) machines.
+
+**Limits** (from [Oracle's Always Free docs](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm)):
+- **Ampere A1 (Arm), recommended:** 2 OCPUs and 12 GB RAM in total, as one instance or two. Use one `VM.Standard.A1.Flex` with 2 OCPU / 12 GB.
+- **AMD micro:** 1/8 OCPU and 1 GB RAM. Too small for comfort; avoid it.
+- **Storage and traffic:** 200 GB of block storage including boot volumes; 10 TB of outbound data a month.
+
+**Watch out for:**
+1. **Pick your home region carefully at sign-up:** UK South (London) for UK data. You can't change it later, and free instances must be created in the home region.
+2. **"Out of host capacity" errors:** free Arm capacity in popular regions is often full. Retry at different times.
+3. **Idle reclamation.** Oracle says idle Always Free instances "may be reclaimed" if, over 7 days, CPU (95th percentile), network and memory are all under 20%. A quiet pilot server can easily look idle. Upgrading the account to **Pay As You Go** is the usual fix: Always Free resources stay free, and reclamation is aimed at free-only accounts. Check Oracle's current terms, and set a budget alert at £1. Don't run fake load to dodge it.
+4. **Open the ports in two places:**
+   - in the VCN **Security List** (or Network Security Group), add ingress TCP 80 and 443 from `0.0.0.0/0`;
+   - in the OS: Oracle's Ubuntu images block them with iptables:
+     ```bash
+     sudo iptables -I INPUT 6 -p tcp --dport 80 -j ACCEPT
+     ```
+     ```bash
+     sudo iptables -I INPUT 6 -p tcp --dport 443 -j ACCEPT
+     ```
+     ```bash
+     sudo netfilter-persistent save
+     ```
+5. **Reserve a public IP** for the instance, so DNS doesn't break if you recreate it.
+6. **Off-site backups:** Object Storage includes 20 GB free (enough for nightly database snapshots), though an account at a different provider is safer.
+
 ## 1. DNS **(you)**
 
 At your DNS provider, add an **A record** `wa` → your VPS IP address (and AAAA for IPv6 if you have one).
