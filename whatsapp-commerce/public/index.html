@@ -40,8 +40,35 @@ code{background:var(--bg);padding:2px 6px;border-radius:6px;word-break:break-all
 .bars .bw:hover .bar{filter:brightness(1.15)}
 .bars .tip{display:none;position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--line);color:var(--ink);padding:4px 8px;border-radius:6px;font-size:12px;white-space:nowrap;z-index:3;box-shadow:0 2px 8px rgba(0,0,0,.12)}
 .bars .bw:hover .tip{display:block}
+/* flow builder */
+.fb{display:flex;flex-direction:column;height:calc(100vh - 110px);min-height:520px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.fb-top{display:flex;gap:8px;align-items:center;padding:8px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.fb-name{flex:1;min-width:160px;font-weight:600}.fb-active{display:flex;gap:4px;align-items:center;margin:0;color:var(--ink);font-size:13px}.fb-active input{width:auto}
+.fb-body{flex:1;display:grid;grid-template-columns:170px 1fr 300px;min-height:0}
+.fb-palette{border-right:1px solid var(--line);padding:8px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.fb-h{font-size:11px;letter-spacing:.08em;color:var(--mute);margin:4px}
+.fb-tool{display:flex;gap:8px;align-items:center;text-align:left;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;cursor:grab;color:var(--ink);font:inherit;font-size:13px}.fb-tool:hover{border-color:var(--brand)}
+.fb-canvas-wrap{overflow:auto;position:relative;background-color:var(--bg);background-image:radial-gradient(var(--line) 1px,transparent 1px);background-size:18px 18px}
+.fb-canvas{position:relative;min-width:100%;min-height:100%}
+.fb-edges{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.fb-edge{fill:none;stroke:var(--brand);stroke-width:2;stroke-dasharray:6 5}.fb-edge.temp{stroke:var(--mute)}.fb-edge-dot{fill:var(--brand)}
+.fb-node{position:absolute;width:240px;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.06);font-size:13px;user-select:none}
+.fb-node.sel{border-color:var(--brand);box-shadow:0 0 0 2px color-mix(in srgb,var(--brand) 35%,transparent)}
+.fb-node-h{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-left:4px solid;border-radius:10px 10px 0 0;font-weight:600;cursor:move;background:var(--bg)}
+.fb-x{background:none;border:0;color:var(--mute);cursor:pointer;font:inherit}
+.fb-node-b{padding:8px 10px;max-height:96px;overflow:hidden;color:var(--ink)}
+.fb-out{display:flex;justify-content:space-between;align-items:center;padding:5px 10px;border-top:1px solid var(--line);font-size:12px;color:var(--mute);position:relative}
+.fb-port{width:14px;height:14px;border-radius:50%;background:var(--card);border:2px solid var(--brand);cursor:crosshair;margin-right:-17px;touch-action:none}
+.fb-port:hover{background:var(--brand)}
+.fb-in{position:absolute;left:-7px;top:16px;width:12px;height:12px;border-radius:50%;background:var(--brand)}
+.fb-start .fb-in{display:none}
+.fb-chip{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 6px;margin:2px}
+.fb-inspector{border-left:1px solid var(--line);padding:10px;overflow:auto}.fb-inspector h3{margin:0 0 8px;text-transform:none;letter-spacing:0;color:var(--ink);font-size:14px}
+.fb-rowedit{display:flex;gap:4px;margin-bottom:4px}
+@media (max-width:900px){.fb-body{grid-template-columns:1fr}.fb-palette{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}.fb-canvas-wrap{min-height:420px}.fb-inspector{border-left:0;border-top:1px solid var(--line)}}
 .axis{display:flex;justify-content:space-between;font-size:12px;color:var(--mute);margin-top:4px}
 </style>
+<script src="flow-builder.js"></script>
 </head>
 <body>
 <header>
@@ -89,15 +116,16 @@ async function boot() {
 }
 $('#logout').onclick = () => { store.set('wc_key', null); S.key = null; S.tenant = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['broadcast', 'Broadcast'], ['team', 'Team']];
-const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders']);
+const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team']];
+const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders', 'contacts']);
 function render() {
   const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [])];
   if (!tabs.find((t) => t[0] === S.tab)) S.tab = tabs[0][0];
+  document.querySelector('main').style.maxWidth = '';
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
-  ({ tenants, overview, analytics, team, ai, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ tenants, overview, analytics, team, ai, automations, contacts, campaigns, templates, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin ----------
@@ -359,6 +387,114 @@ async function downloadCsv(kind) {
   a.download = `${kind}-${S.tenantId}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+// ---------- automations ----------
+async function automations() {
+  const { flows } = await api(T('/flows'));
+  $('#app').innerHTML = `<div class="card"><h2>Automations <span class="mute" style="font-weight:400">– keyword auto-replies & chatbot flows</span></h2>
+    <p class="mute">Flows start when a customer sends a keyword (e.g. “hi”, “price list”), on their very first message, or when they arrive from a Click-to-WhatsApp ad. Anything not matched goes to the shop bot / AI.</p>
+    <p><button class="btn" id="newflow">+ New flow</button> ${FLOW_PRESETS.map((p, i) => `<button class="btn ghost" data-preset="${i}">Use template: ${esc(p.name)}</button>`).join(' ')}</p></div>
+    <div class="card"><div class="tablewrap"><table><tr><th>Name</th><th>Triggers</th><th>Blocks</th><th>Runs</th><th>Status</th><th></th></tr>
+    ${flows.map((f) => `<tr><td><b>${esc(f.name)}</b></td><td>${(f.triggers.keywords || []).map((k) => `<span class="pill">${esc(k)}</span>`).join(' ')}${f.triggers.welcome ? ' <span class="pill">first message</span>' : ''}${(f.triggers.adIds || []).length ? ' <span class="pill">ads</span>' : ''}</td><td>${f.steps.length}</td><td>${f.runs}</td><td>${f.active ? '✅ Active' : '⏸ Paused'}</td>
+      <td><button class="btn ghost" data-edit="${f.id}">Edit</button> <button class="btn ghost" data-delflow="${f.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="6" class="mute">No flows yet – start from a template above.</td></tr>'}</table></div></div>`;
+  const open = async (flow) => {
+    let products = [], templates = [];
+    try { const s = S.tenant.settings; if (s.store.type === 'manual') products = (s.store.manual.products || []).map((p) => ({ id: p.id, title: p.title })); } catch {}
+    try { templates = (await api(T('/templates'))).templates || []; } catch {}
+    document.querySelector('main').style.maxWidth = 'none';
+    openFlowBuilder({ root: $('#app'), flow, products, templates, onClose: automations, api: (method, path, body) => api(T(path), { method, body }) });
+  };
+  $('#newflow').onclick = () => open(null);
+  $('#app').querySelectorAll('[data-preset]').forEach((b) => (b.onclick = () => open(structuredClone(FLOW_PRESETS[+b.dataset.preset]))));
+  $('#app').querySelectorAll('[data-edit]').forEach((b) => (b.onclick = async () => open((await api(T('/flows/' + b.dataset.edit))).flow)));
+  $('#app').querySelectorAll('[data-delflow]').forEach((b) => (b.onclick = async () => { if (confirm('Delete this flow?')) { await api(T('/flows/' + b.dataset.delflow), { method: 'DELETE' }); automations(); } }));
+}
+
+// ---------- contacts ----------
+async function contacts(q = '', tag = '') {
+  const { contacts, tags } = await api(T(`/contacts?q=${encodeURIComponent(q)}&tag=${encodeURIComponent(tag)}`));
+  const owner = S.role === 'owner';
+  $('#app').innerHTML = `<div class="card"><h2>Contacts (${contacts.length})</h2>
+    <div class="row"><div><label>Search name / number</label><input id="cq" value="${esc(q)}"></div><div><label>Tag</label><select id="ct"><option value="">All</option>${tags.map((t) => `<option ${t === tag ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
+    ${owner ? `<div><label>Import CSV (phone,name,email,tags,opt_in + any extra columns)</label><input type="file" id="cf" accept=".csv"></div>` : ''}</div>
+    <p>${owner ? '<button class="btn ghost" id="cimp">Import contacts</button> ' : ''}<button class="btn ghost" data-csv="customers">⬇ Export CSV</button></p><pre id="cres" class="mute" style="white-space:pre-wrap"></pre></div>
+    <div class="card"><div class="tablewrap"><table><tr><th>Name</th><th>WhatsApp</th><th>Tags</th><th>Details</th><th>Source</th><th>Offers</th><th></th></tr>
+    ${contacts.slice(0, 500).map((c) => `<tr><td>${esc(c.name || '')}</td><td>+${esc(c.wa_id)}</td><td>${c.tags.map((t) => `<span class="pill">${esc(t)}</span>`).join(' ')}</td>
+      <td class="mute">${[c.email, ...Object.entries(c.attributes).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).map(esc).join('<br>')}</td>
+      <td class="mute">${c.source ? esc(c.source.source_type === 'ad' ? '📣 Ad ' + (c.source.headline || c.source.source_id || '') : c.source.source_type || 'link') : ''}</td>
+      <td>${c.opted_in_marketing ? '✅' : '—'}</td><td><button class="btn ghost" data-tag="${esc(c.wa_id)}">+ Tag</button></td></tr>`).join('')}</table></div></div>`;
+  $('#cq').onchange = () => contacts($('#cq').value, $('#ct').value);
+  $('#ct').onchange = () => contacts($('#cq').value, $('#ct').value);
+  $('#app').querySelector('[data-csv]').onclick = () => downloadCsv('customers');
+  if ($('#cimp')) $('#cimp').onclick = async () => {
+    const f = $('#cf').files[0]; if (!f) return toast('Choose a CSV file');
+    try { const r = await api(T('/contacts/import'), { method: 'POST', body: { csv: await f.text() } }); toast(`Imported ${r.imported}`); await contacts(q, tag); $('#cres').textContent = [r.note, ...r.errors].join('\n'); } catch (e) { $('#cres').textContent = e.message; }
+  };
+  $('#app').querySelectorAll('[data-tag]').forEach((b) => (b.onclick = async () => {
+    const t = prompt('Tag to add (prefix with - to remove):'); if (!t) return;
+    const body = t.startsWith('-') ? { removeTags: [t.slice(1)] } : { addTags: [t] };
+    await api(T('/contacts/' + b.dataset.tag), { method: 'PATCH', body }); contacts(q, tag);
+  }));
+}
+
+// ---------- campaigns ----------
+async function campaigns() {
+  const [{ campaigns }, tpl, ct] = await Promise.all([api(T('/campaigns')), api(T('/templates')).catch(() => ({ templates: [] })), api(T('/contacts')).catch(() => ({ tags: [] }))]);
+  const approved = (tpl.templates || []).filter((t) => t.status === 'APPROVED');
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) + '%' : '–');
+  $('#app').innerHTML = `<div class="card"><h2>New campaign</h2>
+    <p class="mute">Campaigns use approved WhatsApp templates and go to opted-in contacts. Schedule up to 2 months ahead; retarget people who didn't read or reply.</p>
+    <div class="row">
+      <div><label>Name</label><input id="cn" placeholder="Black Friday"></div>
+      <div><label>Template</label>${approved.length ? `<select id="ctpl">${approved.map((t) => `<option value="${esc(t.name)}|${esc(t.language)}">${esc(t.name)} (${esc(t.language)})</option>`).join('')}</select>` : '<input id="ctpl" placeholder="template_name|en_GB">'}</div>
+      <div><label>Body variables (comma; use {{name}} for first name)</label><input id="cv" placeholder="{{name}}, 20% off"></div>
+      <div><label>Send at (empty = now)</label><input id="cwhen" type="datetime-local"></div></div>
+    <h3>Audience</h3><div class="row">
+      <div><label>Tags (any of, comma)</label><input id="atags" list="taglist"><datalist id="taglist">${(ct.tags || []).map((t) => `<option>${esc(t)}</option>`).join('')}</datalist></div>
+      <div><label>Exclude tags</label><input id="aex"></div>
+      <div><label>Customers</label><select id="aord"><option value="">Everyone</option><option value="true">Have ordered</option><option value="false">Never ordered</option></select></div>
+      <div><label>No order in last N days</label><input id="alast" type="number" min="0"></div>
+      <div><label>Retarget campaign</label><select id="art"><option value="">—</option>${campaigns.filter((c) => c.status === 'sent').map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+      <div><label>…who</label><select id="arts"><option value="not_read">didn't read</option><option value="not_replied">didn't reply</option><option value="read">read</option><option value="replied">replied</option><option value="failed">failed</option></select></div></div>
+    <p><button class="btn ghost" id="cprev">Count recipients</button> <button class="btn" id="cgo">Schedule campaign</button> <span id="cinfo" class="mute"></span></p></div>
+    <div class="card"><h2>Campaigns</h2><div class="tablewrap"><table><tr><th>Name</th><th>Template</th><th>When (UTC)</th><th>Status</th><th>Sent</th><th>Delivered</th><th>Read</th><th>Replied</th><th>Failed</th><th></th></tr>
+    ${campaigns.map((c) => `<tr><td>${esc(c.name)}</td><td>${esc(c.template)}</td><td>${esc(c.scheduled_at)}</td><td>${esc(c.status)}</td><td>${c.stats.sent}</td><td>${c.stats.delivered} <span class="mute">${pct(c.stats.delivered, c.stats.sent)}</span></td><td>${c.stats.read} <span class="mute">${pct(c.stats.read, c.stats.sent)}</span></td><td>${c.stats.replied} <span class="mute">${pct(c.stats.replied, c.stats.sent)}</span></td><td>${c.stats.failed}</td>
+      <td>${c.status === 'scheduled' ? `<button class="btn ghost" data-cancel="${c.id}">Cancel</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="mute">No campaigns yet</td></tr>'}</table></div></div>`;
+  const audience = () => ({
+    tags: $('#atags').value.split(',').map((x) => x.trim()).filter(Boolean), excludeTags: $('#aex').value.split(',').map((x) => x.trim()).filter(Boolean),
+    hasOrdered: $('#aord').value === '' ? null : $('#aord').value === 'true', lastOrderOlderThanDays: Number($('#alast').value) || 0,
+    retarget: $('#art').value ? { campaignId: Number($('#art').value), status: $('#arts').value } : undefined,
+  });
+  $('#cprev').onclick = async () => { const r = await api(T('/campaigns/preview'), { method: 'POST', body: { audience: audience() } }); $('#cinfo').textContent = `${r.recipients} recipients`; };
+  $('#cgo').onclick = async () => {
+    const [template, language = 'en_GB'] = $('#ctpl').value.split('|');
+    const vars = $('#cv').value.split(',').map((x) => x.trim()).filter(Boolean);
+    const components = vars.length ? [{ type: 'body', parameters: vars.map((text) => ({ type: 'text', text })) }] : undefined;
+    const when = $('#cwhen').value ? new Date($('#cwhen').value).toISOString() : undefined;
+    try { await api(T('/campaigns'), { method: 'POST', body: { name: $('#cn').value || template, template, language, components, audience: audience(), scheduledAt: when } }); toast('Campaign scheduled'); campaigns(); } catch (e) { toast(e.message); }
+  };
+  $('#app').querySelectorAll('[data-cancel]').forEach((b) => (b.onclick = async () => { await api(T(`/campaigns/${b.dataset.cancel}/cancel`), { method: 'POST' }); campaigns(); }));
+}
+
+// ---------- templates ----------
+async function templates() {
+  const r = await api(T('/templates'));
+  const have = new Set((r.templates || []).map((t) => t.name));
+  $('#app').innerHTML = `${r.error ? `<div class="card"><p class="pill warn">${esc(r.error)}</p></div>` : ''}
+    <div class="card"><h2>Template library <span class="mute" style="font-weight:400">– one click to submit to Meta for approval</span></h2><div class="tablewrap"><table><tr><th>Name</th><th>Used for</th><th>Text</th><th></th></tr>
+    ${r.library.map((t, i) => `<tr><td><code>${esc(t.name)}</code></td><td>${esc(t.use)}</td><td class="mute">${esc(t.body)}</td><td>${have.has(t.name) ? '✅ added' : `<button class="btn ghost" data-lib="${i}">Submit</button>`}</td></tr>`).join('')}</table></div></div>
+    <div class="card"><h2>Create template</h2><div class="row">
+      <div><label>Name (lowercase_with_underscores)</label><input id="tn"></div><div><label>Category</label><select id="tc"><option>MARKETING</option><option>UTILITY</option></select></div><div><label>Language</label><input id="tl" value="en_GB"></div></div>
+      <label>Header (optional)</label><input id="th"><label>Body – use {{1}}, {{2}} for variables</label><textarea id="tb"></textarea><label>Example values for variables (comma)</label><input id="tx">
+      <label>Footer (optional)</label><input id="tf"><label>Quick-reply buttons (comma, max 3)</label><input id="tq" placeholder="Shop now, Stop offers">
+      <p><button class="btn" id="tgo">Submit for approval</button></p></div>
+    <div class="card"><h2>Your templates</h2><div class="tablewrap"><table><tr><th>Name</th><th>Language</th><th>Category</th><th>Status</th><th></th></tr>
+    ${(r.templates || []).map((t) => `<tr><td><code>${esc(t.name)}</code></td><td>${esc(t.language)}</td><td>${esc(t.category)}</td><td>${t.status === 'APPROVED' ? '✅ ' : t.status === 'REJECTED' ? '❌ ' : '⏳ '}${esc(t.status)}${t.rejected_reason && t.rejected_reason !== 'NONE' ? ` <span class="mute">${esc(t.rejected_reason)}</span>` : ''}</td><td><button class="btn ghost" data-deltpl="${esc(t.name)}">Delete</button></td></tr>`).join('') || '<tr><td colspan="5" class="mute">None yet</td></tr>'}</table></div></div>`;
+  const submit = async (t) => { try { await api(T('/templates'), { method: 'POST', body: t }); toast('Submitted to Meta – approval usually takes minutes'); templates(); } catch (e) { toast(e.message); } };
+  $('#app').querySelectorAll('[data-lib]').forEach((b) => (b.onclick = () => submit(r.library[+b.dataset.lib])));
+  $('#tgo').onclick = () => submit({ name: $('#tn').value.trim(), category: $('#tc').value, language: $('#tl').value, header: $('#th').value, body: $('#tb').value, footer: $('#tf').value, examples: $('#tx').value.split(',').map((x) => x.trim()), buttons: $('#tq').value.split(',').map((x) => x.trim()).filter(Boolean).map((text) => ({ text })) });
+  $('#app').querySelectorAll('[data-deltpl]').forEach((b) => (b.onclick = async () => { if (confirm('Delete template ' + b.dataset.deltpl + '?')) { await api(T('/templates/' + b.dataset.deltpl), { method: 'DELETE' }).catch((e) => toast(e.message)); templates(); } }));
 }
 
 // ---------- analytics ----------

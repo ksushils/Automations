@@ -152,6 +152,8 @@ export async function markRead(tenant, messageId) {
 /** Convert a Cloud API inbound message into a normalised event the engine understands. */
 export function parseInbound(m) {
   const base = { waId: m.from, messageId: m.id, timestamp: Number(m.timestamp) };
+  // Click-to-WhatsApp ads / post links attach a referral object to the first message
+  if (m.referral) base.referral = { source_id: m.referral.source_id, source_type: m.referral.source_type, source_url: m.referral.source_url, headline: m.referral.headline, ctwa_clid: m.referral.ctwa_clid };
   switch (m.type) {
     case 'text':
       return { ...base, kind: 'text', text: m.text?.body || '' };

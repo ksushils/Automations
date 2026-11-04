@@ -16,6 +16,10 @@ import { listOrders, updateOrder, orderUpdateMessage } from '../bot/orders.js';
 import { createStaff, listStaff, deleteStaff, authenticateStaff, ROLES } from '../staff.js';
 import { toCsv, productsFromCsv } from '../csv.js';
 import { analytics } from '../analytics.js';
+import { listFlows, getFlow, saveFlow, deleteFlow, validateFlow, getContact, updateContact } from '../bot/flows.js';
+import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaignStats } from '../campaigns.js';
+import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY } from '../templates.js';
+import { parseCsv } from '../csv.js';
 import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, buildAgentPrompt } from '../dify/provision.js';
 
 const bearer = (req) => (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
@@ -95,6 +99,91 @@ export function adminRouter() {
     res.status(201).json({ ...createStaff(req.tenant.id, req.body), note: 'Give this key to the team member – it is shown once.' });
   });
   r.delete('/tenants/:tenantId/staff/:staffId', requireTenant, requireOwner, (req, res) => { deleteStaff(req.tenant.id, Number(req.params.staffId)); res.json({ ok: true }); });
+
+  // ----- automations (flow builder) -----
+  r.get('/tenants/:tenantId/flows', requireTenant, (req, res) => res.json({ flows: listFlows(req.tenant.id) }));
+  r.get('/tenants/:tenantId/flows/:flowId', requireTenant, (req, res) => {
+    const f = getFlow(req.tenant.id, req.params.flowId);
+    f ? res.json({ flow: f }) : res.status(404).json({ error: 'not found' });
+  });
+  const putFlow = (req, res) => {
+    const f = { ...(req.body || {}), id: req.params.flowId || undefined };
+    const errors = validateFlow(f);
+    if (errors.length) return res.status(400).json({ error: errors[0], errors });
+    if (f.id && !getFlow(req.tenant.id, f.id)) return res.status(404).json({ error: 'not found' });
+    res.json({ flow: saveFlow(req.tenant.id, f) });
+  };
+  r.post('/tenants/:tenantId/flows', requireTenant, requireOwner, putFlow);
+  r.put('/tenants/:tenantId/flows/:flowId', requireTenant, requireOwner, putFlow);
+  r.delete('/tenants/:tenantId/flows/:flowId', requireTenant, requireOwner, (req, res) => { deleteFlow(req.tenant.id, req.params.flowId); res.json({ ok: true }); });
+
+  // ----- contacts (tags, attributes, import) -----
+  r.get('/tenants/:tenantId/contacts', requireTenant, (req, res) => {
+    const q = `%${String(req.query.q || '').toLowerCase()}%`;
+    const tag = String(req.query.tag || '').toLowerCase();
+    const rows = getDb().prepare(`SELECT wa_id, name, email, tags, attributes, source, opted_in_marketing, created_at, last_seen_at FROM customers WHERE tenant_id = ? AND (LOWER(COALESCE(name,'')) LIKE ? OR wa_id LIKE ?) ORDER BY last_seen_at DESC LIMIT 2000`).all(req.tenant.id, q, q)
+      .map((c) => ({ ...c, tags: json(c.tags, []), attributes: json(c.attributes, {}), source: json(c.source, null) }))
+      .filter((c) => !tag || c.tags.includes(tag));
+    const allTags = [...new Set(getDb().prepare('SELECT tags FROM customers WHERE tenant_id = ?').all(req.tenant.id).flatMap((r) => json(r.tags, [])))].sort();
+    res.json({ contacts: rows, tags: allTags });
+  });
+  r.patch('/tenants/:tenantId/contacts/:waId', requireTenant, (req, res) => {
+    const { addTags, removeTags, attributes, opted_in_marketing, name } = req.body || {};
+    if (!getContact(req.tenant.id, req.params.waId)) return res.status(404).json({ error: 'not found' });
+    if (opted_in_marketing !== undefined) getDb().prepare('UPDATE customers SET opted_in_marketing = ? WHERE tenant_id = ? AND wa_id = ?').run(opted_in_marketing ? 1 : 0, req.tenant.id, req.params.waId);
+    if (name) getDb().prepare('UPDATE customers SET name = ? WHERE tenant_id = ? AND wa_id = ?').run(String(name).slice(0, 120), req.tenant.id, req.params.waId);
+    res.json({ contact: updateContact(req.tenant.id, req.params.waId, { addTags, removeTags, attributes }) });
+  });
+  r.post('/tenants/:tenantId/contacts/import', requireTenant, requireOwner, (req, res) => {
+    // columns: phone,name,email,tags (separated by ;),opt_in (yes/no) – any other column becomes an attribute
+    const rows = parseCsv(req.body?.csv || '');
+    let imported = 0;
+    const errors = [];
+    rows.forEach((r, i) => {
+      const wa = String(r.phone || r.whatsapp || r.wa_id || '').replace(/\D/g, '').replace(/^0(?=7)/, '44');
+      if (wa.length < 8) return errors.push(`line ${i + 2}: invalid phone "${r.phone || ''}"`);
+      const { phone, whatsapp, wa_id, name, email, tags, opt_in, ...attrs } = r;
+      getDb().prepare(`INSERT INTO customers (tenant_id, wa_id, name, email, opted_in_marketing) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = COALESCE(excluded.name, customers.name), email = COALESCE(excluded.email, customers.email), opted_in_marketing = excluded.opted_in_marketing`)
+        .run(req.tenant.id, wa, name || null, email || null, /^(y|yes|true|1)$/i.test(opt_in || '') ? 1 : 0);
+      updateContact(req.tenant.id, wa, { addTags: String(tags || '').split(/[;|]/).map((t) => t.trim()).filter(Boolean), attributes: Object.fromEntries(Object.entries(attrs).filter(([, v]) => v !== '')) });
+      imported++;
+    });
+    res.json({ imported, errors: errors.slice(0, 20), note: 'Only contacts with opt_in = yes receive marketing campaigns (WhatsApp policy).' });
+  });
+
+  // ----- campaigns (scheduled broadcasts, segments, retargeting) -----
+  r.get('/tenants/:tenantId/campaigns', requireTenant, (req, res) => res.json({ campaigns: listCampaigns(req.tenant.id) }));
+  r.post('/tenants/:tenantId/campaigns/preview', requireTenant, (req, res) => res.json({ recipients: resolveAudience(req.tenant.id, req.body?.audience || {}).length }));
+  r.post('/tenants/:tenantId/campaigns', requireTenant, requireOwner, (req, res) => {
+    if (!PLANS[req.tenant.plan]?.broadcasts && !req.isSuper) return res.status(403).json({ error: 'Campaigns are not included in this plan' });
+    if (!req.body?.template) return res.status(400).json({ error: 'template required' });
+    try { res.status(201).json({ campaign: createCampaign(req.tenant.id, req.body) }); } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+  r.post('/tenants/:tenantId/campaigns/:cid/cancel', requireTenant, requireOwner, (req, res) => res.json({ ok: cancelCampaign(req.tenant.id, req.params.cid) }));
+  r.get('/tenants/:tenantId/campaigns/:cid', requireTenant, (req, res) => res.json({ stats: campaignStats(req.tenant.id, req.params.cid) }));
+
+  // ----- WhatsApp templates (Meta) -----
+  r.get('/tenants/:tenantId/templates', requireTenant, wrap(async (req, res) => {
+    try { res.json({ templates: await listTemplates(req.tenant), library: TEMPLATE_LIBRARY }); } catch (e) { res.json({ templates: [], library: TEMPLATE_LIBRARY, error: e.message }); }
+  }));
+  r.post('/tenants/:tenantId/templates', requireTenant, requireOwner, wrap(async (req, res) => {
+    try { res.json({ ok: true, result: await createTemplate(req.tenant, req.body || {}) }); } catch (e) { res.status(400).json({ error: e.message }); }
+  }));
+  r.delete('/tenants/:tenantId/templates/:name', requireTenant, requireOwner, wrap(async (req, res) => {
+    try { res.json({ ok: true, result: await deleteTemplate(req.tenant, req.params.name) }); } catch (e) { res.status(400).json({ error: e.message }); }
+  }));
+
+  // ----- developer API: send a message -----
+  r.post('/tenants/:tenantId/messages', requireTenant, requireOwner, wrap(async (req, res) => {
+    const to = String(req.body?.to || '').replace(/\D/g, '');
+    const { text, template } = req.body || {};
+    if (!to || (!text && !template?.name)) return res.status(400).json({ error: 'to and (text or template.name) required' });
+    try {
+      const r2 = await createSender(req.tenant)(to, template?.name ? { type: 'template', name: template.name, language: template.language || 'en_GB', components: template.components } : { type: 'text', text: String(text) });
+      res.json({ ok: true, id: r2?.messages?.[0]?.id || null });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  }));
 
   // ----- analytics & exports -----
   r.get('/tenants/:tenantId/analytics', requireTenant, (req, res) => res.json(analytics(req.tenant.id, req.query.days)));

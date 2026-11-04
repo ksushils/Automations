@@ -3,6 +3,7 @@ import { findTenantByPhoneNumberId, getTenant, bumpUsage } from '../tenants.js';
 import { verifyMetaSignature, safeEqual } from '../crypto.js';
 import { createSender, parseInbound, logMessage, markRead } from './cloudApi.js';
 import { handleInbound } from '../bot/engine.js';
+import { recordStatus, recordReply } from '../campaigns.js';
 
 // Serialise processing per customer so rapid taps don't race each other.
 const queues = new Map();
@@ -29,6 +30,7 @@ export function processWebhookBody(body, { tenantOverride } = {}) {
         // logMessage returns false for duplicates (Meta retries deliveries)
         if (!logMessage(tenant.id, ev.waId, 'in', { type: ev.kind, text: ev.text, id: ev.id, raw: m.type }, m.id)) continue;
         bumpUsage(tenant.id, 'inbound');
+        recordReply(tenant.id, ev.waId, { isButton: m.type === 'button' });
         jobs.push(
           enqueue(`${tenant.id}:${ev.waId}`, async () => {
             markRead(tenant, m.id);
@@ -38,6 +40,7 @@ export function processWebhookBody(body, { tenantOverride } = {}) {
       }
       // value.statuses (sent/delivered/read/failed) – log failures for debugging
       for (const s of value.statuses || []) {
+        recordStatus(tenant.id, s);
         if (s.status === 'failed') console.warn(`[wa status] tenant=${tenant.id} to=${s.recipient_id}`, JSON.stringify(s.errors || []));
       }
     }

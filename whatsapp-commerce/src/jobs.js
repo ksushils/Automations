@@ -3,6 +3,28 @@ import { getTenant, listTenants } from './tenants.js';
 import { getConversation, saveConversation } from './bot/state.js';
 import { createSender } from './whatsapp/cloudApi.js';
 import { formatCart } from './bot/cart.js';
+import { dueJobs, markJobDone } from './bot/flows.js';
+import { runCampaign } from './campaigns.js';
+import { resumeFlow } from './bot/engine.js';
+import { enqueue } from './whatsapp/webhook.js';
+
+/** Scheduled work: flow delays and campaigns. */
+export async function runScheduled() {
+  let n = 0;
+  for (const job of dueJobs()) {
+    markJobDone(job.id);
+    const tenant = getTenant(job.tenant_id);
+    if (!tenant?.active) continue;
+    try {
+      if (job.kind === 'flow_resume') await enqueue(`${tenant.id}:${job.payload.waId}`, () => resumeFlow(tenant, job.payload, createSender(tenant)));
+      else if (job.kind === 'campaign') await runCampaign(tenant, job.payload.campaignId);
+      n++;
+    } catch (e) {
+      console.error('[scheduled]', job.kind, e.message);
+    }
+  }
+  return n;
+}
 
 /**
  * Abandoned-cart reminders: one gentle nudge when a cart sits untouched for N minutes,
@@ -36,6 +58,8 @@ export function startJobs() {
     runAbandonedCartReminders().catch((e) => console.error('[jobs]', e));
     runPaymentReminders().catch((e) => console.error('[jobs]', e));
   }, 5 * 60000);
+  const minutely = setInterval(() => runScheduled().catch((e) => console.error('[jobs]', e)), 30000);
+  minutely.unref();
   const daily = setInterval(() => runWinBack().catch((e) => console.error('[jobs]', e)), 6 * 3600000);
   timer.unref();
   daily.unref();

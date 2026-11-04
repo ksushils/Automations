@@ -6,6 +6,8 @@ import { getConversation, saveConversation, upsertCustomer, updateCustomer } fro
 import { addToCart, removeFromCart, subtotal, money, formatCart } from './cart.js';
 import { placeOrder, listOrders, paymentLabel, STATUS_TEXT } from './orders.js';
 import { quote, validatePromo, findPromo, upcomingSlots } from './pricing.js';
+import { findTriggeredFlow, startFlow, handleFlowButton, handleFlowAnswer, runFlow, getFlow, schedule } from './flows.js';
+import { getDb } from '../db.js';
 
 // ---------- helpers ----------
 const PAY_BUTTONS = { payment_link: '💳 Pay online', cod: '💵 Pay on delivery', bank_transfer: '🏦 Bank transfer' };
@@ -349,10 +351,10 @@ async function askAi(ctx, text) {
   else ctx.reply({ type: 'text', text: answer || "Sorry, I didn't catch that. Type *menu* to see options." });
 }
 
-function handover(ctx) {
+function handover(ctx, text) {
   ctx.conv.humanHandover = true;
   ctx.conv.state = 'idle';
-  ctx.reply({ type: 'text', text: `🙋 A member of our team will reply here shortly${ctx.S.business.supportHours ? ` (${ctx.S.business.supportHours})` : ''}. Your cart is saved.` });
+  ctx.reply({ type: 'text', text: text || `🙋 A member of our team will reply here shortly${ctx.S.business.supportHours ? ` (${ctx.S.business.supportHours})` : ''}. Your cart is saved.` });
   const staff = ctx.S.notifications?.staffWaIds || [];
   for (const s of staff) ctx.rawSend(String(s).replace(/\D/g, ''), { type: 'text', text: `🙋 Customer +${ctx.conv.waId} (${ctx.customer.name || 'unknown'}) asked to talk to a person. Reply from the dashboard.` }).catch(() => {});
 }
@@ -472,15 +474,14 @@ export async function handleInbound(tenant, event, send) {
   const conv = getConversation(tenant.id, event.waId);
   const customer = upsertCustomer(tenant.id, event.waId, event.profileName);
   const replies = [];
-  const ctx = {
-    tenant,
-    S: tenant.settings,
-    store: getStore(tenant),
-    conv,
-    customer,
-    rawSend: send,
-    reply: (m) => replies.push(m),
-  };
+  const ctx = buildCtx(tenant, conv, customer, send, replies);
+
+  // Click-to-WhatsApp ad attribution (first touch wins)
+  if (event.referral && !customer.source) {
+    getDb().prepare('UPDATE customers SET source = ? WHERE tenant_id = ? AND wa_id = ?').run(JSON.stringify({ ...event.referral, at: new Date().toISOString() }), tenant.id, conv.waId);
+  }
+  const isFirstMessage = !conv.data.seen;
+  conv.data.seen = true;
 
   if (conv.humanHandover) {
     // A human is handling this chat – the bot stays quiet. "menu" lets the customer return to the bot.
@@ -490,7 +491,15 @@ export async function handleInbound(tenant, event, send) {
   if (!withinLimit(tenant, 'inbound')) return replies;
 
   try {
-    if (event.kind === 'action') await handleAction(ctx, event.id);
+    const busy = ['awaiting_address', 'awaiting_qty', 'checkout_confirm', 'checkout_slot'].includes(conv.state);
+    let flow = null;
+    if (event.kind === 'action' && event.id.startsWith('flow:')) {
+      if (!(await handleFlowButton(ctx, event.id))) ctx.reply(mainMenu(ctx));
+    } else if (event.kind === 'text' && (await handleFlowAnswer(ctx, event.text))) {
+      // answered a flow question
+    } else if ((event.kind === 'text' || event.referral) && (flow = findTriggeredFlow(tenant.id, { text: event.text, isFirstMessage, adId: event.referral?.source_id })) && (!busy || flow.triggers.keywords?.includes(norm(event.text)))) {
+      await startFlow(ctx, flow);
+    } else if (event.kind === 'action') await handleAction(ctx, event.id);
     else if (event.kind === 'text') await handleText(ctx, event.text);
     else if (event.kind === 'location') {
       if (conv.state === 'awaiting_address') await setAddress(ctx, `${customer.name || ''}\n${event.text}\nhttps://maps.google.com/?q=${event.location.latitude},${event.location.longitude}`.trim());
@@ -514,6 +523,42 @@ export async function handleInbound(tenant, event, send) {
       console.error(`[send] tenant=${tenant.id}`, e.message);
     }
   }
+  return replies;
+}
+
+function buildCtx(tenant, conv, customer, send, replies) {
+  const ctx = {
+    tenant,
+    S: tenant.settings,
+    store: getStore(tenant),
+    conv,
+    customer,
+    rawSend: send,
+    reply: (m) => replies.push(m),
+  };
+  ctx.runAction = (id) => handleAction(ctx, id);
+  ctx.handover = (text) => handover(ctx, text);
+  ctx.schedule = (kind, payload, minutes) => schedule(tenant.id, kind, payload, minutes);
+  ctx.showProducts = async (ids, text) => {
+    const products = (await Promise.all(ids.slice(0, 10).map((id) => ctx.store.getProduct(id).catch(() => null)))).filter(Boolean);
+    if (!products.length) return showCategories(ctx);
+    ctx.reply(productList(ctx, products, text || 'Tap a product to see details 👇'));
+  };
+  return ctx;
+}
+
+/** Continue a flow after a delay step (called by the scheduler). */
+export async function resumeFlow(tenant, { waId, flowId, step }, send) {
+  const flow = getFlow(tenant.id, flowId);
+  if (!flow || !flow.active) return [];
+  const conv = getConversation(tenant.id, waId);
+  if (conv.humanHandover) return [];
+  const customer = upsertCustomer(tenant.id, waId);
+  const replies = [];
+  const ctx = buildCtx(tenant, conv, customer, send, replies);
+  await runFlow(ctx, flow, step);
+  saveConversation(conv);
+  for (const m of replies) await send(waId, m).catch((e) => console.warn('[flow resume]', e.message));
   return replies;
 }
 

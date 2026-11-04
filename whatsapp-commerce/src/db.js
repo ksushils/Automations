@@ -82,6 +82,62 @@ CREATE TABLE IF NOT EXISTS staff (
   key_hash TEXT NOT NULL UNIQUE,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS flows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  triggers TEXT NOT NULL DEFAULT '{}',
+  steps TEXT NOT NULL DEFAULT '[]',
+  runs INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS scheduled (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  run_at TEXT NOT NULL,
+  done INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled(done, run_at);
+CREATE TABLE IF NOT EXISTS campaigns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  template TEXT NOT NULL,
+  language TEXT NOT NULL DEFAULT 'en_GB',
+  components TEXT,
+  audience TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'scheduled',
+  scheduled_at TEXT NOT NULL,
+  sent INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS message_status (
+  tenant_id TEXT NOT NULL,
+  wa_message_id TEXT NOT NULL,
+  wa_id TEXT NOT NULL,
+  campaign_id INTEGER,
+  status TEXT NOT NULL DEFAULT 'sent',
+  error TEXT,
+  replied INTEGER NOT NULL DEFAULT 0,
+  clicked INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (tenant_id, wa_message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_msgstatus_campaign ON message_status(tenant_id, campaign_id);
+CREATE TABLE IF NOT EXISTS store_events (
+  tenant_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  phone TEXT,
+  data TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (tenant_id, kind, ref)
+);
 CREATE TABLE IF NOT EXISTS usage (
   tenant_id TEXT NOT NULL,
   period TEXT NOT NULL,
@@ -96,7 +152,8 @@ CREATE TABLE IF NOT EXISTS usage (
 // Columns added after v1 – applied to existing databases on start.
 const MIGRATIONS = {
   orders: { discount: 'REAL NOT NULL DEFAULT 0', delivery_fee: 'REAL NOT NULL DEFAULT 0', promo_code: 'TEXT', slot: 'TEXT', receipt_token: 'TEXT', paid_at: 'TEXT', reminded_at: 'TEXT', stripe_session_id: 'TEXT' },
-  customers: { winback_sent_at: 'TEXT' },
+  customers: { winback_sent_at: 'TEXT', tags: "TEXT NOT NULL DEFAULT '[]'", attributes: "TEXT NOT NULL DEFAULT '{}'", source: 'TEXT' },
+  conversations: { assigned_to: 'TEXT' },
 };
 
 export function initDb(file = config.databasePath) {
