@@ -14,6 +14,7 @@ import { webRouter, rateLimit } from './routes/web.js';
 import { webchatRouter } from './routes/webchat.js';
 import { securityHeaders, installCrashAlerts, alert, backup } from './ops.js';
 import { getDb } from './db.js';
+import { loadPlatformSetup } from './platformSetup.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +56,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (process.env.NODE_ENV === 'production') process.exit(1);
   }
   initDb();
+  loadPlatformSetup();
   installCrashAlerts();
   startJobs();
   // build the local knowledge index for documents added before it existed

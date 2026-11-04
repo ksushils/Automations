@@ -98,44 +98,160 @@ const T = (p) => `/tenants/${encodeURIComponent(S.tenantId)}${p}`;
 function loginView() {
   $('#nav').innerHTML = ''; $('#logout').style.display = 'none'; $('#who').textContent = '';
   $('#app').innerHTML = `<div class="card" style="max-width:420px;margin:40px auto"><h2>Sign in</h2>
-    <label>Tenant ID (leave empty for super admin)</label><input id="lt" value="${esc(S.tenantId || '')}">
-    <label>Admin key</label><input id="lk" type="password">
-    <p><button class="btn" id="lb">Sign in</button></p></div>`;
-  $('#lb').onclick = async () => {
-    S.key = $('#lk').value.trim(); S.tenantId = $('#lt').value.trim() || null;
-    try { await boot(); store.set('wc_key', S.key); store.set('wc_tenant', S.tenantId); } catch (e) { toast(e.message); }
+    <p class="mute">Paste your key. That's all you need: the admin key you were given, your shop key (starts with <code>adm_</code>) or a team key (<code>stf_</code>).</p>
+    <label>Your key</label><input id="lk" type="password" autocomplete="current-password" autofocus>
+    <p><button class="btn" id="lb">Sign in</button></p><p class="mute" id="lerr"></p>
+    <p class="mute">No shop yet? <a href="/signup">Start a free trial</a></p></div>`;
+  const go = async () => {
+    S.key = $('#lk').value.trim(); S.tenantId = null; S.tenant = null; S.tab = null; S.setupStep = null;
+    if (!S.key) return;
+    try { await boot(); store.set('wc_key', S.key); store.set('wc_tenant', S.tenantId); } catch (e) { $('#lerr').textContent = '⚠️ ' + e.message; }
   };
+  $('#lb').onclick = go; $('#lk').onkeydown = (e) => e.key === 'Enter' && go();
 }
 
 async function boot() {
   const who = await api('/whoami');
   S.super = who.super;
-  if (!S.tenantId && !S.super) throw new Error('Invalid key');
+  if (!S.super) S.tenantId = who.tenantId || null;
+  if (!S.tenantId && !S.super) throw new Error("That key wasn't recognised. Check you copied all of it.");
+  if (S.super) { try { S.setup = await api('/system/setup'); } catch { S.setup = null; } }
   if (S.tenantId) { const r = await api(T('')); S.tenant = r.tenant; S.role = r.role; S.banner = r.banner; }
   $('#logout').style.display = '';
   render();
 }
-$('#logout').onclick = () => { store.set('wc_key', null); S.key = null; S.tenant = null; loginView(); };
+$('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant', null); store.set('wc_tab', null); S.key = null; S.tenant = null; S.tenantId = null; S.setup = null; loginView(); };
 
 const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
 const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders', 'contacts']);
+const MAIN_TABS = new Set(['overview', 'inbox', 'orders', 'simulator', 'ai', 'settings']);
 function render() {
-  const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [])];
+  const shopTabs = S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [];
+  const showAll = store.get('wc_alltabs') === '1' || !MAIN_TABS.has(S.tab) && shopTabs.some(([k]) => k === S.tab);
+  const setupLabel = S.setup ? `Setup ${S.setup.done === S.setup.total ? '✅' : `(${S.setup.done}/${S.setup.total})`}` : 'Setup';
+  const superTabs = S.setup && S.setup.done === S.setup.total ? [['tenants', 'Clients'], ['setup', setupLabel]] : [['setup', setupLabel], ['tenants', 'Clients']];
+  const tabs = [...(S.super ? superTabs : []), ...shopTabs.filter(([k]) => showAll || MAIN_TABS.has(k))];
+  const hasMore = shopTabs.some(([k]) => !MAIN_TABS.has(k));
   if (!tabs.find((t) => t[0] === S.tab)) S.tab = tabs[0][0];
   document.querySelector('main').style.maxWidth = '';
   $('#banner').innerHTML = S.banner ? `<div style="max-width:1100px;margin:12px auto 0;padding:0 16px"><div class="card" style="margin:0;border-color:${S.banner.level === 'warn' ? 'var(--warn)' : 'var(--line)'}">${S.banner.level === 'warn' ? '⚠️' : '⏳'} ${esc(S.banner.text)} ${S.role === 'owner' ? '<a href="#" id="bgo">Choose a plan →</a>' : ''}</div></div>` : '';
   if ($('#bgo')) $('#bgo').onclick = (e) => { e.preventDefault(); S.tab = 'billing'; render(); };
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
-  $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('');
-  $('#nav').querySelectorAll('button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
-  ({ tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('') + (hasMore ? `<button id="moretabs">${showAll ? '‹ Fewer' : 'More ›'}</button>` : '');
+  $('#nav').querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
+  if ($('#moretabs')) $('#moretabs').onclick = () => { store.set('wc_alltabs', showAll ? null : '1'); if (showAll && !MAIN_TABS.has(S.tab)) S.tab = 'overview'; render(); };
+  ({ setup, tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+}
+
+// ---------- super admin: guided platform setup ----------
+const SETUP_STEPS = [
+  ['ai', '🤖', 'AI'],
+  ['payments', '💳', 'Payments'],
+  ['whatsapp', '📱', 'WhatsApp'],
+  ['business', '🏢', 'Your business'],
+];
+const copyBox = (label, value) => `<label>${label}</label><div style="display:flex;gap:6px"><input readonly value="${esc(value)}"><button class="btn ghost" data-copy="${esc(value)}">Copy</button></div>`;
+const ext = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener">${text} ↗</a>`;
+const field = (k, label, v, { secret, placeholder = '', type = 'text' } = {}) => `<label>${label}</label><input data-k="${k}" type="${secret ? 'password' : type}" autocomplete="off" placeholder="${esc(secret && v ? 'Saved: ' + v + ' (leave empty to keep it)' : placeholder)}" value="${secret ? '' : esc(v || '')}">`;
+const stepNo = (n, html) => `<div style="display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--line)"><span class="pill" style="height:fit-content">${n}</span><div style="flex:1;min-width:0">${html}</div></div>`;
+
+async function setup() {
+  const st = (S.setup = await api('/system/setup'));
+  const v = st.values, u = st.urls;
+  const firstTodo = SETUP_STEPS.findIndex(([k]) => !st.steps[k]);
+  if (S.setupStep == null) S.setupStep = firstTodo === -1 ? SETUP_STEPS.length : firstTodo;
+  const i = S.setupStep;
+  const bar = `<div class="card"><h2>Set up your platform <span class="mute" style="font-weight:400">${st.done} of ${st.total} done</span></h2>
+    <div style="height:8px;background:var(--bg);border-radius:99px;overflow:hidden;margin-bottom:12px"><div style="height:100%;width:${(st.done / st.total) * 100}%;background:var(--brand)"></div></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${SETUP_STEPS.map(([k, icon, label], n) => `<button class="btn ${n === i ? '' : 'ghost'}" data-step="${n}">${st.steps[k] ? '✅' : icon} ${n + 1}. ${label}</button>`).join('')}
+    <button class="btn ${i === SETUP_STEPS.length ? '' : 'ghost'}" data-step="${SETUP_STEPS.length}">🎉 Finish</button></div></div>`;
+  const nav = () => `<p style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">${i > 0 ? `<button class="btn ghost" data-step="${i - 1}">‹ Back</button>` : ''}<span style="flex:1"></span><button class="btn ghost" data-step="${i + 1}">${st.steps[SETUP_STEPS[i][0]] ? 'Next ›' : 'Skip for now ›'}</button></p>`;
+  let body = '';
+  if (i === 0) body = `<div class="card"><h2>🤖 Step 1: Turn on the AI</h2>
+    <p>The AI answers your shops' customers. It runs on <b>OpenRouter</b>, which you pay as you go (a few pounds a month for a small shop).</p>
+    ${stepNo(1, `${ext('https://openrouter.ai/sign-up', 'Create an OpenRouter account')} and ${ext('https://openrouter.ai/settings/credits', 'add some credit')} (for example $20).`)}
+    ${stepNo(2, `In ${ext('https://openrouter.ai/settings/privacy', 'Settings → Privacy')}, switch off anything that lets them log or train on prompts.`)}
+    ${stepNo(3, `Go to ${ext('https://openrouter.ai/settings/keys', 'Keys')}, press <b>Create key</b> and paste it here:${field('aiApiKey', 'OpenRouter key (starts with sk-or-)', v.aiApiKey, { secret: true })}
+      <details style="margin-top:8px"><summary class="mute">Advanced: change the AI model</summary>${field('aiModel', 'Model (the default is cheap and good)', v.aiModel, { placeholder: 'openai/gpt-4o-mini' })}</details>`)}
+    ${st.aiCheck === '0' ? '<p class="pill warn">⚠️ The saved key was rejected. Paste a new one.</p>' : ''}
+    <p><button class="btn" id="ssave">Save and test</button> ${st.steps.ai ? '<button class="btn ghost" id="stest">Test again</button>' : ''}</p><div id="sres"></div>${nav()}</div>`;
+  if (i === 1) body = `<div class="card"><h2>💳 Step 2: Get paid by your shops</h2>
+    <p>Shops pay you monthly by card through <b>Stripe</b>. Paste one key and we create the three plans (£29 / £79 / £199 a month) and the rest of the Stripe setup for you.</p>
+    ${st.stripeMode ? `<p>Stripe is in <span class="pill ${st.stripeMode === 'live' ? '' : 'warn'}">${st.stripeMode === 'live' ? 'LIVE mode: real money' : 'TEST mode: no real money'}</span></p>` : ''}
+    ${stepNo(1, `Open ${ext('https://dashboard.stripe.com/test/apikeys', 'Stripe → Developers → API keys')}. Start in <b>Test mode</b>, so you can try everything with the test card 4242 4242 4242 4242.`)}
+    ${stepNo(2, `Copy the <b>Secret key</b> and paste it here:${field('platformStripeSecret', 'Stripe secret key (sk_test_… or sk_live_…)', v.platformStripeSecret, { secret: true })}`)}
+    ${stepNo(3, `Press the button. We create the plans and the webhook in your Stripe account.<p><button class="btn" id="sstripe">Save and set up Stripe for me</button></p><div id="sres"></div>`)}
+    ${stepNo(4, `In Stripe, turn on the ${ext('https://dashboard.stripe.com/test/settings/billing/portal', 'customer portal')} (allow cancel, switch plan and update card) and ${ext('https://dashboard.stripe.com/settings/emails', 'receipt emails')}.`)}
+    ${stepNo(5, `<b>When you're ready for real money:</b> switch Stripe to Live mode, paste your <b>live</b> secret key above and press the button again.`)}
+    <details style="margin-top:8px"><summary class="mute">Advanced: enter the Stripe IDs yourself</summary>
+      <div class="row"><div>${field('stripePriceStarter', 'Starter price ID', v.stripePriceStarter, { placeholder: 'price_…' })}</div><div>${field('stripePriceGrowth', 'Growth price ID', v.stripePriceGrowth, { placeholder: 'price_…' })}</div><div>${field('stripePricePro', 'Pro price ID', v.stripePricePro, { placeholder: 'price_…' })}</div></div>
+      ${field('platformStripeWebhookSecret', 'Webhook signing secret (whsec_…)', v.platformStripeWebhookSecret, { secret: true })}
+      ${copyBox('Webhook address', u.stripeWebhook)}<p><button class="btn ghost" id="ssave">Save</button></p></details>${nav()}</div>`;
+  if (i === 2) body = `<div class="card"><h2>📱 Step 3: Connect WhatsApp (Meta)</h2>
+    <p>This lets shops connect their WhatsApp number in a few clicks. Meta has to approve you first, which takes <b>days to weeks</b>.
+    <b>You can skip this for now.</b> The website chat and the Test bot work without it.</p>
+    ${stepNo(1, `Go to ${ext('https://developers.facebook.com/apps', 'Meta for Developers → My Apps')} → <b>Create app</b> → type <b>Business</b> → add the <b>WhatsApp</b> product.`)}
+    ${stepNo(2, `In <b>App settings → Basic</b>, paste these two links:${copyBox('Privacy policy URL', u.privacy)}${copyBox('Terms of service URL', u.terms)}
+      Then copy the App ID and App secret here:<div class="row"><div>${field('metaAppId', 'App ID', v.metaAppId)}</div><div>${field('metaAppSecret', 'App secret', v.metaAppSecret, { secret: true })}</div></div>`)}
+    ${stepNo(3, `In <b>WhatsApp → Configuration → Webhook</b>, press Edit and paste:${copyBox('Callback URL', u.whatsappWebhook)}${copyBox('Verify token', v.metaWebhookVerifyToken)}
+      Then subscribe to these fields: <code>messages</code> <code>account_update</code> <code>history</code> <code>smb_app_state_sync</code> <code>smb_message_echoes</code> <code>message_template_status_update</code>`)}
+    ${stepNo(4, `In <b>Facebook Login for Business → Configurations</b>, create a configuration with login variation <b>Embedded Signup</b>, and <b>tick the WhatsApp product</b>. Copy its ID here:
+      ${field('metaConfigId', 'Configuration ID', v.metaConfigId)}Then under Facebook Login for Business → <b>Settings</b>, add this to <b>Allowed domains</b>:${copyBox('Domain', u.domain)}`)}
+    ${stepNo(5, `Get your company ${ext('https://business.facebook.com/settings/security', 'Business verified')}. Then apply to be a <b>Tech Provider</b>, and in App Review request advanced access to <code>whatsapp_business_messaging</code> and <code>whatsapp_business_management</code>.`)}
+    <p><button class="btn" id="ssave">Save</button></p><div id="sres"></div>${nav()}</div>`;
+  if (i === 3) body = `<div class="card"><h2>🏢 Step 4: Your business details</h2>
+    <p>These appear on your sales page and on the terms and privacy pages. Have a solicitor read the ${ext(u.terms, 'terms')} and ${ext(u.privacy, 'privacy')} pages before you start selling.</p>
+    <div class="row"><div>${field('productName', 'Product name (shown to shops)', v.productName)}</div><div>${field('supportEmail', 'Support email', v.supportEmail, { type: 'email' })}</div>
+    <div>${field('legalCompanyName', 'Company name', v.legalCompanyName, { placeholder: 'Your Company Ltd' })}</div><div>${field('legalCompanyNumber', 'Company number', v.legalCompanyNumber)}</div></div>
+    ${field('legalAddress', 'Registered address', v.legalAddress)}${field('legalContactEmail', 'Privacy contact email', v.legalContactEmail, { type: 'email' })}
+    <details style="margin-top:8px"><summary class="mute">Optional: get an alert in Slack or Discord when something breaks</summary>${field('alertWebhookUrl', 'Slack / Discord webhook URL', v.alertWebhookUrl, { placeholder: 'https://hooks.slack.com/services/…' })}</details>
+    <p><button class="btn" id="ssave">Save</button></p><div id="sres"></div>${nav()}</div>`;
+  if (i >= SETUP_STEPS.length) body = `<div class="card"><h2>🎉 ${st.done === st.total ? "You're all set" : 'Nearly there'}</h2>
+    ${SETUP_STEPS.map(([k, , label], n) => `<div style="padding:6px 0">${st.steps[k] ? '✅' : '⬜'} ${label} ${st.steps[k] ? '' : `<a href="#" data-step="${n}">finish this</a>`}</div>`).join('')}
+    <h3>What to do next</h3>
+    ${stepNo(1, `Make a test shop for yourself: open ${ext('/signup', 'the sign-up page')} as a customer would, or create one under <b>Clients</b>.`)}
+    ${stepNo(2, 'Open the shop, go to <b>Test bot</b> and chat with it.')}
+    ${stepNo(3, 'Once Meta has approved you, connect a WhatsApp number from the shop’s Overview page.')}
+    <p><button class="btn" id="sclients">Go to Clients</button></p></div>`;
+  $('#app').innerHTML = bar + body;
+  $('#nav').querySelector('[data-t="setup"]')?.replaceChildren(`Setup ${st.done === st.total ? '✅' : `(${st.done}/${st.total})`}`);
+  $('#app').querySelectorAll('[data-step]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); S.setupStep = Number(b.dataset.step); setup().catch((x) => toast(x.message)); }));
+  $('#app').querySelectorAll('[data-copy]').forEach((b) => (b.onclick = () => { navigator.clipboard?.writeText(b.dataset.copy).then(() => toast('Copied'), () => toast('Select the text and copy it')); }));
+  const res = (html) => { if ($('#sres')) $('#sres').innerHTML = html; };
+  const collect = () => { const p = {}; $('#app').querySelectorAll('[data-k]').forEach((el) => { const val = el.value.trim(); if (el.type === 'password' && !val) return; p[el.dataset.k] = val; }); return p; };
+  const save = async () => (S.setup = await api('/system/setup', { method: 'PATCH', body: collect() }));
+  const testAi = async () => {
+    res('<p class="mute">Asking the AI to say hello…</p>');
+    const t = await api('/system/setup/test-ai', { method: 'POST' });
+    res(t.ok ? `<p>✅ The AI works (${esc(t.model)} replied “${esc(t.reply)}”).</p>` : `<p class="pill warn">⚠️ ${esc(t.error)}</p><p class="mute">Check you copied the whole key and that your OpenRouter account has credit.</p>`);
+    return t.ok;
+  };
+  $('#app').querySelectorAll('#ssave').forEach((b) => (b.onclick = async () => {
+    try {
+      await save();
+      if (i === 0) { if (await testAi()) setTimeout(() => { S.setupStep = 1; setup(); }, 1500); return; }
+      toast('Saved'); S.setupStep = i + 1; setup();
+    } catch (e) { res(`<p class="pill warn">⚠️ ${esc(e.message)}</p>`); }
+  }));
+  if ($('#stest')) $('#stest').onclick = () => testAi().catch((e) => res(esc(e.message)));
+  if ($('#sstripe')) $('#sstripe').onclick = async () => {
+    try {
+      await save();
+      res('<p class="mute">Setting up Stripe…</p>');
+      const r = await api('/system/setup/stripe-auto', { method: 'POST' });
+      S.setup = r.status;
+      res(`${r.done.map((d) => `<div>✅ ${esc(d)}</div>`).join('')}<p>Stripe is ready. Do step 4 below, then press <b>Next ›</b>.</p>`);
+    } catch (e) { res(`<p class="pill warn">⚠️ ${esc(e.message)}</p><p class="mute">Check you copied the <b>Secret</b> key, not the Publishable one.</p>`); }
+  };
+  if ($('#sclients')) $('#sclients').onclick = () => { S.tab = 'tenants'; store.set('wc_tab', 'tenants'); render(); };
 }
 
 // ---------- super admin ----------
 async function tenants() {
   const { tenants } = await api('/tenants');
   const { plans } = await api('/plans');
-  $('#app').innerHTML = `<div class="card"><h2>New client</h2><div class="row">
+  const st = S.setup;
+  $('#app').innerHTML = `${st && st.done < st.total ? `<div class="card" style="border-color:var(--warn)">⚙️ Platform setup: ${st.done} of ${st.total} steps done. <a href="#" id="gosetup">Continue setup →</a></div>` : ''}<div class="card"><h2>New client</h2><div class="row">
       <div><label>Business name</label><input id="tn"></div>
       <div><label>Plan</label><select id="tp">${Object.entries(plans).map(([k, p]) => `<option value="${k}">${p.label} — £${p.priceGbp}/mo</option>`).join('')}</select></div>
       <div style="align-self:end"><button class="btn" id="tc">Create client</button></div></div><div id="keys"></div></div>
@@ -144,6 +260,7 @@ async function tenants() {
       <td>${t.usage.inbound} in · ${t.usage.orders} orders · ${t.usage.ai_calls} AI</td>
       <td><button class="btn ghost" data-open="${esc(t.id)}">Manage</button> <button class="btn ghost" data-toggle="${esc(t.id)}" data-active="${t.active}">${t.active ? 'Suspend' : 'Activate'}</button></td></tr>`).join('')}
     </table></div></div>`;
+  if ($('#gosetup')) $('#gosetup').onclick = (e) => { e.preventDefault(); S.tab = 'setup'; S.setupStep = null; render(); };
   $('#tc').onclick = async () => {
     try {
       const r = await api('/tenants', { method: 'POST', body: { name: $('#tn').value, plan: $('#tp').value } });
@@ -162,7 +279,7 @@ async function overview() {
   const checks = [
     ['WhatsApp connected', s.whatsapp.phoneNumberId && s.whatsapp.accessToken],
     ['Store connected', s.store.type === 'manual' ? (s.store.manual.products || []).length > 0 : true],
-    ['Dify AI enabled', s.dify.enabled && s.dify.apiKey],
+    ['AI chatbot on', aiLive(s)],
     ['Staff alerts', (s.notifications.staffWaIds || []).length || s.notifications.webhookUrl],
   ];
   $('#app').innerHTML = `<div class="row">
@@ -564,6 +681,7 @@ async function templates() {
 }
 
 // ---------- setup wizard ----------
+const aiLive = (s) => !!(s.dify.enabled && s.dify.apiKey) || (s.ai?.provider !== 'dify' && s.ai?.enabled !== false); // matches the bot engine: built-in AI unless switched off
 async function setupWizard(t) {
   const s = t.settings;
   const kb = await api(T('/knowledge')).catch(() => ({ docs: [] }));
@@ -572,7 +690,7 @@ async function setupWizard(t) {
     ['🌐', 'Tell us your website', 'We read your shop, products and policies automatically.', !!s.business.website, 'site'],
     ['🛍️', 'Products connected', s.store.type === 'manual' ? 'Add products or connect Shopify / WooCommerce.' : `Connected: ${s.store.type.replace('_public', ' (website)')}`, products, 'catalogue'],
     ['📚', 'Knowledge base', `${kb.docs.length} document${kb.docs.length === 1 ? '' : 's'} – policies, FAQs, guides`, kb.docs.length > 0, 'knowledge'],
-    ['🤖', 'AI chatbot', s.dify.enabled && s.dify.apiKey ? 'Live' + (kb.attached ? ' with your knowledge base' : '') : 'Created automatically', !!(s.dify.enabled && s.dify.apiKey), 'ai'],
+    ['🤖', 'AI chatbot', aiLive(s) ? 'Live' + (kb.docs.length ? ' with your knowledge base' : '') : 'Turn it on in AI assistant', aiLive(s), 'ai'],
     ['📱', 'Connect WhatsApp', s.whatsapp.phoneNumberId ? 'Connected' : 'Link your business number', !!s.whatsapp.phoneNumberId, 'overview'],
     ['💬', 'Test your bot', 'Chat with it like a customer would', false, 'simulator'],
   ];

@@ -1,7 +1,8 @@
 import express from 'express';
 import { config } from '../config.js';
 import { getDb, redactSettings, json } from '../db.js';
-import { safeEqual } from '../crypto.js';
+import { safeEqual, sha256 } from '../crypto.js';
+import { setupStatus, savePlatformSetup, testAi, autoSetupStripe } from '../platformSetup.js';
 import {
   PLANS, createTenant, getTenant, listTenants, updateTenantSettings, updateTenantMeta, rotateKeys, deleteTenant,
   authenticateAdminKey, getUsage,
@@ -126,7 +127,24 @@ export function adminRouter() {
   }));
 
   // Who am I? Super admin gets tenant list, tenant admin gets their tenant.
-  r.get('/whoami', (req, res) => res.json({ super: isSuper(req) }));
+  // One key is enough to sign in: we work out whether it's the super admin key, a shop owner key or a staff key.
+  r.get('/whoami', (req, res) => {
+    if (isSuper(req)) return res.json({ super: true, tenantId: null });
+    const key = bearer(req);
+    if (!key) return res.json({ super: false, tenantId: null });
+    const d = getDb();
+    const tenantId = d.prepare('SELECT id FROM tenants WHERE admin_key_hash = ?').get(sha256(key))?.id
+      || (key.startsWith('stf_') ? d.prepare('SELECT tenant_id FROM staff WHERE key_hash = ?').get(sha256(key))?.tenant_id : null) || null;
+    res.json({ super: false, tenantId });
+  });
+
+  // ----- super admin: guided platform setup (instead of editing .env) -----
+  r.get('/system/setup', requireSuper, (req, res) => res.json(setupStatus()));
+  r.patch('/system/setup', requireSuper, (req, res) => res.json(savePlatformSetup(req.body || {})));
+  r.post('/system/setup/test-ai', requireSuper, wrap(async (req, res) => res.json(await testAi())));
+  r.post('/system/setup/stripe-auto', requireSuper, wrap(async (req, res) => {
+    try { res.json({ ok: true, ...(await autoSetupStripe()) }); } catch (e) { res.status(400).json({ error: e.message }); }
+  }));
 
   // ----- super admin: tenant management -----
   r.get('/tenants', requireSuper, (req, res) => res.json({ tenants: listTenants().map(view) }));
