@@ -13,6 +13,7 @@ import { handleInbound } from '../bot/engine.js';
 import { enqueue } from '../whatsapp/webhook.js';
 import { setHandover } from '../bot/state.js';
 import { listOrders, updateOrder, orderUpdateMessage } from '../bot/orders.js';
+import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt } from '../dify/provision.js';
 
 const bearer = (req) => (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
 const isSuper = (req) => !!config.superAdminKey && safeEqual(bearer(req), config.superAdminKey);
@@ -51,11 +52,16 @@ export function adminRouter() {
 
   // ----- super admin: tenant management -----
   r.get('/tenants', requireSuper, (req, res) => res.json({ tenants: listTenants().map(view) }));
-  r.post('/tenants', requireSuper, (req, res) => {
+  r.post('/tenants', requireSuper, wrap(async (req, res) => {
     if (!req.body?.name) return res.status(400).json({ error: 'name required' });
     const { tenant, adminKey, toolKey } = createTenant({ name: String(req.body.name).slice(0, 80), plan: req.body.plan });
-    res.status(201).json({ tenant: view(tenant), adminKey, toolKey, note: 'Store these keys now – they are not shown again.' });
-  });
+    // Automatically create the client's AI chatbot in Dify (if console access is configured)
+    let ai = { created: false, reason: 'Dify console access not configured on the server' };
+    if (consoleConfigured() && req.body.createAiBot !== false) {
+      ai = await provisionDifyBot(tenant.id).then((r) => ({ created: true, ...r }), (e) => ({ created: false, reason: e.message }));
+    }
+    res.status(201).json({ tenant: view(getTenant(tenant.id)), adminKey, toolKey, ai, note: 'Store these keys now – they are not shown again.' });
+  }));
   r.patch('/tenants/:tenantId/meta', requireSuper, (req, res) => {
     const t = updateTenantMeta(req.params.tenantId, req.body || {});
     t ? res.json({ tenant: view(t) }) : res.status(404).json({ error: 'not found' });
@@ -71,8 +77,26 @@ export function adminRouter() {
     delete patch.storeWebhookSecret;
     if (patch.store?.type && !STORE_TYPES.includes(patch.store.type)) return res.status(400).json({ error: 'invalid store type' });
     if (!req.isSuper && patch.store?.type && !(PLANS[req.tenant.plan]?.storeTypes || []).includes(patch.store.type)) return res.status(403).json({ error: 'store type not in plan' });
-    res.json({ tenant: view(updateTenantSettings(req.tenant.id, patch)) });
+    const updated = updateTenantSettings(req.tenant.id, patch);
+    // Keep the managed Dify bot's prompt in sync with the shop's settings
+    if (req.query.sync !== '0' && updated.settings.dify?.managed && (patch.ai || patch.business || patch.ordering) && consoleConfigured()) {
+      provisionDifyBot(updated.id).catch((e) => console.warn('[dify sync]', e.message));
+    }
+    res.json({ tenant: view(updated) });
   });
+
+  // ----- AI assistant (Dify) -----
+  r.get('/tenants/:tenantId/ai', requireTenant, wrap(async (req, res) => {
+    const models = await listDifyModels().catch((e) => ({ configured: consoleConfigured(), models: [], error: e.message }));
+    res.json({ ...models, prompt: buildPrompt(req.tenant), dify: redactSettings(req.tenant.settings).dify });
+  }));
+  r.post('/tenants/:tenantId/ai/provision', requireTenant, wrap(async (req, res) => {
+    try {
+      res.json({ ok: true, ...(await provisionDifyBot(req.tenant.id)), tenant: view(getTenant(req.tenant.id)) });
+    } catch (e) {
+      res.status(200).json({ ok: false, error: e.message });
+    }
+  }));
 
   r.post('/tenants/:tenantId/test/:what', requireTenant, wrap(async (req, res) => {
     const t = req.tenant;

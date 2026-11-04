@@ -82,14 +82,14 @@ async function boot() {
 }
 $('#logout').onclick = () => { store.set('wc_key', null); S.key = null; S.tenant = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['simulator', 'Test bot'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['broadcast', 'Broadcast']];
+const TABS = [['overview', 'Overview'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['broadcast', 'Broadcast']];
 function render() {
   const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS : [])];
   if (!tabs.find((t) => t[0] === S.tab)) S.tab = tabs[0][0];
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
-  ({ tenants, overview, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ tenants, overview, ai, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin ----------
@@ -108,7 +108,7 @@ async function tenants() {
   $('#tc').onclick = async () => {
     try {
       const r = await api('/tenants', { method: 'POST', body: { name: $('#tn').value, plan: $('#tp').value } });
-      $('#keys').innerHTML = `<p>✅ Created <code>${esc(r.tenant.id)}</code>. Save these now – shown once:</p><p>Admin key (give to client): <code>${esc(r.adminKey)}</code></p><p>Dify tool key: <code>${esc(r.toolKey)}</code></p>`;
+      $('#keys').innerHTML = `<p>✅ Created <code>${esc(r.tenant.id)}</code>. Save these now – shown once:</p><p>Admin key (give to client): <code>${esc(r.adminKey)}</code></p><p>Dify tool key: <code>${esc(r.toolKey)}</code></p><p>${r.ai.created ? `🤖 AI chatbot created in Dify (${esc(r.ai.model.name)}) – <a href="${esc(r.ai.appUrl)}" target="_blank" rel="noopener">open in Dify</a>` : `⚠️ AI chatbot not created: ${esc(r.ai.reason)}`}</p>`;
     } catch (e) { toast(e.message); }
   };
   $('#app').querySelectorAll('[data-open]').forEach((b) => (b.onclick = async () => { S.tenantId = b.dataset.open; store.set('wc_tenant', S.tenantId); S.tenant = (await api(T(''))).tenant; S.tab = 'overview'; render(); }));
@@ -146,6 +146,48 @@ async function overview() {
     $('#tr').textContent = 'Testing…';
     try { $('#tr').textContent = JSON.stringify(await api(T('/test/' + b.dataset.test), { method: 'POST', body: { to: $('#tw').value } }), null, 2); } catch (e) { $('#tr').textContent = e.message; }
   }));
+}
+
+
+// ---------- AI assistant ----------
+async function ai() {
+  const info = await api(T('/ai'));
+  const a = S.tenant.settings.ai || {};
+  const d = info.dify || {};
+  const tones = [['friendly', 'Friendly 😊'], ['professional', 'Professional'], ['playful', 'Playful 🎉'], ['luxury', 'Luxury / premium']];
+  const modelOpts = (info.models || []).map((m) => { const v = m.provider + '|' + m.name; return `<option value="${esc(v)}" ${a.model === v ? 'selected' : ''}>${esc(m.providerLabel)} · ${esc(m.label)}</option>`; }).join('');
+  $('#app').innerHTML = `
+    <div class="card"><h2>🤖 AI chatbot</h2>
+      ${d.managed && d.appId ? `<p>✅ Live in Dify · model <code>${esc(d.model || '')}</code> · last synced ${esc(d.syncedAt || '')} · <a href="${esc(location.protocol)}//${esc(new URL(d.baseUrl || location.href).host)}/app/${esc(d.appId)}/configuration" target="_blank" rel="noopener">open in Dify</a></p>`
+        : d.enabled && d.apiKey ? '<p>✅ Using a Dify app key entered manually (Settings → AI).</p>' : '<p>⬜ No AI chatbot yet. Fill in the details below and press <b>Create AI chatbot</b> – it is created in your Dify automatically.</p>'}
+      ${info.configured ? '' : `<p class="pill warn">Server is not connected to the Dify console${info.error ? ': ' + esc(info.error) : ''}. Set DIFY_ADMIN_API_KEY + DIFY_WORKSPACE_ID (or DIFY_CONSOLE_EMAIL + DIFY_CONSOLE_PASSWORD) in .env.</p>`}
+      <div class="row">
+        <div><label>Assistant name</label><input data-a="assistantName" value="${esc(a.assistantName || '')}"></div>
+        <div><label>Tone</label><select data-a="tone">${tones.map(([k, l]) => `<option value="${k}" ${a.tone === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div><label>AI model (from your Dify)</label><select data-a="model"><option value="">Dify default${info.default ? ' (' + esc(info.default.name) + ')' : ''}</option>${modelOpts}</select></div>
+        <div><label>Creativity (0 = precise, 1 = creative)</label><input data-a="temperature" type="number" min="0" max="1" step="0.1" value="${esc(a.temperature ?? 0.4)}"></div>
+      </div>
+      <label>About the shop (what you sell, who for, what makes you special)</label><textarea data-a="about">${esc(a.about || '')}</textarea>
+      <label>FAQ & policies – delivery times, returns, sizing, opening hours… (the bot answers from this)</label><textarea data-a="faq" style="min-height:160px">${esc(a.faq || '')}</textarea>
+      <label>Extra instructions (optional)</label><textarea data-a="instructions">${esc(a.instructions || '')}</textarea>
+      <p><button class="btn" id="aisave">${d.managed ? 'Save & update AI chatbot' : 'Save & create AI chatbot'}</button> <button class="btn ghost" id="aitest">Try it in Test bot →</button></p>
+      <pre id="aires" class="mute" style="white-space:pre-wrap"></pre>
+    </div>
+    <div class="card"><h2>Generated instructions (sent to Dify)</h2><pre style="white-space:pre-wrap" class="mute">${esc(info.prompt)}</pre></div>`;
+  $('#aitest').onclick = () => { S.tab = 'simulator'; render(); };
+  $('#aisave').onclick = async () => {
+    const patch = { ai: {} };
+    $('#app').querySelectorAll('[data-a]').forEach((el) => (patch.ai[el.dataset.a] = el.dataset.a === 'temperature' ? Number(el.value) : el.value));
+    $('#aires').textContent = 'Saving and setting up the chatbot in Dify…';
+    try {
+      S.tenant = (await api(T('/settings?sync=0'), { method: 'PATCH', body: patch })).tenant;
+      const r = await api(T('/ai/provision'), { method: 'POST' });
+      if (!r.ok) { $('#aires').textContent = '⚠️ ' + r.error; return; }
+      S.tenant = r.tenant;
+      toast(r.created ? 'AI chatbot created in Dify' : 'AI chatbot updated');
+      ai();
+    } catch (e) { $('#aires').textContent = e.message; }
+  };
 }
 
 // ---------- simulator ----------

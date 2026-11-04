@@ -34,7 +34,7 @@ See [docs/COMPETITOR_REVIEW.md](docs/COMPETITOR_REVIEW.md) for how this compares
   - *Cash on delivery/collection.*
   - *Bank transfer*: shows your bank details; staff get an alert when the customer sends a payment screenshot.
 - **Orders are created in the real store.** Shopify draft orders (or completed orders with payment pending for COD), WooCommerce orders, or custom API orders. They also show in the dashboard.
-- **Dify AI.** Two modes:
+- **AI chatbot, auto-created in your Dify** (see below). Two modes:
   - `assist` (recommended to start): the service searches the store, gives Dify the matching products and the cart, then sends the AI reply with a tappable product list underneath. Works with any Dify Chatbot or Chatflow app and its knowledge base.
   - `agent`: a Dify Agent app calls this service's store tools (search, add to cart, checkout, order status, handover) through an OpenAPI custom tool. Each call is locked to the customer in the chat by a signed `session_token`.
   - If Dify fails, the bot falls back to a plain catalogue search, so customers always get an answer.
@@ -102,7 +102,26 @@ Implement the six small endpoints in [docs/CUSTOM_STORE_API.md](docs/CUSTOM_STOR
 Use store type `manual` and enter products on the **Catalogue** tab. For online payment, set *Payment link* to a Stripe or PayPal link
 (`{total}` and `{order}` placeholders are supported); otherwise use COD or bank transfer.
 
-### 3. Dify AI (dify.rcshopper.com)
+### 3. AI chatbot (created automatically in dify.rcshopper.com)
+
+The system creates and maintains each client's AI chatbot in your Dify. You don't build anything in Dify by hand.
+
+**One-time server setup.** Give this service access to your Dify console, using one of these:
+- **Admin API key (recommended).** In Dify's `docker/.env` set `ADMIN_API_KEY_ENABLE=true` and `ADMIN_API_KEY=<long random string>`, then restart Dify.
+  Here, set `DIFY_ADMIN_API_KEY` to the same value and `DIFY_WORKSPACE_ID` to your workspace ID. You can get the ID with
+  `docker exec -it docker-db-1 psql -U postgres -d dify -c "select id, name from tenants;"`.
+- **Login.** Set `DIFY_CONSOLE_EMAIL` and `DIFY_CONSOLE_PASSWORD` to a Dify owner/admin account.
+
+Make sure Dify has a model provider (OpenAI or OpenRouter) and a system default model
+(Dify → Settings → Model Provider). Optionally, force a model with `DIFY_DEFAULT_MODEL=provider|model`.
+
+**Per client:**
+- When you create a client, its chatbot app is created in Dify, an API key is generated, and AI is switched on.
+- The **AI assistant** tab lets you (or the client) set the assistant name, tone, model (any LLM in your Dify), the "about the shop" text, FAQ and policies, and extra instructions. Press **Save & update AI chatbot** and the Dify app is updated in place.
+- Delivery fees, minimum order, payment options and support hours are written into the bot's instructions automatically, and re-synced whenever settings change.
+- The app appears in Dify as "<Shop> · WhatsApp", where you can see its logs or attach a Knowledge base for long documents.
+
+### 3b. Manual Dify setup (optional; e.g. a client's own Dify, or agent mode)
 1. In Dify, **Create app → Chatbot** (or Chatflow) and pick your OpenAI or OpenRouter model.
 2. Paste the instructions from [dify/assist-system-prompt.md](dify/assist-system-prompt.md).
 3. Add the input variables `store_name`, `customer_name`, `currency`, `session_token` (Text, optional).

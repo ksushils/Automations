@@ -33,6 +33,15 @@ export function defaultSettings(name) {
       // "agent":  Dify Agent app calls our store tools (OpenAPI) itself
       mode: 'assist',
     },
+    ai: {
+      assistantName: `${name} assistant`,
+      tone: 'friendly', // friendly | professional | playful | luxury
+      about: '',
+      faq: '',
+      instructions: '',
+      model: '', // "provider|model" – empty = server/Dify default
+      temperature: 0.4,
+    },
     store: {
       type: 'manual', // manual | shopify | woocommerce | custom
       shopify: { domain: '', adminToken: '' },

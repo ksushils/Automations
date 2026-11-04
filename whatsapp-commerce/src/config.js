@@ -32,3 +32,13 @@ export function assertProductionConfig() {
   if (config.superAdminKey.length < 16) problems.push('SUPER_ADMIN_KEY must be at least 16 characters');
   return problems;
 }
+
+// Dify console access – lets this service create/update chatbot apps in your Dify automatically.
+Object.assign(config, {
+  difyConsoleUrl: (env.DIFY_CONSOLE_URL || config.difyBaseUrl.replace(/\/v1$/, '')).replace(/\/$/, ''),
+  difyAdminApiKey: env.DIFY_ADMIN_API_KEY || '',
+  difyWorkspaceId: env.DIFY_WORKSPACE_ID || '',
+  difyConsoleEmail: env.DIFY_CONSOLE_EMAIL || '',
+  difyConsolePassword: env.DIFY_CONSOLE_PASSWORD || '',
+  difyDefaultModel: env.DIFY_DEFAULT_MODEL || '', // optional "provider|model", e.g. "langgenius/openai/openai|gpt-4o-mini"
+});
