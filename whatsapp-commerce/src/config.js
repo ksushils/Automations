@@ -42,3 +42,19 @@ Object.assign(config, {
   difyConsolePassword: env.DIFY_CONSOLE_PASSWORD || '',
   difyDefaultModel: env.DIFY_DEFAULT_MODEL || '', // optional "provider|model", e.g. "langgenius/openai/openai|gpt-4o-mini"
 });
+
+// SaaS: self-serve sign-up, your own subscription billing (Stripe Billing), Meta Embedded Signup
+Object.assign(config, {
+  signupEnabled: env.SIGNUP_ENABLED !== 'false',
+  trialDays: Number(env.TRIAL_DAYS || 14),
+  platformStripeSecret: env.PLATFORM_STRIPE_SECRET_KEY || '',
+  platformStripeWebhookSecret: env.PLATFORM_STRIPE_WEBHOOK_SECRET || '',
+  stripePrices: { starter: env.STRIPE_PRICE_STARTER || '', growth: env.STRIPE_PRICE_GROWTH || '', pro: env.STRIPE_PRICE_PRO || '' },
+  metaAppId: env.META_APP_ID || '',
+  metaAppSecret: env.META_APP_SECRET || '',
+  metaConfigId: env.META_CONFIG_ID || '', // WhatsApp Embedded Signup configuration ID (Meta app → Facebook Login for Business → Configurations)
+  metaWebhookVerifyToken: env.META_WEBHOOK_VERIFY_TOKEN || '',
+  alertWebhookUrl: env.ALERT_WEBHOOK_URL || '', // errors are POSTed here (Slack/Discord/n8n)
+  backupDir: env.BACKUP_DIR || './data/backups',
+  backupKeep: Number(env.BACKUP_KEEP || 14),
+});

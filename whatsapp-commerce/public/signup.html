@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Start free trial · WhatsApp Commerce</title>
+<style>
+:root{--bg:#f5f7f6;--card:#fff;--ink:#17201b;--mute:#5d6b63;--line:#dfe5e1;--brand:#128c4a}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1512;--card:#17201b;--ink:#e7efe9;--mute:#9aaba1;--line:#2a362f;--brand:#1fa055}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+main{max-width:980px;margin:0 auto;padding:24px 16px}h1{font-size:28px;margin:0 0 6px}.mute{color:var(--mute)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:20px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+.plan{cursor:pointer}.plan.on{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand)}.price{font-size:26px;font-weight:700}
+ul{padding-left:18px;margin:8px 0}label{display:block;font-size:13px;color:var(--mute);margin-top:12px}
+input{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:inherit}
+.chk{display:flex;gap:8px;align-items:center;color:var(--ink)}.chk input{width:auto}
+.btn{background:var(--brand);color:#fff;border:0;border-radius:10px;padding:12px 18px;font:inherit;font-weight:600;cursor:pointer;width:100%;margin-top:16px}
+.err{color:#c0392b}code{background:var(--bg);padding:4px 8px;border-radius:6px;word-break:break-all}
+</style>
+</head>
+<body>
+<main>
+  <h1>Sell on WhatsApp – with AI 🤖</h1>
+  <p class="mute">Connect your Shopify / WooCommerce shop (or add products), and customers can browse, ask questions and order inside WhatsApp. <b id="trial">14-day free trial.</b></p>
+  <div class="grid" id="plans"></div>
+  <div class="card" style="max-width:520px">
+    <form id="f">
+      <label>Business name<input name="business" required autocomplete="organization"></label>
+      <label>Email<input name="email" type="email" required autocomplete="email"></label>
+      <label class="chk"><input type="checkbox" name="acceptTerms" required> I agree to the <a href="/legal/terms" target="_blank">Terms</a>, <a href="/legal/privacy" target="_blank">Privacy Policy</a> and <a href="/legal/dpa" target="_blank">Data Processing Agreement</a></label>
+      <button class="btn" type="submit">Start free trial</button>
+      <p class="err" id="err"></p>
+    </form>
+    <div id="ok" hidden></div>
+  </div>
+</main>
+<script>
+const FEATURES = {
+  starter: ['Tap-to-order WhatsApp shop', 'Shopify / WooCommerce / built-in catalogue', 'AI assistant', '1,000 messages / month'],
+  growth: ['Everything in Starter', 'Campaigns & broadcasts', 'Flow builder & automations', '5,000 messages / month'],
+  pro: ['Everything in Growth', 'AI agent takes orders', 'Unlimited messages', 'Priority support'],
+};
+let plan = 'growth';
+fetch('/api/plans').then((r) => r.json()).then((d) => {
+  document.getElementById('trial').textContent = `${d.trialDays}-day free trial${d.billing ? '' : ''}.`;
+  if (!d.signupEnabled) document.getElementById('f').innerHTML = '<p>Sign-up is currently closed – please contact us.</p>';
+  const el = document.getElementById('plans');
+  const draw = () => (el.innerHTML = Object.entries(d.plans).map(([k, p]) => `<div class="card plan ${k === plan ? 'on' : ''}" data-p="${k}"><b>${p.label}</b><div class="price">£${p.priceGbp}<span class="mute" style="font-size:14px;font-weight:400">/month</span></div><ul>${(FEATURES[k] || []).map((x) => `<li>${x}</li>`).join('')}</ul></div>`).join(''));
+  draw();
+  el.onclick = (e) => { const c = e.target.closest('[data-p]'); if (c) { plan = c.dataset.p; draw(); } };
+});
+document.getElementById('f').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = Object.fromEntries(new FormData(e.target));
+  const err = document.getElementById('err');
+  err.textContent = '';
+  const res = await fetch('/api/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...fd, acceptTerms: !!fd.acceptTerms, plan }) });
+  const r = await res.json().catch(() => ({}));
+  if (!res.ok) { err.textContent = r.error || 'Something went wrong'; return; }
+  try { localStorage.setItem('wc_key', r.adminKey); localStorage.setItem('wc_tenant', r.tenantId); } catch {}
+  e.target.hidden = true;
+  const ok = document.getElementById('ok');
+  ok.hidden = false;
+  ok.innerHTML = `<h2>🎉 You're in!</h2><p>Save your login details (they are not shown again):</p><p>Shop ID: <code>${r.tenantId}</code></p><p>Admin key: <code>${r.adminKey}</code></p>
+    <p><a class="btn" style="display:block;text-align:center;text-decoration:none" href="${r.checkoutUrl || '/admin/'}">${r.checkoutUrl ? 'Add payment details & open dashboard' : 'Open my dashboard'}</a></p>`;
+};
+</script>
+</body>
+</html>

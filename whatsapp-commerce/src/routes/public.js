@@ -5,6 +5,8 @@ import { getStore } from '../stores/index.js';
 import { findOrderByReceipt, getOrder, updateOrder, notifyStaff, STATUS_TEXT, paymentLabel } from '../bot/orders.js';
 import { money } from '../bot/cart.js';
 import { verifyStripeSignature } from '../payments/stripe.js';
+import { handlePlatformStripeEvent } from '../platform.js';
+import { renderLegal } from '../legal.js';
 import { createSender } from '../whatsapp/cloudApi.js';
 import { getDb } from '../db.js';
 
@@ -172,6 +174,22 @@ export function publicRouter() {
     const t = getTenant(req.params.tenantId);
     if (!t || !t.active) return res.status(404).send(page('Not found', '<div class="card">Shop not found.</div>'));
     res.send(await renderStorefront(t, { category: req.query.category, q: req.query.q }));
+  });
+
+  r.get('/legal/:page', (req, res) => {
+    const html = renderLegal(req.params.page);
+    html ? res.send(html) : res.sendStatus(404);
+  });
+
+  // Your own SaaS billing (Stripe Billing subscriptions)
+  r.post('/webhooks/platform-stripe', (req, res) => {
+    try {
+      const out = handlePlatformStripeEvent(req.rawBody?.toString('utf8') || '', req.get('stripe-signature'));
+      res.status(out.status).json({ received: out.ok });
+    } catch (e) {
+      console.error('[platform stripe]', e.message);
+      res.status(500).json({ error: 'failed' });
+    }
   });
 
   // Stripe → mark order paid, tell the customer and staff

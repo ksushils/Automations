@@ -1,5 +1,6 @@
 import express from 'express';
 import { findTenantByPhoneNumberId, getTenant, bumpUsage } from '../tenants.js';
+import { config } from '../config.js';
 import { verifyMetaSignature, safeEqual } from '../crypto.js';
 import { createSender, parseInbound, logMessage, markRead } from './cloudApi.js';
 import { handleInbound } from '../bot/engine.js';
@@ -50,6 +51,18 @@ export function processWebhookBody(body, { tenantOverride } = {}) {
 
 export function whatsappRouter() {
   const r = express.Router();
+
+  // App-level webhook for numbers connected through Embedded Signup (all clients share your Meta app).
+  // Messages are routed to the right client by phone_number_id.
+  r.get('/', (req, res) => {
+    const ok = config.metaWebhookVerifyToken && req.query['hub.mode'] === 'subscribe' && safeEqual(req.query['hub.verify_token'], config.metaWebhookVerifyToken);
+    return ok ? res.status(200).send(String(req.query['hub.challenge'])) : res.sendStatus(403);
+  });
+  r.post('/', (req, res) => {
+    if (!config.metaAppSecret || !verifyMetaSignature(req.rawBody || Buffer.from(''), req.get('x-hub-signature-256'), config.metaAppSecret)) return res.sendStatus(401);
+    res.sendStatus(200);
+    processWebhookBody(req.body).catch((e) => console.error('[webhook]', e));
+  });
 
   // Webhook verification (GET). One URL per tenant: /webhooks/whatsapp/:tenantId
   r.get('/:tenantId', (req, res) => {

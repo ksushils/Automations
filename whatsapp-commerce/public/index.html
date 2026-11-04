@@ -116,7 +116,7 @@ async function boot() {
 }
 $('#logout').onclick = () => { store.set('wc_key', null); S.key = null; S.tenant = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team']];
+const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
 const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders', 'contacts']);
 function render() {
   const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [])];
@@ -125,7 +125,7 @@ function render() {
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('');
   $('#nav').querySelectorAll('button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
-  ({ tenants, overview, analytics, team, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ tenants, overview, analytics, team, billing, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin ----------
@@ -167,7 +167,8 @@ async function overview() {
       <div class="card"><div class="mute">Orders (month)</div><div class="stat">${t.usage.orders}</div></div>
       <div class="card"><div class="mute">AI replies (month)</div><div class="stat">${t.usage.ai_calls}${lim.aiCalls ? ` / ${lim.aiCalls}` : ''}</div></div>
       <div class="card"><div class="mute">Plan</div><div class="stat">${esc(lim.label || t.plan)}</div></div></div>
-    <div class="card"><h2>Setup checklist</h2>${checks.map(([l, ok]) => `<div>${ok ? '✅' : '⬜'} ${l}</div>`).join('')}</div>
+    <div class="card"><h2>Setup checklist</h2>${checks.map(([l, ok]) => `<div>${ok ? '✅' : '⬜'} ${l}</div>`).join('')}
+      ${S.role === 'owner' ? `<p id="esu"></p>` : ''}</div>
     <div class="card"><h2>Connection details</h2>
       <label>WhatsApp webhook callback URL (Meta App → WhatsApp → Configuration)</label><code>${esc(t.urls.whatsappWebhook)}</code>
       <label>Webhook verify token</label><code>${esc(s.whatsapp.verifyToken)}</code>
@@ -180,6 +181,7 @@ async function overview() {
       <div><button class="btn ghost" data-test="store">Test store</button></div>
       <div><button class="btn ghost" data-test="dify">Test Dify</button></div>
       <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></div>`;
+  embeddedSignupButton(s);
   $('#app').querySelectorAll('[data-test]').forEach((b) => (b.onclick = async () => {
     $('#tr').textContent = 'Testing…';
     try { $('#tr').textContent = JSON.stringify(await api(T('/test/' + b.dataset.test), { method: 'POST', body: { to: $('#tw').value } }), null, 2); } catch (e) { $('#tr').textContent = e.message; }
@@ -496,6 +498,54 @@ async function templates() {
   $('#app').querySelectorAll('[data-lib]').forEach((b) => (b.onclick = () => submit(r.library[+b.dataset.lib])));
   $('#tgo').onclick = () => submit({ name: $('#tn').value.trim(), category: $('#tc').value, language: $('#tl').value, header: $('#th').value, body: $('#tb').value, footer: $('#tf').value, examples: $('#tx').value.split(',').map((x) => x.trim()), buttons: $('#tq').value.split(',').map((x) => x.trim()).filter(Boolean).map((text) => ({ text })) });
   $('#app').querySelectorAll('[data-deltpl]').forEach((b) => (b.onclick = async () => { if (confirm('Delete template ' + b.dataset.deltpl + '?')) { await api(T('/templates/' + b.dataset.deltpl), { method: 'DELETE' }).catch((e) => toast(e.message)); templates(); } }));
+}
+
+// ---------- Meta Embedded Signup ----------
+async function embeddedSignupButton(s) {
+  const el = $('#esu');
+  if (!el) return;
+  const cfg = await api('/meta/config').catch(() => ({}));
+  if (!cfg.enabled) { el.innerHTML = s.whatsapp.phoneNumberId ? '' : '<span class="mute">Connect WhatsApp by entering your Meta details in Settings (one-click connect becomes available when the server has Meta Embedded Signup configured).</span>'; return; }
+  el.innerHTML = `<button class="btn" id="esbtn">${s.whatsapp.phoneNumberId ? '🔄 Reconnect WhatsApp number' : '📱 Connect WhatsApp (takes 2 minutes)'}</button> <span id="esmsg" class="mute"></span>`;
+  let session = {};
+  window.addEventListener('message', (ev) => {
+    if (!/facebook\.com$/.test(new URL(ev.origin).hostname)) return;
+    try { const d = JSON.parse(ev.data); if (d.type === 'WA_EMBEDDED_SIGNUP' && d.event === 'FINISH') session = { phoneNumberId: d.data.phone_number_id, wabaId: d.data.waba_id }; } catch {}
+  });
+  const loadSdk = () => new Promise((res) => {
+    if (window.FB) return res();
+    window.fbAsyncInit = () => { FB.init({ appId: cfg.appId, autoLogAppEvents: true, xfbml: false, version: cfg.graphVersion }); res(); };
+    const sc = document.createElement('script'); sc.src = 'https://connect.facebook.net/en_US/sdk.js'; sc.async = true; sc.crossOrigin = 'anonymous'; document.head.appendChild(sc);
+  });
+  $('#esbtn').onclick = async () => {
+    await loadSdk();
+    FB.login((resp) => {
+      const code = resp.authResponse?.code;
+      if (!code) return ($('#esmsg').textContent = 'Cancelled');
+      $('#esmsg').textContent = 'Connecting…';
+      setTimeout(async () => {
+        const r = await api(T('/whatsapp/embedded'), { method: 'POST', body: { code, ...session } }).catch((e) => ({ ok: false, error: e.message }));
+        if (!r.ok) return ($('#esmsg').textContent = '⚠️ ' + r.error);
+        toast(`Connected ${r.displayPhoneNumber || ''} ✅`);
+        overview();
+      }, 800); // the FINISH message can arrive just after the login callback
+    }, { config_id: cfg.configId, response_type: 'code', override_default_response_type: true, extras: { setup: {}, sessionInfoVersion: '3' } });
+  };
+}
+
+// ---------- billing ----------
+async function billing() {
+  const { billing: b, plans } = await api(T('/billing'));
+  const status = b.subscription_status || 'none';
+  const trial = b.trial_ends_at ? new Date(b.trial_ends_at + 'Z') : null;
+  $('#app').innerHTML = `<div class="card"><h2>Your plan</h2>
+      <p><b>${esc(plans[b.plan]?.label || b.plan)}</b> · status <span class="pill ${['active', 'trialing'].includes(status) ? '' : 'warn'}">${esc(status)}</span>${trial && status === 'trialing' ? ` · trial ends ${trial.toLocaleDateString('en-GB')}` : ''}</p>
+      ${b.configured ? `<p>${b.stripe_customer_id ? '<button class="btn ghost" id="portal">Manage billing, invoices & card</button>' : ''}</p>` : '<p class="mute">Online billing is not set up on this server (PLATFORM_STRIPE_SECRET_KEY). Your provider will invoice you directly.</p>'}</div>
+    ${b.configured ? `<div class="row">${Object.entries(plans).map(([k, p]) => `<div class="card"><h2>${esc(p.label)}</h2><div class="stat">£${p.priceGbp}<span class="mute" style="font-size:13px">/month</span></div>
+      <p class="mute">${p.monthlyConversationsIn ? p.monthlyConversationsIn.toLocaleString() + ' messages' : 'Unlimited messages'} · ${p.aiCalls.toLocaleString()} AI replies${p.broadcasts ? ' · campaigns' : ''}</p>
+      ${b.prices[k] ? `<button class="btn ${k === b.plan && status === 'active' ? 'ghost' : ''}" data-plan="${k}">${k === b.plan && status === 'active' ? 'Current plan' : 'Choose ' + esc(p.label)}</button>` : '<span class="mute">Not available</span>'}</div>`).join('')}</div>` : ''}`;
+  $('#app').querySelectorAll('[data-plan]').forEach((x) => (x.onclick = async () => { try { location.href = (await api(T('/billing/checkout'), { method: 'POST', body: { plan: x.dataset.plan } })).url; } catch (e) { toast(e.message); } }));
+  if ($('#portal')) $('#portal').onclick = async () => { try { location.href = (await api(T('/billing/portal'), { method: 'POST' })).url; } catch (e) { toast(e.message); } };
 }
 
 // ---------- grow: links, QR, widget, storefront ----------

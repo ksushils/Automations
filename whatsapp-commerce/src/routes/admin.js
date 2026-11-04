@@ -20,6 +20,8 @@ import { listFlows, getFlow, saveFlow, deleteFlow, validateFlow, getContact, upd
 import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaignStats } from '../campaigns.js';
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY } from '../templates.js';
 import { parseCsv } from '../csv.js';
+import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, embeddedSignupConfigured } from '../platform.js';
+import { rateLimit } from './web.js';
 import { provisionDifyBot, listDifyModels, consoleConfigured, buildPrompt, buildAgentPrompt } from '../dify/provision.js';
 
 const bearer = (req) => (req.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
@@ -65,7 +67,25 @@ export function adminRouter() {
   const r = express.Router();
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-  r.get('/plans', (req, res) => res.json({ plans: PLANS, storeTypes: STORE_TYPES }));
+  r.get('/plans', (req, res) => res.json({ plans: PLANS, storeTypes: STORE_TYPES, signupEnabled: config.signupEnabled, billing: billingConfigured(), trialDays: config.trialDays }));
+  r.get('/meta/config', (req, res) => res.json({ enabled: embeddedSignupConfigured(), appId: config.metaAppId || null, configId: config.metaConfigId || null, graphVersion: config.graphVersion }));
+
+  // ----- public self-serve sign-up -----
+  r.post('/signup', rateLimit({ windowMs: 3600000, max: 5 }), wrap(async (req, res) => {
+    if (!config.signupEnabled) return res.status(403).json({ error: 'Sign-up is closed' });
+    const name = String(req.body?.business || '').trim().slice(0, 80);
+    const email = String(req.body?.email || '').trim().toLowerCase().slice(0, 200);
+    if (name.length < 2) return res.status(400).json({ error: 'Please enter your business name' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Please enter a valid email' });
+    if (!req.body?.acceptTerms) return res.status(400).json({ error: 'Please accept the terms' });
+    const plan = PLANS[req.body?.plan] ? req.body.plan : 'starter';
+    const { tenant, adminKey } = createTenant({ name, plan });
+    getDb().prepare("UPDATE tenants SET owner_email = ?, trial_ends_at = datetime('now', ?), subscription_status = 'trialing' WHERE id = ?").run(email, `+${config.trialDays} days`, tenant.id);
+    if (consoleConfigured()) provisionDifyBot(tenant.id).catch((e) => console.warn('[signup ai]', e.message));
+    let checkoutUrl = null;
+    if (billingConfigured() && config.stripePrices[plan]) checkoutUrl = await createSubscriptionCheckout(getTenant(tenant.id), plan).catch((e) => { console.warn('[signup billing]', e.message); return null; });
+    res.status(201).json({ tenantId: tenant.id, adminKey, checkoutUrl, trialDays: config.trialDays });
+  }));
 
   // Who am I? Super admin gets tenant list, tenant admin gets their tenant.
   r.get('/whoami', (req, res) => res.json({ super: isSuper(req) }));
@@ -91,6 +111,23 @@ export function adminRouter() {
 
   // ----- tenant scoped -----
   r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant), role: req.role, staffName: req.staff?.name || null }));
+
+  // ----- billing (your SaaS subscription) -----
+  r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS }));
+  r.post('/tenants/:tenantId/billing/checkout', requireTenant, requireOwner, wrap(async (req, res) => {
+    try { res.json({ url: await createSubscriptionCheckout(req.tenant, req.body?.plan) }); } catch (e) { res.status(400).json({ error: e.message }); }
+  }));
+  r.post('/tenants/:tenantId/billing/portal', requireTenant, requireOwner, wrap(async (req, res) => {
+    try { res.json({ url: await createBillingPortal(req.tenant) }); } catch (e) { res.status(400).json({ error: e.message }); }
+  }));
+
+  // ----- connect WhatsApp via Meta Embedded Signup -----
+  r.post('/tenants/:tenantId/whatsapp/embedded', requireTenant, requireOwner, wrap(async (req, res) => {
+    try {
+      const r2 = await completeEmbeddedSignup(req.tenant.id, req.body || {});
+      res.json({ ok: true, displayPhoneNumber: r2.displayPhoneNumber, verifiedName: r2.verifiedName, tenant: view(r2.tenant) });
+    } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+  }));
 
   // ----- team (staff logins) -----
   r.get('/tenants/:tenantId/staff', requireTenant, requireOwner, (req, res) => res.json({ staff: listStaff(req.tenant.id), roles: ROLES }));
