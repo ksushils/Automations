@@ -1,0 +1,11 @@
+services:
+  whatsapp-commerce:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_PATH: /app/data/whatsapp-commerce.db
+    ports:
+      - "127.0.0.1:3000:3000" # put nginx / Caddy / Traefik in front for HTTPS
+    volumes:
+      - ./data:/app/data

@@ -1,0 +1,410 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "WhatsApp Store Tools",
+    "version": "1.0.0",
+    "description": "Search the shop catalogue, manage the customer's cart and place orders for the WhatsApp customer you are chatting with."
+  },
+  "servers": [
+    {
+      "url": "https://wa.rcshopper.com/tools"
+    }
+  ],
+  "paths": {
+    "/search_products": {
+      "post": {
+        "operationId": "search_products",
+        "summary": "Search the shop's products by keywords. Use before recommending or adding anything.",
+        "description": "Search the shop's products by keywords. Use before recommending or adding anything.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_token",
+                  "query"
+                ],
+                "properties": {
+                  "session_token": {
+                    "type": "string",
+                    "description": "Always pass the {{session_token}} conversation variable exactly as given."
+                  },
+                  "query": {
+                    "type": "string",
+                    "description": "Search keywords, e.g. 'red dress' or 'phone case'"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Max results (1-10), default 5"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/list_categories": {
+      "post": {
+        "operationId": "list_categories",
+        "summary": "List the shop's product categories/collections.",
+        "description": "List the shop's product categories/collections.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_token"
+                ],
+                "properties": {
+                  "session_token": {
+                    "type": "string",
+                    "description": "Always pass the {{session_token}} conversation variable exactly as given."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_product": {
+      "post": {
+        "operationId": "get_product",
+        "summary": "Get full details and purchasable options (variant_id) for one product.",
+        "description": "Get full details and purchasable options (variant_id) for one product.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_token",
+                  "product_id"
+                ],
+                "properties": {
+                  "session_token": {
+                    "type": "string",
+                    "description": "Always pass the {{session_token}} conversation variable exactly as given."
+                  },
+                  "product_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/add_to_cart": {
+      "post": {
+        "operationId": "add_to_cart",
+        "summary": "Add a product to the customer's cart. variant_id is required when the product has several options.",
+        "description": "Add a product to the customer's cart. variant_id is required when the product has several options.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_token",
+                  "product_id"
+                ],
+                "properties": {
+                  "session_token": {
+                    "type": "string",
+                    "description": "Always pass the {{session_token}} conversation variable exactly as given."
+                  },
+                  "product_id": {
+                    "type": "string"
+                  },
+                  "variant_id": {
+                    "type": "string"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "description": "default 1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/view_cart": {
+      "post": {
+        "operationId": "view_cart",
+        "summary": "Show the items currently in the customer's cart.",
+        "description": "Show the items currently in the customer's cart.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_token"
+                ],
+                "properties": {
+                  "session_token": {
+                    "type": "string",
+                    "description": "Always pass the {{session_token}} conversation variable exactly as given."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/remove_from_cart": {
+      "post": {
+        "operationId": "remove_from_cart",
+        "summary": "Remove a cart line by its line number (from view_cart).",
+        "description": "Remove a cart line by its line number (from view_cart).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_token",
+                  "line"
+                ],
+                "properties": {
+                  "session_token": {
+                    "type": "string",
+                    "description": "Always pass the {{session_token}} conversation variable exactly as given."
+                  },
+                  "line": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/checkout": {
+      "post": {
+        "operationId": "checkout",
+        "summary": "Place the order for everything in the cart. Only call after the customer clearly confirms. The confirmation and payment link are sent to the customer automatically.",
+        "description": "Place the order for everything in the cart. Only call after the customer clearly confirms. The confirmation and payment link are sent to the customer automatically.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_token"
+                ],
+                "properties": {
+                  "session_token": {
+                    "type": "string",
+                    "description": "Always pass the {{session_token}} conversation variable exactly as given."
+                  },
+                  "fulfilment": {
+                    "type": "string",
+                    "enum": [
+                      "delivery",
+                      "pickup"
+                    ]
+                  },
+                  "payment_method": {
+                    "type": "string",
+                    "enum": [
+                      "payment_link",
+                      "cod",
+                      "bank_transfer"
+                    ]
+                  },
+                  "customer_name": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string",
+                    "description": "Full delivery address incl. postcode (required for delivery unless saved)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/order_status": {
+      "post": {
+        "operationId": "order_status",
+        "summary": "Look up the status of the customer's orders. Optionally pass an order number.",
+        "description": "Look up the status of the customer's orders. Optionally pass an order number.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_token"
+                ],
+                "properties": {
+                  "session_token": {
+                    "type": "string",
+                    "description": "Always pass the {{session_token}} conversation variable exactly as given."
+                  },
+                  "order_number": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/handover": {
+      "post": {
+        "operationId": "handover",
+        "summary": "Hand the conversation to a human team member (complaints, refunds, anything you cannot solve).",
+        "description": "Hand the conversation to a human team member (complaints, refunds, anything you cannot solve).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_token"
+                ],
+                "properties": {
+                  "session_token": {
+                    "type": "string",
+                    "description": "Always pass the {{session_token}} conversation variable exactly as given."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

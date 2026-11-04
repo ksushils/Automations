@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Commerce</title>
+<style>
+:root{--bg:#f5f7f6;--card:#fff;--ink:#17201b;--mute:#5d6b63;--line:#dfe5e1;--brand:#128c4a;--brand2:#0b6b38;--warn:#b5470b;--bubble-in:#fff;--bubble-out:#d9fdd3;--chat:#efeae2}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1512;--card:#17201b;--ink:#e7efe9;--mute:#9aaba1;--line:#2a362f;--brand:#25d366;--brand2:#1fb457;--bubble-in:#202c33;--bubble-out:#005c4b;--chat:#0b141a}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2;flex-wrap:wrap}
+header h1{font-size:16px;margin:0;flex:1}nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:none;border:0;padding:6px 10px;border-radius:8px;color:var(--mute);cursor:pointer;font:inherit}nav button.on{background:var(--brand);color:#fff}
+main{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+h2{font-size:15px;margin:0 0 12px}h3{font-size:13px;margin:16px 0 8px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
+label{display:block;font-size:12px;color:var(--mute);margin:8px 0 2px}
+input,select,textarea{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:70px}
+.btn{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit}.btn:hover{background:var(--brand2)}
+.btn.ghost{background:none;color:var(--brand);border:1px solid var(--line)}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;color:var(--mute)}
+.tablewrap{overflow-x:auto}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:var(--bg);border:1px solid var(--line)}
+.pill.warn{color:var(--warn);border-color:var(--warn)}
+.stat{font-size:22px;font-weight:600}.mute{color:var(--mute)}
+code{background:var(--bg);padding:2px 6px;border-radius:6px;word-break:break-all}
+.chat{background:var(--chat);border-radius:12px;padding:12px;height:440px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.b{max-width:80%;padding:8px 10px;border-radius:10px;white-space:pre-wrap;word-wrap:break-word}.b.in{background:var(--bubble-out);align-self:flex-end}.b.out{background:var(--bubble-in);align-self:flex-start}
+.b img{max-width:100%;border-radius:8px;display:block;margin-bottom:6px}
+.acts{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.acts button{background:var(--card);color:var(--brand);border:1px solid var(--line);border-radius:8px;padding:4px 8px;cursor:pointer;font:inherit;font-size:13px}
+.split{display:grid;grid-template-columns:280px 1fr;gap:12px}@media (max-width:760px){.split{grid-template-columns:1fr}}
+.list-item{padding:8px;border-radius:8px;cursor:pointer;border:1px solid transparent}.list-item:hover,.list-item.on{border-color:var(--line);background:var(--bg)}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;display:none;z-index:9}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>💬 WhatsApp Commerce <span class="mute" id="who"></span></h1>
+  <nav id="nav"></nav>
+  <button class="btn ghost" id="logout" style="display:none">Sign out</button>
+</header>
+<main id="app"></main>
+<div id="toast"></div>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} } };
+let S = { key: store.get('wc_key'), tenantId: store.get('wc_tenant'), super: false, tenant: null, tab: store.get('wc_tab') || 'overview' };
+const toast = (m) => { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = 'none'), 3000); };
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, { ...opts, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.key }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+const T = (p) => `/tenants/${encodeURIComponent(S.tenantId)}${p}`;
+
+// ---------- login ----------
+function loginView() {
+  $('#nav').innerHTML = ''; $('#logout').style.display = 'none'; $('#who').textContent = '';
+  $('#app').innerHTML = `<div class="card" style="max-width:420px;margin:40px auto"><h2>Sign in</h2>
+    <label>Tenant ID (leave empty for super admin)</label><input id="lt" value="${esc(S.tenantId || '')}">
+    <label>Admin key</label><input id="lk" type="password">
+    <p><button class="btn" id="lb">Sign in</button></p></div>`;
+  $('#lb').onclick = async () => {
+    S.key = $('#lk').value.trim(); S.tenantId = $('#lt').value.trim() || null;
+    try { await boot(); store.set('wc_key', S.key); store.set('wc_tenant', S.tenantId); } catch (e) { toast(e.message); }
+  };
+}
+
+async function boot() {
+  const who = await api('/whoami');
+  S.super = who.super;
+  if (!S.tenantId && !S.super) throw new Error('Invalid key');
+  if (S.tenantId) S.tenant = (await api(T(''))).tenant;
+  $('#logout').style.display = '';
+  render();
+}
+$('#logout').onclick = () => { store.set('wc_key', null); S.key = null; S.tenant = null; loginView(); };
+
+const TABS = [['overview', 'Overview'], ['simulator', 'Test bot'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['broadcast', 'Broadcast']];
+function render() {
+  const tabs = [...(S.super ? [['tenants', 'Clients']] : []), ...(S.tenant ? TABS : [])];
+  if (!tabs.find((t) => t[0] === S.tab)) S.tab = tabs[0][0];
+  $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
+  $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('');
+  $('#nav').querySelectorAll('button').forEach((b) => (b.onclick = () => { S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
+  ({ tenants, overview, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+}
+
+// ---------- super admin ----------
+async function tenants() {
+  const { tenants } = await api('/tenants');
+  const { plans } = await api('/plans');
+  $('#app').innerHTML = `<div class="card"><h2>New client</h2><div class="row">
+      <div><label>Business name</label><input id="tn"></div>
+      <div><label>Plan</label><select id="tp">${Object.entries(plans).map(([k, p]) => `<option value="${k}">${p.label} — £${p.priceGbp}/mo</option>`).join('')}</select></div>
+      <div style="align-self:end"><button class="btn" id="tc">Create client</button></div></div><div id="keys"></div></div>
+    <div class="card"><h2>Clients (${tenants.length})</h2><div class="tablewrap"><table><tr><th>Name</th><th>ID</th><th>Plan</th><th>Store</th><th>This month</th><th></th></tr>
+    ${tenants.map((t) => `<tr><td>${esc(t.name)} ${t.active ? '' : '<span class="pill warn">inactive</span>'}</td><td><code>${esc(t.id)}</code></td><td>${esc(t.plan)}</td><td>${esc(t.settings.store.type)}</td>
+      <td>${t.usage.inbound} in · ${t.usage.orders} orders · ${t.usage.ai_calls} AI</td>
+      <td><button class="btn ghost" data-open="${esc(t.id)}">Manage</button> <button class="btn ghost" data-toggle="${esc(t.id)}" data-active="${t.active}">${t.active ? 'Suspend' : 'Activate'}</button></td></tr>`).join('')}
+    </table></div></div>`;
+  $('#tc').onclick = async () => {
+    try {
+      const r = await api('/tenants', { method: 'POST', body: { name: $('#tn').value, plan: $('#tp').value } });
+      $('#keys').innerHTML = `<p>✅ Created <code>${esc(r.tenant.id)}</code>. Save these now – shown once:</p><p>Admin key (give to client): <code>${esc(r.adminKey)}</code></p><p>Dify tool key: <code>${esc(r.toolKey)}</code></p>`;
+    } catch (e) { toast(e.message); }
+  };
+  $('#app').querySelectorAll('[data-open]').forEach((b) => (b.onclick = async () => { S.tenantId = b.dataset.open; store.set('wc_tenant', S.tenantId); S.tenant = (await api(T(''))).tenant; S.tab = 'overview'; render(); }));
+  $('#app').querySelectorAll('[data-toggle]').forEach((b) => (b.onclick = async () => { await api(`/tenants/${b.dataset.toggle}/meta`, { method: 'PATCH', body: { active: b.dataset.active !== 'true' } }); tenants(); }));
+}
+
+// ---------- overview ----------
+async function overview() {
+  const t = (S.tenant = (await api(T(''))).tenant);
+  const lim = t.planLimits || {};
+  const s = t.settings;
+  const checks = [
+    ['WhatsApp connected', s.whatsapp.phoneNumberId && s.whatsapp.accessToken],
+    ['Store connected', s.store.type === 'manual' ? (s.store.manual.products || []).length > 0 : true],
+    ['Dify AI enabled', s.dify.enabled && s.dify.apiKey],
+    ['Staff alerts', (s.notifications.staffWaIds || []).length || s.notifications.webhookUrl],
+  ];
+  $('#app').innerHTML = `<div class="row">
+      <div class="card"><div class="mute">Messages in (month)</div><div class="stat">${t.usage.inbound}${lim.monthlyConversationsIn ? ` / ${lim.monthlyConversationsIn}` : ''}</div></div>
+      <div class="card"><div class="mute">Orders (month)</div><div class="stat">${t.usage.orders}</div></div>
+      <div class="card"><div class="mute">AI replies (month)</div><div class="stat">${t.usage.ai_calls}${lim.aiCalls ? ` / ${lim.aiCalls}` : ''}</div></div>
+      <div class="card"><div class="mute">Plan</div><div class="stat">${esc(lim.label || t.plan)}</div></div></div>
+    <div class="card"><h2>Setup checklist</h2>${checks.map(([l, ok]) => `<div>${ok ? '✅' : '⬜'} ${l}</div>`).join('')}</div>
+    <div class="card"><h2>Connection details</h2>
+      <label>WhatsApp webhook callback URL (Meta App → WhatsApp → Configuration)</label><code>${esc(t.urls.whatsappWebhook)}</code>
+      <label>Webhook verify token</label><code>${esc(s.whatsapp.verifyToken)}</code>
+      <label>Store order webhook (Shopify / WooCommerce order update notifications)</label><code>${esc(t.urls.storeWebhook)}</code>
+      <label>Dify custom tool schema URL (Agent mode)</label><code>${esc(location.origin)}/dify/store-tools.openapi.json</code>
+      <label>Tenant ID</label><code>${esc(t.id)}</code></div>
+    <div class="card"><h2>Test connections</h2><div class="row">
+      <div><button class="btn ghost" data-test="store">Test store</button></div>
+      <div><button class="btn ghost" data-test="dify">Test Dify</button></div>
+      <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></div>`;
+  $('#app').querySelectorAll('[data-test]').forEach((b) => (b.onclick = async () => {
+    $('#tr').textContent = 'Testing…';
+    try { $('#tr').textContent = JSON.stringify(await api(T('/test/' + b.dataset.test), { method: 'POST', body: { to: $('#tw').value } }), null, 2); } catch (e) { $('#tr').textContent = e.message; }
+  }));
+}
+
+// ---------- simulator ----------
+function bubble(m, dir) {
+  if (dir === 'in') return `<div class="b in">${esc(m)}</div>`;
+  let h = '', acts = [];
+  if (m.type === 'image') h = `<img src="${esc(m.url)}" alt="">${esc(m.caption)}`;
+  else if (m.type === 'cta') { h = esc(m.text); acts.push(`<a class="btn" style="text-decoration:none;font-size:13px;padding:4px 8px" href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.buttonText)}</a>`); }
+  else if (m.type === 'buttons') { h = (m.header ? `<b>${esc(m.header)}</b>\n` : '') + esc(m.text); acts = m.buttons.map((b) => `<button data-a="${esc(b.id)}" data-l="${esc(b.title)}">${esc(b.title)}</button>`); }
+  else if (m.type === 'list') { h = esc(m.text); acts = m.sections.flatMap((s) => s.rows.map((r) => `<button data-a="${esc(r.id)}" data-l="${esc(r.title)}" title="${esc(r.description || '')}">${esc(r.title)}</button>`)); }
+  else h = esc(m.text || JSON.stringify(m));
+  h = h.replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/(^|\s)_([^_\n]+)_/g, '$1<i>$2</i>');
+  return `<div class="b out">${h}${acts.length ? `<div class="acts">${acts.join('')}</div>` : ''}</div>`;
+}
+async function simulator() {
+  const waId = store.get('wc_simid') || '4470000' + Math.floor(Math.random() * 1e5);
+  store.set('wc_simid', waId);
+  $('#app').innerHTML = `<div class="card"><h2>Test your bot</h2><p class="mute">Chat exactly as a customer would on WhatsApp – nothing is sent to WhatsApp (except staff alerts). Test number: <code>${waId}</code> <button class="btn ghost" id="newsim">New customer</button></p>
+    <div class="chat" id="chat"></div><div style="display:flex;gap:8px;margin-top:8px"><input id="msg" placeholder="Type a message… try “hi”"><button class="btn" id="send">Send</button></div></div>`;
+  const chat = $('#chat');
+  const push = (html) => { chat.insertAdjacentHTML('beforeend', html); chat.scrollTop = chat.scrollHeight; };
+  const go = async (body, label) => {
+    push(bubble(label, 'in'));
+    try { const { replies } = await api(T('/simulate'), { method: 'POST', body: { waId, ...body } }); replies.forEach((m) => push(bubble(m, 'out'))); if (!replies.length) push('<div class="mute">(no reply – conversation may be with a human. Type “menu”)</div>'); } catch (e) { toast(e.message); }
+  };
+  chat.onclick = (e) => { const b = e.target.closest('button[data-a]'); if (b) go({ actionId: b.dataset.a }, b.dataset.l); };
+  const sendText = () => { const v = $('#msg').value.trim(); if (!v) return; $('#msg').value = ''; go({ text: v }, v); };
+  $('#send').onclick = sendText; $('#msg').onkeydown = (e) => e.key === 'Enter' && sendText();
+  $('#newsim').onclick = () => { store.set('wc_simid', null); simulator(); };
+}
+
+// ---------- inbox ----------
+async function inbox(sel) {
+  const { conversations } = await api(T('/conversations'));
+  const preview = (c) => { const b = c.last || {}; return esc((b.text || b.caption || b.type || '').slice(0, 60)); };
+  $('#app').innerHTML = `<div class="split"><div class="card" style="max-height:600px;overflow:auto"><h2>Chats</h2>
+    ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
+    </div><div class="card" id="thread"><p class="mute">Select a chat</p></div></div>`;
+  $('#app').querySelectorAll('[data-w]').forEach((el) => (el.onclick = () => inbox(el.dataset.w)));
+  if (!sel) return;
+  const c = conversations.find((x) => x.wa_id === sel);
+  const { messages } = await api(T(`/conversations/${sel}/messages`));
+  $('#thread').innerHTML = `<h2>${esc(c?.name || '')} +${esc(sel)} <button class="btn ghost" id="ho">${c?.human_handover ? '🤖 Give back to bot' : '🙋 Take over'}</button></h2>
+    ${c?.cart?.length ? `<p class="mute">Cart: ${c.cart.map((i) => esc(i.title) + ' ×' + i.quantity).join(', ')}</p>` : ''}
+    <div class="chat" id="tchat">${messages.map((m) => (m.direction === 'in' ? bubble(m.body.text || `[${m.body.raw || m.type}]`, 'in') : bubble(m.body, 'out'))).join('')}</div>
+    <div style="display:flex;gap:8px;margin-top:8px"><input id="rep" placeholder="Reply as staff (takes over from bot)"><button class="btn" id="rs">Send</button></div>`;
+  $('#tchat').scrollTop = 1e9;
+  $('#ho').onclick = async () => { await api(T(`/conversations/${sel}/handover`), { method: 'POST', body: { on: !c?.human_handover } }); inbox(sel); };
+  $('#rs').onclick = async () => { const r = await api(T(`/conversations/${sel}/reply`), { method: 'POST', body: { text: $('#rep').value } }); if (!r.ok) toast(r.error + ' ' + (r.hint || '')); inbox(sel); };
+}
+
+// ---------- orders ----------
+const STATUSES = ['new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivered', 'completed', 'cancelled'];
+async function orders() {
+  const { orders } = await api(T('/orders?limit=100'));
+  const sym = S.tenant.settings.business.currencySymbol || '£';
+  $('#app').innerHTML = `<div class="card"><h2>Orders</h2><div class="tablewrap"><table><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Payment</th><th></th></tr>
+    ${orders.map((o) => `<tr><td><b>${esc(o.store_order_name)}</b><div class="mute">${esc(o.created_at)}</div></td><td>${esc(o.customer_name || '')}<div class="mute">+${esc(o.wa_id)}</div><div class="mute">${esc(o.fulfilment)}${o.address ? ': ' + esc(o.address) : ''}</div></td>
+      <td>${o.items.map((i) => `${esc(i.title)} ×${i.quantity}`).join('<br>')}</td><td>${sym}${Number(o.subtotal).toFixed(2)}</td>
+      <td><select data-s="${o.id}">${STATUSES.map((s) => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
+      <td><select data-p="${o.id}">${['unpaid', 'paid', 'refunded'].map((s) => `<option ${s === o.payment_status ? 'selected' : ''}>${s}</option>`).join('')}</select><div class="mute">${esc(o.payment_method)}</div></td>
+      <td><button class="btn ghost" data-u="${o.id}">Save & notify</button></td></tr>`).join('') || '<tr><td colspan="7" class="mute">No orders yet</td></tr>'}</table></div></div>`;
+  $('#app').querySelectorAll('[data-u]').forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.u;
+    const r = await api(T('/orders/' + id), { method: 'PATCH', body: { status: $(`[data-s="${id}"]`).value, payment_status: $(`[data-p="${id}"]`).value, notify: true } });
+    toast(r.notified === true ? 'Saved & customer notified' : 'Saved (notify: ' + r.notified + ')');
+  }));
+}
+
+// ---------- catalogue (built-in store) ----------
+async function catalogue() {
+  const s = S.tenant.settings;
+  if (s.store.type !== 'manual') {
+    $('#app').innerHTML = `<div class="card"><h2>Catalogue</h2><p>Products come live from your <b>${esc(s.store.type)}</b> store. Manage them there. Switch store type in Settings to use the built-in catalogue.</p></div>`;
+    return;
+  }
+  const m = s.store.manual;
+  $('#app').innerHTML = `<div class="card"><h2>Built-in catalogue</h2><p class="mute">For sellers without Shopify/WooCommerce. One product per line in JSON. Fields: id, title, price, description, image, category, variants [{id,title,price}].</p>
+    <label>Categories (JSON)</label><textarea id="cats" style="min-height:90px">${esc(JSON.stringify(m.categories || [], null, 2))}</textarea>
+    <label>Products (JSON)</label><textarea id="prods" style="min-height:320px;font-family:monospace">${esc(JSON.stringify(m.products || [], null, 2))}</textarea>
+    <p><button class="btn" id="savecat">Save catalogue</button> <button class="btn ghost" id="sample">Load sample products</button></p></div>`;
+  $('#sample').onclick = () => {
+    $('#cats').value = JSON.stringify([{ id: 'tees', title: 'T-shirts' }, { id: 'mugs', title: 'Mugs' }], null, 2);
+    $('#prods').value = JSON.stringify([
+      { id: 'tee-classic', title: 'Classic Tee', price: 15, category: 'tees', description: '100% organic cotton', image: '', variants: [{ id: 'tee-s', title: 'Small', price: 15 }, { id: 'tee-m', title: 'Medium', price: 15 }, { id: 'tee-l', title: 'Large', price: 16 }] },
+      { id: 'mug-white', title: 'White Mug', price: 8.5, category: 'mugs', description: '350ml ceramic, dishwasher safe' },
+    ], null, 2);
+  };
+  $('#savecat').onclick = async () => {
+    try {
+      const categories = JSON.parse($('#cats').value), products = JSON.parse($('#prods').value);
+      // send full arrays (deep-merge replaces arrays)
+      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { store: { manual: { categories, products } } } })).tenant;
+      toast('Catalogue saved');
+    } catch (e) { toast(e.message); }
+  };
+}
+
+// ---------- settings ----------
+const FIELDS = [
+  ['Business', [['business.name', 'Business name'], ['business.currency', 'Currency code (GBP)'], ['business.currencySymbol', 'Currency symbol'], ['business.welcomeMessage', 'Welcome message ({{name}} = first name)', 'textarea'], ['business.supportHours', 'Support hours'], ['business.exampleQuery', 'Example search shown to customers']]],
+  ['WhatsApp Cloud API (Meta)', [['whatsapp.phoneNumberId', 'Phone number ID'], ['whatsapp.wabaId', 'WhatsApp Business Account ID'], ['whatsapp.accessToken', 'Permanent access token (System User)', 'secret'], ['whatsapp.appSecret', 'App secret (verifies webhook signatures)', 'secret'], ['whatsapp.verifyToken', 'Webhook verify token']]],
+  ['Store connection', [['store.type', 'Store type', 'select', ['manual', 'shopify', 'woocommerce', 'custom']], ['store.shopify.domain', 'Shopify domain (yourshop.myshopify.com)'], ['store.shopify.adminToken', 'Shopify Admin API access token (shpat_…)', 'secret'], ['store.woocommerce.url', 'WooCommerce site URL (https://…)'], ['store.woocommerce.consumerKey', 'WooCommerce consumer key (ck_…)', 'secret'], ['store.woocommerce.consumerSecret', 'WooCommerce consumer secret (cs_…)', 'secret'], ['store.custom.baseUrl', 'Custom VPS store API base URL'], ['store.custom.apiKey', 'Custom store API key', 'secret']]],
+  ['AI (Dify)', [['dify.enabled', 'Enable AI replies', 'bool'], ['dify.baseUrl', 'Dify API base URL'], ['dify.apiKey', 'Dify app API key (app-…)', 'secret'], ['dify.mode', 'Mode', 'select', ['assist', 'agent']]]],
+  ['Ordering & payment', [['ordering.paymentMethods', 'Payment methods (comma: payment_link,cod,bank_transfer)', 'csv'], ['ordering.paymentLinkUrl', 'Payment link for built-in catalogue (e.g. Stripe link; {total} {order})'], ['ordering.bankDetails', 'Bank transfer details', 'textarea'], ['ordering.fulfilment', 'Fulfilment (comma: delivery,pickup)', 'csv'], ['ordering.deliveryFee', 'Delivery fee', 'number'], ['ordering.freeDeliveryOver', 'Free delivery over (0 = never)', 'number'], ['ordering.minOrder', 'Minimum order (0 = none)', 'number'], ['ordering.pickupAddress', 'Collection address']]],
+  ['Notifications', [['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Order webhook URL (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number']]],
+];
+const getP = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
+function setP(o, p, v) { const ks = p.split('.'); let c = o; ks.slice(0, -1).forEach((k) => (c = c[k] ||= {})); c[ks.at(-1)] = v; }
+async function settings() {
+  const s = S.tenant.settings;
+  $('#app').innerHTML = FIELDS.map(([title, fields]) => `<div class="card"><h2>${title}</h2><div class="row">${fields.map(([p, l, type, opts]) => {
+    const v = getP(s, p);
+    let input;
+    if (type === 'textarea') input = `<textarea data-f="${p}">${esc(v)}</textarea>`;
+    else if (type === 'select') input = `<select data-f="${p}">${opts.map((o) => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+    else if (type === 'bool') input = `<select data-f="${p}" data-type="bool"><option value="true" ${v ? 'selected' : ''}>Yes</option><option value="false" ${!v ? 'selected' : ''}>No</option></select>`;
+    else input = `<input data-f="${p}" data-type="${type || ''}" ${type === 'secret' ? 'type="password" placeholder="(unchanged)"' : ''} value="${esc(type === 'csv' ? (v || []).join(',') : type === 'secret' ? '' : v)}">`;
+    return `<div><label>${l}</label>${input}</div>`;
+  }).join('')}</div></div>`).join('') + '<p><button class="btn" id="saveset">Save settings</button></p>';
+  $('#saveset').onclick = async () => {
+    const patch = {};
+    $('#app').querySelectorAll('[data-f]').forEach((el) => {
+      const t = el.dataset.type; let v = el.value;
+      if (t === 'secret' && !v) return;
+      if (t === 'csv') v = v.split(',').map((x) => x.trim()).filter(Boolean);
+      if (t === 'number') v = Number(v) || 0;
+      if (t === 'bool') v = v === 'true';
+      setP(patch, el.dataset.f, v);
+    });
+    try { S.tenant = (await api(T('/settings'), { method: 'PATCH', body: patch })).tenant; toast('Settings saved'); } catch (e) { toast(e.message); }
+  };
+}
+
+// ---------- broadcast ----------
+async function broadcast() {
+  const { customers } = await api(T('/customers'));
+  const opted = customers.filter((c) => c.opted_in_marketing).length;
+  $('#app').innerHTML = `<div class="card"><h2>Broadcast offer</h2><p class="mute">WhatsApp only allows marketing via <b>approved templates</b> (create them in Meta Business Manager → WhatsApp Manager → Message templates). Sends to the ${opted} customers who opted in.</p>
+    <div class="row"><div><label>Template name</label><input id="bt" placeholder="weekend_offer"></div><div><label>Language code</label><input id="bl" value="en_GB"></div></div>
+    <label>Body variables (comma separated, optional)</label><input id="bv" placeholder="20%, SALE20">
+    <p><button class="btn" id="bs">Send broadcast</button></p><pre id="br" class="mute"></pre></div>
+    <div class="card"><h2>Customers (${customers.length})</h2><div class="tablewrap"><table><tr><th>Name</th><th>WhatsApp</th><th>Offers</th><th>Last seen</th></tr>${customers.slice(0, 200).map((c) => `<tr><td>${esc(c.name || '')}</td><td>+${esc(c.wa_id)}</td><td>${c.opted_in_marketing ? '✅' : '—'}</td><td>${esc(c.last_seen_at || '')}</td></tr>`).join('')}</table></div></div>`;
+  $('#bs').onclick = async () => {
+    const vars = $('#bv').value.split(',').map((x) => x.trim()).filter(Boolean);
+    const components = vars.length ? [{ type: 'body', parameters: vars.map((text) => ({ type: 'text', text })) }] : undefined;
+    if (!confirm(`Send template "${$('#bt').value}" to ${opted} customers?`)) return;
+    try { $('#br').textContent = JSON.stringify(await api(T('/broadcasts'), { method: 'POST', body: { template: $('#bt').value, language: $('#bl').value, components } }), null, 2); } catch (e) { $('#br').textContent = e.message; }
+  };
+}
+
+S.key ? boot().catch(loginView) : loginView();
+</script>
+</body>
+</html>
