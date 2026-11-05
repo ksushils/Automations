@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { getDb, redactSettings, json } from '../db.js';
 import { safeEqual, sha256 } from '../crypto.js';
 import { onboardingStatus, connectShopStripe } from '../onboarding.js';
+import { sendEmail, alertEmails, emailConfigured } from '../email.js';
 import { setupStatus, savePlatformSetup, testAi, autoSetupStripe } from '../platformSetup.js';
 import {
   PLANS, createTenant, getTenant, listTenants, updateTenantSettings, updateTenantMeta, rotateKeys, deleteTenant,
@@ -143,6 +144,10 @@ export function adminRouter() {
   r.get('/system/setup', requireSuper, (req, res) => res.json(setupStatus()));
   r.patch('/system/setup', requireSuper, (req, res) => res.json(savePlatformSetup(req.body || {})));
   r.post('/system/setup/test-ai', requireSuper, wrap(async (req, res) => res.json(await testAi())));
+  r.post('/system/setup/test-email', requireSuper, wrap(async (req, res) => {
+    const to = String(req.body?.to || config.supportEmail || '').trim();
+    res.json({ to, ...(await sendEmail({ to, subject: `Test email from ${config.productName}`, text: 'It works. Shops will get their order alerts like this.', html: '<p>✅ It works. Shops will get their order alerts like this.</p>' })) });
+  }));
   r.post('/system/setup/stripe-auto', requireSuper, wrap(async (req, res) => {
     try { res.json({ ok: true, ...(await autoSetupStripe()) }); } catch (e) { res.status(400).json({ error: e.message }); }
   }));
@@ -178,6 +183,11 @@ export function adminRouter() {
 
   // ----- the shop owner's step-by-step guide -----
   r.get('/tenants/:tenantId/onboarding', requireTenant, requireOwner, (req, res) => res.json(onboardingStatus(req.tenant)));
+  r.get('/tenants/:tenantId/alert-emails', requireTenant, requireOwner, (req, res) => res.json({ emails: alertEmails(req.tenant), enabled: emailConfigured() }));
+  r.post('/tenants/:tenantId/alert-emails/test', requireTenant, requireOwner, wrap(async (req, res) => {
+    const { emailShop } = await import('../email.js');
+    res.json(await emailShop(req.tenant, 'Test: your order alerts work', '✅ This is how new orders will reach you.\nYou can change who gets these in Settings → Notifications.'));
+  }));
   r.post('/tenants/:tenantId/payments/stripe-connect', requireTenant, requireOwner, wrap(async (req, res) => {
     try { res.json(await connectShopStripe(req.tenant, req.body?.secretKey)); } catch (e) { res.status(400).json({ error: e.message }); }
   }));

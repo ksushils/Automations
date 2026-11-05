@@ -3,6 +3,7 @@ import { bumpUsage, updateTenantSettings } from '../tenants.js';
 import { money } from './cart.js';
 import { quote } from './pricing.js';
 import { config } from '../config.js';
+import { emailShop } from '../email.js';
 import { randomToken } from '../crypto.js';
 import { createCheckoutSession } from '../payments/stripe.js';
 import { toPlainText, notify } from '../whatsapp/cloudApi.js';
@@ -142,13 +143,16 @@ export async function placeOrder({ tenant, store, conv, customer, fulfilment, pa
 export async function notifyStaff(tenant, order, send, { lowStock = [], text: customText, event = 'order.created' } = {}) {
   const S = tenant.settings;
   const sym = S.business.currencySymbol || '£';
-  const text = customText || `🛒 *New WhatsApp order ${order.store_order_name}*\nCustomer: ${order.customer_name || ''} (+${order.wa_id})\n${order.items.map((i) => `• ${i.title} × ${i.quantity}`).join('\n')}${order.discount ? `\nDiscount ${order.promo_code}: -${money(order.discount, sym)}` : ''}\nTotal: ${money(order.subtotal, sym)}\n${order.fulfilment}${order.address ? `: ${order.address}` : ''}${order.slot ? `\nSlot: ${order.slot}` : ''}${order.notes ? `\nNote: ${order.notes}` : ''}\nPayment: ${paymentLabel(order.payment_method)}${lowStock.length ? `\n\n⚠️ Low stock: ${lowStock.map((l) => `${l.title} (${l.stock} left)`).join(', ')}` : ''}`;
+  const web = String(order.wa_id || '').startsWith('web:');
+  const text = customText || `🛒 *New ${web ? 'website chat' : 'WhatsApp'} order ${order.store_order_name}*\nCustomer: ${order.customer_name || ''}${web ? '' : ` (+${order.wa_id})`}\n${order.items.map((i) => `• ${i.title} × ${i.quantity}`).join('\n')}${order.discount ? `\nDiscount ${order.promo_code}: -${money(order.discount, sym)}` : ''}\nTotal: ${money(order.subtotal, sym)}\n${order.fulfilment}${order.address ? `: ${order.address}` : ''}${order.slot ? `\nSlot: ${order.slot}` : ''}${order.notes ? `\nNote: ${order.notes}` : ''}\nPayment: ${paymentLabel(order.payment_method)}${lowStock.length ? `\n\n⚠️ Low stock: ${lowStock.map((l) => `${l.title} (${l.stock} left)`).join(', ')}` : ''}`;
   const jobs = [];
   const staffTpl = S.notifications?.templates?.staffAlert;
   for (const staff of S.notifications?.staffWaIds || []) {
     const to = String(staff).replace(/\D/g, '');
     if (send && to !== order.wa_id) jobs.push(notify(tenant, to, { type: 'text', text }, staffTpl ? { name: staffTpl, params: [text.replace(/\*/g, '').replace(/\n+/g, ' · ').slice(0, 900)] } : null, send).catch((e) => console.error('[notify staff]', e.message)));
   }
+  const subject = event === 'order.paid' ? `Paid: order ${order.store_order_name} (${money(order.subtotal, sym)})` : `New order ${order.store_order_name}: ${money(order.subtotal, sym)}`;
+  jobs.push(emailShop(tenant, subject, text, { button: 'See the order' }).catch((e) => console.error('[notify email]', e.message)));
   if (S.notifications?.webhookUrl) {
     jobs.push(
       fetch(S.notifications.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, tenant: tenant.id, order }), signal: AbortSignal.timeout(10000) }).catch((e) => console.error('[notify webhook]', e.message)),

@@ -28,7 +28,7 @@ test('platform setup: saved in the dashboard, encrypted, secrets masked, applied
   let r = await fetch(`${base}/api/system/setup`, { headers: { Authorization: 'Bearer wrong' } });
   assert.equal(r.status, 401);
   let st = await (await fetch(`${base}/api/system/setup`, { headers: SUPER })).json();
-  assert.equal(st.total, 4);
+  assert.equal(st.total, 5);
   assert.ok(st.values.metaWebhookVerifyToken, 'a verify token is generated');
   st = await (await fetch(`${base}/api/system/setup`, { method: 'PATCH', headers: SUPER, body: JSON.stringify({ aiApiKey: 'sk-or-v1-abcdefghijklmnop1234', legalCompanyName: 'Karat IT Ltd', supportEmail: 'help@example.com', bogus: 'x' }) })).json();
   assert.equal(st.steps.ai, true);

@@ -152,6 +152,7 @@ const SETUP_STEPS = [
   ['payments', '💳', 'Payments'],
   ['whatsapp', '📱', 'WhatsApp'],
   ['business', '🏢', 'Your business'],
+  ['email', '📧', 'Emails'],
 ];
 const copyBox = (label, value) => `<label>${label}</label><div style="display:flex;gap:6px"><input readonly value="${esc(value)}"><button class="btn ghost" data-copy="${esc(value)}">Copy</button></div>`;
 const ext = (href, text) => `<a href="${esc(href)}" target="_blank" rel="noopener">${text} ↗</a>`;
@@ -209,6 +210,13 @@ async function setup() {
     ${field('legalAddress', 'Registered address', v.legalAddress)}${field('legalContactEmail', 'Privacy contact email', v.legalContactEmail, { type: 'email' })}
     <details style="margin-top:8px"><summary class="mute">Optional: get an alert in Slack or Discord when something breaks</summary>${field('alertWebhookUrl', 'Slack / Discord webhook URL', v.alertWebhookUrl, { placeholder: 'https://hooks.slack.com/services/…' })}</details>
     <p><button class="btn" id="ssave">Save</button></p><div id="sres"></div>${nav()}</div>`;
+  if (i === 4) body = `<div class="card"><h2>📧 Step 5: Order alert emails</h2>
+    <p>Shops get an email for every new order, paid order, and when a customer asks for a person. This matters most before they connect WhatsApp, because email is the only way they hear about website-chat orders. We send it through <b>Resend</b>: free for up to 3,000 emails a month.</p>
+    ${stepNo(1, `${ext('https://resend.com/signup', 'Create a Resend account')}.`)}
+    ${stepNo(2, `Go to ${ext('https://resend.com/domains', 'Domains')} → <b>Add domain</b> → type <code>${esc(u.domain.split('.').slice(-2).join('.'))}</code>. Resend shows you 3 or 4 DNS records: add them where you manage that domain's DNS, the same place you added the <code>wa</code> record. Wait until it says <b>Verified</b> (usually a few minutes).`)}
+    ${stepNo(3, `Go to ${ext('https://resend.com/api-keys', 'API keys')} → <b>Create API key</b> (Sending access) and paste it here:${field('resendApiKey', 'Resend API key (starts with re_)', v.resendApiKey, { secret: true })}`)}
+    ${stepNo(4, `Choose the sender. It must use the domain you verified:${field('emailFrom', 'Send emails from', v.emailFrom, { placeholder: `${v.productName || 'Orders'} <orders@${u.domain.split('.').slice(-2).join('.')}>` })}`)}
+    <p><button class="btn" id="ssave">Save and send me a test</button></p><div id="sres"></div>${nav()}</div>`;
   if (i >= SETUP_STEPS.length) body = `<div class="card"><h2>🎉 ${st.done === st.total ? "You're all set" : 'Nearly there'}</h2>
     ${SETUP_STEPS.map(([k, , label], n) => `<div style="padding:6px 0">${st.steps[k] ? '✅' : '⬜'} ${label} ${st.steps[k] ? '' : `<a href="#" data-step="${n}">finish this</a>`}</div>`).join('')}
     <h3>What to do next</h3>
@@ -233,6 +241,12 @@ async function setup() {
     try {
       await save();
       if (i === 0) { if (await testAi()) setTimeout(() => { S.setupStep = 1; setup(); }, 1500); return; }
+      if (i === 4) {
+        res('<p class="mute">Sending a test email…</p>');
+        const t = await api('/system/setup/test-email', { method: 'POST', body: {} });
+        res(t.ok ? `<p>✅ Sent to ${esc(t.to)}. Check your inbox (and spam, the first time).</p>` : `<p class="pill warn">⚠️ ${esc(t.error)}</p><p class="mute">${t.to ? 'Check the domain shows Verified in Resend, and that the sender uses that domain.' : 'Add your support email in step 4 first, so we know where to send the test.'}</p>`);
+        return;
+      }
       toast('Saved'); S.setupStep = i + 1; setup();
     } catch (e) { res(`<p class="pill warn">⚠️ ${esc(e.message)}</p>`); }
   }));
@@ -543,7 +557,7 @@ const FIELDS = [
   ['Promo codes & delivery zones', [['ordering.promoCodes', 'Promo codes (JSON) – [{"code":"WELCOME10","type":"percent|fixed|free_delivery","value":10,"minSpend":0,"expires":"2026-12-31","maxUses":0,"oncePerCustomer":true}]', 'json'], ['ordering.deliveryZones', 'Delivery zones (JSON, empty = deliver anywhere) – [{"name":"Central London","postcodes":["SW1","W1","EC"],"fee":3.5,"minOrder":15,"freeOver":50}]', 'json']]],
   ['Delivery / collection time slots', [['ordering.slots.enabled', 'Ask customers to pick a time slot', 'bool'], ['ordering.slots.times', 'Time windows (comma, e.g. 10:00-12:00,14:00-16:00)', 'csv'], ['ordering.slots.days', 'Days ahead to offer', 'number'], ['ordering.slots.leadHours', 'Minimum notice (hours)', 'number'], ['ordering.slots.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum']]],
   ['Card payments (Stripe – built-in catalogue & custom stores)', [['payments.stripe.secretKey', 'Stripe secret key (sk_live_… / rk_live_…)', 'secret'], ['payments.stripe.webhookSecret', 'Stripe webhook signing secret (whsec_…)', 'secret']]],
-  ['Notifications', [['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Order webhook URL (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number'], ['notifications.defaultCountryCode', 'Default country code for local numbers (44 = UK)']]],
+  ['Notifications', [['notifications.alertEmails', 'Email order alerts to (comma; empty = your sign-up email)', 'csv'], ['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Order webhook URL (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number'], ['notifications.defaultCountryCode', 'Default country code for local numbers (44 = UK)']]],
   ['Messages outside the 24-hour window (approved templates)', [['notifications.templates.orderUpdate', 'Order update template (vars: name, order, status) – e.g. order_update'], ['notifications.templates.paymentReminder', 'Payment reminder template (vars: name, order, total, link)'], ['notifications.templates.staffAlert', 'Staff alert template (var: alert text) – e.g. staff_alert']]],
   ['Website order notifications (Shopify / WooCommerce)', [['notifications.storeTemplates.orderConfirmation.enabled', 'Send order confirmation on WhatsApp', 'bool'], ['notifications.storeTemplates.orderConfirmation.template', 'Confirmation template (vars: name, order, shop, total)'], ['notifications.storeTemplates.shipping.enabled', 'Send shipping update', 'bool'], ['notifications.storeTemplates.shipping.template', 'Shipping template (vars: name, order, tracking link)'], ['notifications.storeTemplates.abandonedCheckout.enabled', 'Recover abandoned Shopify checkouts', 'bool'], ['notifications.storeTemplates.abandonedCheckout.template', 'Abandoned checkout template (vars: name, shop, checkout link)'], ['notifications.storeTemplates.abandonedCheckout.afterMinutes', 'Send after minutes', 'number'], ['notifications.storeTemplates.abandonedCheckout.requireMarketingConsent', 'Only customers who accepted marketing', 'bool'], ['store.shopify.webhookSecret', 'Shopify webhook signing secret (optional)', 'secret'], ['store.woocommerce.webhookSecret', 'WooCommerce webhook secret (optional)', 'secret']]],
 ];
@@ -771,7 +785,10 @@ async function shopGuide(t) {
         <p class="mute">${skip}</p>`;
       }
       case 'orders': {
-        if (d.ownCheckout) return `<p>✅ Nothing to do here. Customers pay and choose delivery on <b>your ${d.storeType === 'woocommerce' ? 'WooCommerce' : 'Shopify'} checkout</b>, as they do now. The assistant fills their basket and sends them there.</p>`;
+        const alertsBox = `<h3>Who hears about new orders</h3>${d.emailOn
+          ? `<div class="mute">We email every new order, and every customer who asks for a person, to:</div><div style="display:flex;gap:6px;margin-top:6px"><input id="g-aemail" value="${esc((d.alertEmails || []).join(', '))}" placeholder="you@yourshop.co.uk"><button class="btn ghost" id="g-aesave">Save</button><button class="btn ghost" id="g-aetest">Send a test</button></div><div class="mute">Several people? Separate the emails with commas.</div>`
+          : '<div class="mute">Email alerts aren\'t switched on by your provider yet. Until then, check the <a href="#" data-gtab="orders">Orders</a> tab for new orders. Once WhatsApp is connected, you can also get alerts on your phone.</div>'}<div id="g-aeres" class="mute"></div>`;
+        if (d.ownCheckout) return `<p>✅ Payment and delivery: nothing to do. Customers pay and choose delivery on <b>your ${d.storeType === 'woocommerce' ? 'WooCommerce' : 'Shopify'} checkout</b>, as they do now. The assistant fills their basket and sends them there.</p>${alertsBox}`;
         const pm = new Set(d.paymentMethods), ff = new Set(d.fulfilment);
         const chk = (id, on, label) => `<label style="display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px;margin:10px 0 4px"><input type="checkbox" id="${id}" style="width:auto" ${on ? 'checked' : ''}> ${label}</label>`;
         return `<p>Choose how customers pay you and how they get their order. Tick everything you offer.</p>
@@ -789,7 +806,7 @@ async function shopGuide(t) {
         ${chk('g-fpick', ff.has('pickup'), '🏪 Collection')}
         <div style="padding-left:26px"><label>Collection address</label><input id="g-paddr" value="${esc(d.pickupAddress)}" placeholder="12 High Street, Leeds LS1 1AA"></div>
         <p class="mute">Delivery areas, time slots and promo codes are in <a href="#" data-gtab="settings">Settings</a> if you need them.</p>
-        <p><button class="btn" id="g-ordsave">Save</button></p><div id="g-res"></div>`;
+        <p><button class="btn" id="g-ordsave">Save</button></p><div id="g-res"></div>${alertsBox}`;
       }
       case 'whatsapp': return `<p>Now let customers order inside WhatsApp. Before you start, have these ready:</p>
         <div class="mute">• A <b>phone number</b> that can get a text or call. You can keep using the <b>WhatsApp Business app</b> on it, or use a new number.<br>
@@ -858,6 +875,17 @@ async function shopGuide(t) {
     res('Connecting to Stripe…');
     const r = await api(T('/payments/stripe-connect'), { method: 'POST', body: { secretKey: $('#g-sk').value } });
     toast(r.mode === 'live' ? 'Stripe connected' : 'Stripe connected in TEST mode'); reload(true);
+  });
+  on('g-aesave', async () => {
+    const emails = $('#g-aemail').value.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+    if (emails.some((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e))) { $('#g-aeres').textContent = '⚠️ One of those emails doesn\'t look right.'; return; }
+    await patch({ notifications: { alertEmails: emails } });
+    $('#g-aeres').textContent = '✅ Saved';
+  });
+  on('g-aetest', async () => {
+    $('#g-aeres').textContent = 'Sending…';
+    const r = await api(T('/alert-emails/test'), { method: 'POST' });
+    $('#g-aeres').textContent = r.ok ? '✅ Sent. Check your inbox (and spam, the first time).' : '⚠️ ' + (r.error || 'No email address saved yet.');
   });
   on('g-ordsave', async () => {
     const pm = [], ff = [];

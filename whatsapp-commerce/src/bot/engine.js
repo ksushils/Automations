@@ -11,6 +11,7 @@ import { notify } from '../whatsapp/cloudApi.js';
 import { getDb } from '../db.js';
 import { config as appConfig } from '../config.js';
 import { alert } from '../ops.js';
+import { emailShop } from '../email.js';
 import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 import { recordConsent, defaultWording } from '../consent.js';
 import { directConfigured, directTurn } from '../ai/direct.js';
@@ -379,6 +380,8 @@ function handover(ctx, text) {
   ctx.reply({ type: 'text', text: text || `🙋 A member of our team will reply here shortly${ctx.S.business.supportHours ? ` (${ctx.S.business.supportHours})` : ''}. Your cart is saved.` });
   const staff = ctx.S.notifications?.staffWaIds || [];
   for (const s of staff) staffAlert(ctx.tenant, String(s).replace(/\D/g, ''), `🙋 Customer +${ctx.conv.waId} (${ctx.customer.name || 'unknown'}) asked to talk to a person. Reply from the dashboard.`, ctx.rawSend);
+  const who = String(ctx.conv.waId).startsWith('web:') ? 'A website visitor' : `Customer +${ctx.conv.waId}`;
+  emailShop(ctx.tenant, 'A customer wants to talk to a person', `🙋 ${who} (${ctx.customer.name || 'name unknown'}) asked to talk to a person.\nReply from the Inbox in your dashboard.`, { button: 'Open the Inbox' }).catch(() => {});
 }
 
 // ---------- routing ----------
@@ -625,6 +628,7 @@ export async function handleInbound(tenant, event, send) {
       if (unpaid) getDb().prepare("UPDATE orders SET notes = TRIM(COALESCE(notes, '') || ' [payment proof received ' || datetime('now') || ']'), updated_at = datetime('now') WHERE id = ?").run(unpaid.id);
       ctx.reply({ type: 'text', text: unpaid ? `Thanks! 🙏 We've received your payment proof for order *${unpaid.store_order_name}* and will confirm shortly.` : 'Thanks! 🙏 A member of our team will check this shortly.' });
       for (const s of tenant.settings.notifications?.staffWaIds || []) staffAlert(tenant, String(s).replace(/\D/g, ''), `📎 Customer +${conv.waId} sent a ${event.type}${unpaid ? ` – payment proof for ${unpaid.store_order_name}` : ''}. View it in the dashboard inbox.`, send);
+      if (unpaid) emailShop(tenant, `Payment proof for order ${unpaid.store_order_name}`, `📎 Customer +${conv.waId} sent a ${event.type} as payment proof for order ${unpaid.store_order_name}.\nCheck it in the Inbox, then mark the order paid.`, { button: 'Open the Inbox' }).catch(() => {});
     } else if (event.kind === 'text' && event.text) {
       await handleText(ctx, event.text);
     } else {
@@ -694,6 +698,7 @@ function ownerNotice(tenant, kind, send, { monthly = false } = {}) {
   getDb().prepare('INSERT OR IGNORE INTO kv (key, value) VALUES (?, ?)').run(key, '1');
   const text = kind === 'ai80' ? `ℹ️ ${tenant.settings.business.name}: 80% of this month's AI budget is used. When it runs out the bot keeps answering with keyword search. Buy a top-up or upgrade on the Billing tab.` : kind === 'ai' ? `⚠️ ${tenant.settings.business.name}: this month's AI budget is used up – the bot now answers with keyword search and product search only (customers still get replies). Buy a top-up or upgrade on the Billing tab.` : `⚠️ ${tenant.settings.business.name}: this month's message limit is reached – new chats are handed to your team instead of the bot. Upgrade on the Billing tab.`;
   for (const s of tenant.settings.notifications?.staffWaIds || []) staffAlert(tenant, String(s).replace(/\D/g, ''), text, send);
+  emailShop(tenant, kind === 'ai80' ? 'Your AI budget is 80% used' : kind === 'ai' ? 'Your AI budget is used up' : 'Your monthly message limit is reached', text, { button: 'Open Billing' }).catch(() => {});
   alert(`Plan limit (${kind}) reached for ${tenant.id}`, { key: `limit:${tenant.id}:${kind}` });
 }
 

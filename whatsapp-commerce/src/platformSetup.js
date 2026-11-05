@@ -30,6 +30,8 @@ export const SETUP_FIELDS = {
   legalAddress: { apply: (v) => { process.env.LEGAL_ADDRESS = v; } },
   legalContactEmail: { apply: (v) => { process.env.LEGAL_CONTACT_EMAIL = v; } },
   alertWebhookUrl: { apply: (v) => { config.alertWebhookUrl = v; } },
+  resendApiKey: { secret: true, apply: (v) => { config.resendApiKey = v; } },
+  emailFrom: { apply: (v) => { config.emailFrom = v; } },
 };
 
 // What .env had at start-up, so clearing a dashboard value restores it.
@@ -42,6 +44,7 @@ const envValue = () => ({
   legalCompanyName: process.env.LEGAL_COMPANY_NAME || '', legalCompanyNumber: process.env.LEGAL_COMPANY_NUMBER || '',
   legalAddress: process.env.LEGAL_ADDRESS || '', legalContactEmail: process.env.LEGAL_CONTACT_EMAIL || '',
   alertWebhookUrl: config.alertWebhookUrl,
+  resendApiKey: config.resendApiKey, emailFrom: config.emailFrom,
 });
 let fromEnv = null;
 
@@ -107,6 +110,7 @@ export function setupStatus() {
     payments: !!(config.platformStripeSecret && config.platformStripeWebhookSecret && prices),
     whatsapp: !!(config.metaAppId && config.metaAppSecret && config.metaConfigId),
     business: !!(process.env.LEGAL_COMPANY_NAME && config.supportEmail),
+    email: !!(config.resendApiKey && config.emailFrom),
   };
   return {
     values: cur,
