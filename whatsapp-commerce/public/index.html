@@ -749,15 +749,47 @@ async function shopGuide(t) {
         <p><button class="btn" data-gtab="simulator">Open the test chat</button></p><p class="mute">Wrong answer? Fix it in step ${num('assistant')} and try again.</p>`;
       case 'website': {
         const code = `<script src="${location.origin}/chat-widget/${t.id}.js" async><\/script>`;
-        return `<p>Put your assistant on your website so customers can ask questions and order today. WhatsApp isn't needed for this.</p>
-        <label>Copy this code</label><div style="display:flex;gap:6px"><input readonly value="${esc(code)}"><button class="btn ghost" data-gcopy="${esc(code)}">Copy</button></div>
-        <p><b>Where to paste it:</b></p>
-        <div class="mute">• <b>Shopify:</b> Online Store → Themes → ⋯ → Edit code → <code>theme.liquid</code>, paste just above <code>&lt;/body&gt;</code>, then Save.<br>
-        • <b>WordPress / WooCommerce:</b> install the free “WPCode” plugin → Code Snippets → Header &amp; Footer → paste in <b>Footer</b>.<br>
-        • <b>Wix / Squarespace:</b> Settings → Custom code → add to all pages, at the end of the body.</div>
-        <p style="margin-top:10px"><b>No website?</b> Share your ready-made shop page instead (Instagram bio, Google profile, QR codes):</p>
+        const where = {
+          shopify: '<b>Shopify:</b> Online Store → Themes → ⋯ → Edit code → open <code>theme.liquid</code> → paste just above <code>&lt;/body&gt;</code> → Save.',
+          wordpress: '<b>WordPress / WooCommerce:</b> Plugins → Add new → install the free <b>WPCode</b> plugin → Code Snippets → Header &amp; Footer → paste in <b>Footer</b> → Save.',
+          wix: '<b>Wix:</b> Settings → Custom code → Add code → paste → All pages, Body end → Apply.',
+          squarespace: '<b>Squarespace:</b> Settings → Advanced → Code injection → paste in <b>Footer</b> → Save.',
+          other: '<b>Any other website:</b> paste it just above <code>&lt;/body&gt;</code> on every page, or in the site footer.',
+        };
+        const first = /shopify/.test(d.storeType || s.store.type) ? 'shopify' : s.store.type === 'woocommerce' ? 'wordpress' : null;
+        const order = [first, ...Object.keys(where).filter((k) => k !== first)].filter(Boolean);
+        const mail = `mailto:?subject=${encodeURIComponent('Please add our chat to the website')}&body=${encodeURIComponent(`Hi,\n\nPlease paste this code on every page of our website, just above </body> (or in the footer):\n\n${code}\n\nIt adds a small chat button in the bottom corner. Thank you!`)}`;
+        if (d.seenOn) return `<p>✅ We can see your chat on <b>${esc(d.seenOn)}</b>. Customers can now ask questions and order there.</p>
+          <p class="mute">Open your website and try the chat button in the corner. Change its colour and wording in <a href="#" data-gtab="grow">Grow</a>.</p>`;
+        return `<p>Add a chat button to your website, so customers can ask questions and order today. WhatsApp isn't needed for this. It's one copy and paste, done once.</p>
+        ${stepNo(1, `<b>Copy this code</b><div style="display:flex;gap:6px;margin-top:6px"><input readonly value="${esc(code)}"><button class="btn" data-gcopy="${esc(code)}">Copy</button></div>`)}
+        ${stepNo(2, `<b>Paste it into your website</b><div class="mute" style="margin-top:4px">${order.map((k) => '• ' + where[k]).join('<br>')}</div>
+          <p class="mute">Someone else looks after your website? <a class="btn ghost" href="${esc(mail)}">✉️ Email these steps to them</a></p>`)}
+        ${stepNo(3, `<b>Check it worked:</b> open your website once, then press the button below. We can tell when the chat shows on your site.<p><button class="btn ghost" id="g-recheck">Check now</button> <span id="g-res" class="mute"></span></p>`)}
+        <p style="margin-top:10px"><b>No website?</b> Use your ready-made shop page instead. Put it in your Instagram bio, Google profile or on a QR code:</p>
         <div style="display:flex;gap:6px"><input readonly value="${esc(t.urls.storefront)}"><button class="btn ghost" data-gcopy="${esc(t.urls.storefront)}">Copy</button><a class="btn ghost" href="${esc(t.urls.storefront)}?chat=1" target="_blank" rel="noopener">Open</a></div>
-        <p class="mute">This step ticks itself once the first customer chats on your website. ${skip}</p>`;
+        <p class="mute">${skip}</p>`;
+      }
+      case 'orders': {
+        if (d.ownCheckout) return `<p>✅ Nothing to do here. Customers pay and choose delivery on <b>your ${d.storeType === 'woocommerce' ? 'WooCommerce' : 'Shopify'} checkout</b>, as they do now. The assistant fills their basket and sends them there.</p>`;
+        const pm = new Set(d.paymentMethods), ff = new Set(d.fulfilment);
+        const chk = (id, on, label) => `<label style="display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px;margin:10px 0 4px"><input type="checkbox" id="${id}" style="width:auto" ${on ? 'checked' : ''}> ${label}</label>`;
+        return `<p>Choose how customers pay you and how they get their order. Tick everything you offer.</p>
+        <h3 style="margin-top:8px">How customers pay</h3>
+        ${chk('g-pcard', pm.has('payment_link') && (d.stripe || d.paymentLinkUrl), '💳 Card, online')}
+        <div style="padding-left:26px"><div class="mute">Best: connect your own Stripe account. The money goes straight to you, and orders are marked paid automatically. Get your secret key from ${ext('https://dashboard.stripe.com/apikeys', 'Stripe → Developers → API keys')}.</div>
+          ${d.stripe ? '<p>✅ Stripe connected.</p>' : `<div style="display:flex;gap:6px;margin-top:6px"><input id="g-sk" type="password" placeholder="sk_live_…"><button class="btn ghost" id="g-skgo">Connect Stripe</button></div>`}
+          <details style="margin-top:6px"><summary class="mute">No Stripe? Use a payment link instead (PayPal.me, SumUp…)</summary><input id="g-plink" placeholder="https://paypal.me/yourshop/{total}" value="${esc(d.paymentLinkUrl)}"><div class="mute">{total} and {order} are filled in for you. You mark these orders as paid yourself.</div></details></div>
+        ${chk('g-pbank', pm.has('bank_transfer'), '🏦 Bank transfer')}
+        <div style="padding-left:26px"><textarea id="g-bank" placeholder="Account name, sort code, account number">${esc(d.bankDetails)}</textarea></div>
+        ${chk('g-pcod', pm.has('cod'), '💷 Cash or card when they receive or collect it')}
+        <h3>How they get it</h3>
+        ${chk('g-fdel', ff.has('delivery'), '🚚 Delivery')}
+        <div class="row" style="padding-left:26px"><div><label>Delivery fee</label><input id="g-dfee" type="number" min="0" step="0.01" value="${esc(d.deliveryFee)}"></div><div><label>Free delivery over (0 = never)</label><input id="g-dfree" type="number" min="0" step="0.01" value="${esc(d.freeDeliveryOver)}"></div></div>
+        ${chk('g-fpick', ff.has('pickup'), '🏪 Collection')}
+        <div style="padding-left:26px"><label>Collection address</label><input id="g-paddr" value="${esc(d.pickupAddress)}" placeholder="12 High Street, Leeds LS1 1AA"></div>
+        <p class="mute">Delivery areas, time slots and promo codes are in <a href="#" data-gtab="settings">Settings</a> if you need them.</p>
+        <p><button class="btn" id="g-ordsave">Save</button></p><div id="g-res"></div>`;
       }
       case 'whatsapp': return `<p>Now let customers order inside WhatsApp. Before you start, have these ready:</p>
         <div class="mute">• A <b>phone number</b> that can get a text or call. You can keep using the <b>WhatsApp Business app</b> on it, or use a new number.<br>
@@ -791,6 +823,7 @@ async function shopGuide(t) {
       }).join('');
     }).join('')}</div>`;
 
+  const d0 = (k) => g.steps.find((x) => x.key === k)?.data || {};
   const reload = async (keepOpen) => { S.tenant = (await api(T(''))).tenant; S.guideOpen = keepOpen ? open : null; shopGuide(S.tenant); };
   const res = (h) => { if ($('#g-res')) $('#g-res').innerHTML = h; };
   const patch = async (body) => (S.tenant = (await api(T('/settings?sync=0'), { method: 'PATCH', body })).tenant);
@@ -819,6 +852,25 @@ async function shopGuide(t) {
     const r = await api(T('/test/store'), { method: 'POST', body: {} });
     if (!r.ok) return res('⚠️ ' + esc(r.error) + ' Check the address and both keys.');
     res('✅ Connected to WooCommerce'); setTimeout(() => reload(false), 1500);
+  });
+  on('g-recheck', async () => { res('Checking…'); const g2 = await api(T('/onboarding')); const w = g2.steps.find((x) => x.key === 'website'); if (w.data.seenOn || w.done) return reload(true); res('Not yet. Open your website in a new tab after saving the change there, then press Check now again.'); });
+  on('g-skgo', async () => {
+    res('Connecting to Stripe…');
+    const r = await api(T('/payments/stripe-connect'), { method: 'POST', body: { secretKey: $('#g-sk').value } });
+    toast(r.mode === 'live' ? 'Stripe connected' : 'Stripe connected in TEST mode'); reload(true);
+  });
+  on('g-ordsave', async () => {
+    const pm = [], ff = [];
+    const plink = ($('#g-plink')?.value || '').trim();
+    if ($('#g-pcard').checked) { if (!d0('orders').stripe && !plink) return res('⚠️ To take card payments, connect Stripe or add a payment link. Or untick Card.'); pm.push('payment_link'); }
+    if ($('#g-pbank').checked) { if (!$('#g-bank').value.trim()) return res('⚠️ Add your bank details, or untick Bank transfer.'); pm.push('bank_transfer'); }
+    if ($('#g-pcod').checked) pm.push('cod');
+    if ($('#g-fdel').checked) ff.push('delivery');
+    if ($('#g-fpick').checked) { if (!$('#g-paddr').value.trim()) return res('⚠️ Add your collection address, or untick Collection.'); ff.push('pickup'); }
+    if (!pm.length) return res('⚠️ Tick at least one way to pay.');
+    if (!ff.length) return res('⚠️ Tick delivery, collection or both.');
+    await patch({ ordering: { paymentMethods: pm, fulfilment: ff, deliveryFee: Number($('#g-dfee').value) || 0, freeDeliveryOver: Number($('#g-dfree').value) || 0, pickupAddress: $('#g-paddr').value.trim(), bankDetails: $('#g-bank').value.trim(), paymentLinkUrl: plink }, onboarding: { ordersSet: true } });
+    toast('Saved'); reload(false);
   });
   on('g-aisave', async () => { await patch({ ai: { about: $('#g-about').value, faq: $('#g-faq').value, tone: $('#g-tone').value } }); toast('Saved'); reload(false); });
   on('g-tpl', async () => {

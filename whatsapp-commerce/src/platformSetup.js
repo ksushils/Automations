@@ -155,11 +155,11 @@ function form(obj, prefix = '', out = new URLSearchParams()) {
   return out;
 }
 
-async function stripe(method, path, body, query) {
+export async function stripe(method, path, body, query, key = config.platformStripeSecret) {
   const qs = query ? '?' + form(query).toString() : '';
   const res = await fetch(`https://api.stripe.com/v1${path}${qs}`, {
     method,
-    headers: { Authorization: `Bearer ${config.platformStripeSecret}`, ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
+    headers: { Authorization: `Bearer ${key}`, ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
     body: body ? form(body) : undefined,
     signal: AbortSignal.timeout(20000),
   });

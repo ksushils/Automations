@@ -66,6 +66,7 @@ export function webchatRouter() {
     const t = getTenant(req.params.tenantId);
     res.type('application/javascript').set('Cache-Control', 'public, max-age=300');
     if (!t?.active || t.settings.webchat?.enabled === false) return res.send('/* chat widget disabled */');
+    noteWidgetSeen(t.id, req.get('referer'));
     const W = t.settings.webchat || {};
     const cfg = {
       api: `${config.publicUrl}/chat/${t.id}`,
@@ -129,3 +130,15 @@ function toggle(){open=!open;P.classList.toggle('on',open);if(open){I.focus();if
 w.querySelector('.wc-b').onclick=toggle;w.querySelector('.wc-x').onclick=toggle;
 (d.body||d.documentElement).appendChild(w);
 })();`;
+
+/** Remember which website loaded the chat widget, so the shop's guide can say "we can see it on yourshop.co.uk". */
+export function noteWidgetSeen(tenantId, referer) {
+  let origin;
+  try { origin = new URL(referer).origin; } catch { return; }
+  if (!/^https?:/.test(origin) || origin === new URL(config.publicUrl).origin) return; // our own storefront doesn't count
+  const d = getDb();
+  const key = `widget_seen:${tenantId}`;
+  const prev = json(d.prepare('SELECT value FROM kv WHERE key = ?').get(key)?.value, null);
+  if (prev?.origin === origin && Date.now() - Date.parse(prev.at) < 3600000) return;
+  d.prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, JSON.stringify({ origin, at: new Date().toISOString() }));
+}
