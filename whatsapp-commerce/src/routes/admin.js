@@ -4,6 +4,7 @@ import { getDb, redactSettings, json } from '../db.js';
 import { safeEqual, sha256 } from '../crypto.js';
 import { onboardingStatus, connectShopStripe } from '../onboarding.js';
 import { sendEmail, alertEmails, emailConfigured } from '../email.js';
+import { siteAssistantKnowledge } from '../site.js';
 import { setupStatus, savePlatformSetup, testAi, autoSetupStripe } from '../platformSetup.js';
 import {
   PLANS, createTenant, getTenant, listTenants, updateTenantSettings, updateTenantMeta, rotateKeys, deleteTenant,
@@ -148,6 +149,19 @@ export function adminRouter() {
     const to = String(req.body?.to || config.supportEmail || '').trim();
     res.json({ to, ...(await sendEmail({ to, subject: `Test email from ${config.productName}`, text: 'It works. Shops will get their order alerts like this.', html: '<p>✅ It works. Shops will get their order alerts like this.</p>' })) });
   }));
+  // The assistant that answers on your own homepage: a shop whose knowledge is your website copy.
+  r.post('/system/site-assistant', requireSuper, (req, res) => {
+    const k = siteAssistantKnowledge();
+    let id = config.siteChatTenant && getTenant(config.siteChatTenant) ? config.siteChatTenant : null;
+    if (!id) id = createTenant({ name: `${config.productName} website`, plan: 'pro' }).tenant.id;
+    updateTenantSettings(id, {
+      business: { name: config.productName, welcomeMessage: `Hi! 👋 Ask me anything about ${config.productName}: what it does, pricing, WhatsApp costs or how set-up works.` },
+      ai: { provider: 'direct', enabled: true, assistantName: `${config.productName} assistant`, tone: 'professional', about: k.about, faq: k.faq, instructions: k.instructions },
+      webchat: { enabled: true, title: config.productName, subtitle: 'Ask us anything. This is the assistant itself.', greeting: 'Hi' },
+    });
+    res.json({ ok: true, tenantId: id, status: savePlatformSetup({ siteChatTenant: id }) });
+  });
+  r.get('/system/leads', requireSuper, (req, res) => res.json({ leads: getDb().prepare('SELECT * FROM leads ORDER BY id DESC LIMIT 200').all().map((l) => ({ ...l, data: json(l.data, {}) })) }));
   r.post('/system/setup/stripe-auto', requireSuper, wrap(async (req, res) => {
     try { res.json({ ok: true, ...(await autoSetupStripe()) }); } catch (e) { res.status(400).json({ error: e.message }); }
   }));

@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
 <title>Start free trial · WhatsApp Commerce</title>
 <style>
 :root{--bg:#f5f7f6;--card:#fff;--ink:#17201b;--mute:#5d6b63;--line:#dfe5e1;--brand:#128c4a}
@@ -40,7 +41,7 @@ input{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;bac
 const FEATURES = {
   starter: ['Tap-to-order WhatsApp shop & storefront', 'Shopify / WooCommerce / built-in catalogue', 'AI assistant & agent', 'Flow builder & auto-replies', '1,000 messages · 300 AI replies / month'],
   growth: ['Everything in Starter', 'Campaigns, segments & retargeting', '5,000 messages · 3,000 AI replies / month'],
-  pro: ['Everything in Growth', 'No limit on incoming messages · 20,000 AI replies / month', 'Priority support'],
+  pro: ['Everything in Growth', 'No limit on incoming messages · 20,000 AI replies / month', 'Changes made for you every month', 'Phone support, same day'],
 };
 let plan = new URLSearchParams(location.search).get('plan') || 'growth';
 fetch('/api/plans').then((r) => r.json()).then((d) => {

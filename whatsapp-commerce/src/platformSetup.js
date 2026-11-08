@@ -30,6 +30,9 @@ export const SETUP_FIELDS = {
   legalAddress: { apply: (v) => { process.env.LEGAL_ADDRESS = v; } },
   legalContactEmail: { apply: (v) => { process.env.LEGAL_CONTACT_EMAIL = v; } },
   alertWebhookUrl: { apply: (v) => { config.alertWebhookUrl = v; } },
+  contactPhone: { apply: (v) => { config.contactPhone = v; } },
+  demoUrl: { apply: (v) => { config.demoUrl = v; } },
+  siteChatTenant: { apply: (v) => { config.siteChatTenant = v; } },
   resendApiKey: { secret: true, apply: (v) => { config.resendApiKey = v; } },
   emailFrom: { apply: (v) => { config.emailFrom = v; } },
 };
@@ -45,6 +48,7 @@ const envValue = () => ({
   legalAddress: process.env.LEGAL_ADDRESS || '', legalContactEmail: process.env.LEGAL_CONTACT_EMAIL || '',
   alertWebhookUrl: config.alertWebhookUrl,
   resendApiKey: config.resendApiKey, emailFrom: config.emailFrom,
+  contactPhone: config.contactPhone, demoUrl: config.demoUrl, siteChatTenant: config.siteChatTenant,
 });
 let fromEnv = null;
 

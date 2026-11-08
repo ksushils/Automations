@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
 <title>WhatsApp Commerce</title>
 <style>
 :root{--bg:#f5f7f6;--card:#fff;--ink:#17201b;--mute:#5d6b63;--line:#dfe5e1;--brand:#128c4a;--bar:#128c4a;--brand2:#0b6b38;--warn:#b5470b;--bubble-in:#fff;--bubble-out:#d9fdd3;--chat:#efeae2}
@@ -180,7 +181,7 @@ async function setup() {
     ${st.aiCheck === '0' ? '<p class="pill warn">⚠️ The saved key was rejected. Paste a new one.</p>' : ''}
     <p><button class="btn" id="ssave">Save and test</button> ${st.steps.ai ? '<button class="btn ghost" id="stest">Test again</button>' : ''}</p><div id="sres"></div>${nav()}</div>`;
   if (i === 1) body = `<div class="card"><h2>💳 Step 2: Get paid by your shops</h2>
-    <p>Shops pay you monthly by card through <b>Stripe</b>. Paste one key and we create the three plans (£29 / £79 / £199 a month) and the rest of the Stripe setup for you.</p>
+    <p>Shops pay you monthly by card through <b>Stripe</b>. Paste one key and we create the three plans (£29 / £79 / £249 a month) and the rest of the Stripe setup for you.</p>
     ${st.stripeMode ? `<p>Stripe is in <span class="pill ${st.stripeMode === 'live' ? '' : 'warn'}">${st.stripeMode === 'live' ? 'LIVE mode: real money' : 'TEST mode: no real money'}</span></p>` : ''}
     ${stepNo(1, `Open ${ext('https://dashboard.stripe.com/test/apikeys', 'Stripe → Developers → API keys')}. Start in <b>Test mode</b>, so you can try everything with the test card 4242 4242 4242 4242.`)}
     ${stepNo(2, `Copy the <b>Secret key</b> and paste it here:${field('platformStripeSecret', 'Stripe secret key (sk_test_… or sk_live_…)', v.platformStripeSecret, { secret: true })}`)}
@@ -208,6 +209,11 @@ async function setup() {
     <div class="row"><div>${field('productName', 'Product name (shown to shops)', v.productName)}</div><div>${field('supportEmail', 'Support email', v.supportEmail, { type: 'email' })}</div>
     <div>${field('legalCompanyName', 'Company name', v.legalCompanyName, { placeholder: 'Your Company Ltd' })}</div><div>${field('legalCompanyNumber', 'Company number', v.legalCompanyNumber)}</div></div>
     ${field('legalAddress', 'Registered address', v.legalAddress)}${field('legalContactEmail', 'Privacy contact email', v.legalContactEmail, { type: 'email' })}
+    <h3>Your public website</h3>
+    <p class="mute">Shown on ${ext(u.publicUrl + '/', 'your website')}. Leave a box empty to hide it.</p>
+    <div class="row"><div>${field('contactPhone', 'Phone number', v.contactPhone, { placeholder: '020 1234 5678' })}</div><div>${field('demoUrl', 'Demo booking link (optional, e.g. Calendly)', v.demoUrl, { placeholder: 'https://calendly.com/you/20min' })}</div></div>
+    <label>Homepage chat</label><div class="mute">The chat button on your homepage is a real assistant answering questions about your product: the best proof you have before you have customers.</div>
+    <p>${v.siteChatTenant ? `✅ Live, using shop <code>${esc(v.siteChatTenant)}</code>. <button class="btn ghost" id="ssite">Refresh its answers from the website copy</button>` : '<button class="btn ghost" id="ssite">Create my homepage assistant</button>'}</p>
     <details style="margin-top:8px"><summary class="mute">Optional: get an alert in Slack or Discord when something breaks</summary>${field('alertWebhookUrl', 'Slack / Discord webhook URL', v.alertWebhookUrl, { placeholder: 'https://hooks.slack.com/services/…' })}</details>
     <p><button class="btn" id="ssave">Save</button></p><div id="sres"></div>${nav()}</div>`;
   if (i === 4) body = `<div class="card"><h2>📧 Step 5: Order alert emails</h2>
@@ -250,6 +256,9 @@ async function setup() {
       toast('Saved'); S.setupStep = i + 1; setup();
     } catch (e) { res(`<p class="pill warn">⚠️ ${esc(e.message)}</p>`); }
   }));
+  if ($('#ssite')) $('#ssite').onclick = async () => {
+    try { await save(); const r = await api('/system/site-assistant', { method: 'POST' }); S.setup = r.status; toast('Homepage assistant ready'); setup(); } catch (e) { res(`<p class="pill warn">⚠️ ${esc(e.message)}</p>`); }
+  };
   if ($('#stest')) $('#stest').onclick = () => testAi().catch((e) => res(esc(e.message)));
   if ($('#sstripe')) $('#sstripe').onclick = async () => {
     try {
@@ -272,11 +281,16 @@ async function tenants() {
       <div><label>Business name</label><input id="tn"></div>
       <div><label>Plan</label><select id="tp">${Object.entries(plans).map(([k, p]) => `<option value="${k}">${p.label} — £${p.priceGbp}/mo</option>`).join('')}</select></div>
       <div style="align-self:end"><button class="btn" id="tc">Create client</button></div></div><div id="keys"></div></div>
+    <div class="card" id="leads"><h2>Demo requests and leads</h2><p class="mute">Loading…</p></div>
     <div class="card"><h2>Clients (${tenants.length})</h2><div class="tablewrap"><table><tr><th>Name</th><th>ID</th><th>Plan</th><th>Store</th><th>This month</th><th></th></tr>
     ${tenants.map((t) => `<tr><td>${esc(t.name)} ${t.active ? '' : '<span class="pill warn">inactive</span>'}</td><td><code>${esc(t.id)}</code></td><td>${esc(t.plan)}</td><td>${esc(t.settings.store.type)}</td>
       <td>${t.usage.inbound} in · ${t.usage.orders} orders · ${t.usage.ai_calls} AI</td>
       <td><button class="btn ghost" data-open="${esc(t.id)}">Manage</button> <button class="btn ghost" data-toggle="${esc(t.id)}" data-active="${t.active}">${t.active ? 'Suspend' : 'Activate'}</button></td></tr>`).join('')}
     </table></div></div>`;
+  api('/system/leads').then(({ leads }) => {
+    const el = $('#leads'); if (!el) return;
+    el.innerHTML = `<h2>Demo requests and leads (${leads.length})</h2>` + (leads.length ? `<div class="tablewrap"><table><tr><th>When</th><th>Type</th><th>Who</th><th>Contact</th><th>Details</th></tr>${leads.map((l) => `<tr><td>${esc(l.created_at)}</td><td><span class="pill">${l.kind === 'demo' ? 'Demo request' : 'Calculator'}</span></td><td><b>${esc(l.name || '')}</b><div class="mute">${esc(l.business || '')}</div></td><td><a href="mailto:${esc(l.email)}">${esc(l.email)}</a>${l.phone ? `<div>${esc(l.phone)}</div>` : ''}${l.website ? `<div class="mute">${esc(l.website)}</div>` : ''}</td><td class="mute">${l.kind === 'calculator' ? `£${esc(l.data.totalGbp)}/month · ${esc(l.data.inputs?.customers)} customers` : esc(l.message || '')}</td></tr>`).join('')}</table></div>` : '<p class="mute">None yet. They appear here when someone books a demo or emails themselves a calculator result.</p>');
+  }).catch(() => {});
   if ($('#gosetup')) $('#gosetup').onclick = (e) => { e.preventDefault(); S.tab = 'setup'; S.setupStep = null; render(); };
   $('#tc').onclick = async () => {
     try {

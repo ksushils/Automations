@@ -15,6 +15,7 @@ import { webchatRouter } from './routes/webchat.js';
 import { securityHeaders, installCrashAlerts, alert, backup } from './ops.js';
 import { getDb } from './db.js';
 import { loadPlatformSetup } from './platformSetup.js';
+import { siteRouter } from './site.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +31,7 @@ export function createApp() {
     try { getDb().prepare('SELECT 1').get(); res.json({ ok: true }); } catch (e) { res.status(503).json({ ok: false, error: e.message }); }
   });
   app.use(customDomainMiddleware());
+  app.use(siteRouter()); // public website: /, /pricing, /takeaways, /whatsapp-cost-calculator, /demo, sitemap, robots
   app.use(publicRouter());
   app.use(webRouter());
   app.use(webchatRouter());
@@ -45,7 +47,6 @@ export function createApp() {
   });
   app.use('/admin', express.static(path.join(__dirname, '..', 'public')));
   app.get('/signup', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'signup.html')));
-  app.get('/', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'home.html')));
   return app;
 }
 

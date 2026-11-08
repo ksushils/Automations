@@ -120,6 +120,6 @@ test('trial enforcement pauses expired trials only when billing is configured; b
 
 test('marketing home page is served', () => withServer(async (base) => {
   const html = await (await fetch(`${base}/`)).text();
-  assert.match(html, /Sell on WhatsApp\. Let AI take the orders\./);
-  assert.match(html, /id="pricing"/);
+  assert.match(html, /Your customers message at 11pm/);
+  assert.match(html, /href="\/pricing"/);
 }));

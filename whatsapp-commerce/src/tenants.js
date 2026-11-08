@@ -6,7 +6,7 @@ import { config } from './config.js';
 export const PLANS = {
   starter: { label: 'Starter', priceGbp: 29, monthlyConversationsIn: 1000, aiCalls: 300, aiBudgetUsd: 5, knowledgeDocs: 20, broadcasts: false, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
   growth: { label: 'Growth', priceGbp: 79, monthlyConversationsIn: 5000, aiCalls: 3000, aiBudgetUsd: 20, knowledgeDocs: 100, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
-  pro: { label: 'Pro', priceGbp: 199, monthlyConversationsIn: null, aiCalls: 20000, aiBudgetUsd: 80, knowledgeDocs: 500, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
+  pro: { label: 'Managed', priceGbp: 249, monthlyConversationsIn: null, aiCalls: 20000, aiBudgetUsd: 80, knowledgeDocs: 500, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom'] },
 };
 
 export function defaultSettings(name) {

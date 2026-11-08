@@ -11,6 +11,9 @@ const DEFAULT_RATES = {
   DEFAULT: { marketing: 0.05, utility: 0.02, authentication: 0.02, service: 0.02 },
 };
 export const FREE_SERVICE_PER_MONTH = 1000;
+// Shown on the public cost calculator. Update it whenever you re-check DEFAULT_RATES against Meta's rate card.
+export const RATES_CHECKED_ON = process.env.META_RATES_CHECKED_ON || '1 October 2026';
+export const getRates = () => rates();
 
 function rates() {
   try { return { ...DEFAULT_RATES, ...JSON.parse(process.env.META_RATES_JSON || '{}') }; } catch { return DEFAULT_RATES; }
