@@ -5,6 +5,7 @@ import { getTenant } from './tenants.js';
 import { getRates, FREE_SERVICE_PER_MONTH, RATES_CHECKED_ON } from './metaPricing.js';
 import { sendEmail } from './email.js';
 import { rateLimit } from './routes/web.js';
+import { COMPARISONS, comparison, CHECKED_ON } from './compare.js';
 
 /*
  * The public marketing website: home, pricing, takeaways, the WhatsApp cost calculator and "book a demo".
@@ -28,6 +29,7 @@ export const PAGES = [
   { path: '/takeaways', title: () => `WhatsApp ordering for UK takeaways | ${brand()}`, description: 'Take orders and answer questions on WhatsApp automatically. No commission per order, unlike the delivery apps.' },
   { path: '/whatsapp-cost-calculator', title: () => 'WhatsApp Business API cost calculator (UK, 2026)', description: 'Work out what Meta will charge you per month. Current UK rates, free service-message allowance included.' },
   { path: '/demo', title: () => `Book a demo | ${brand()}`, description: `Book 20 minutes. We load your website into ${brand()} live on the call and you ask it what your customers ask you.` },
+  ...COMPARISONS.map((c) => ({ path: `/${c.slug}`, title: () => c.title(brand()), description: c.description })),
 ];
 const page = (path) => PAGES.find((p) => p.path === path);
 
@@ -97,7 +99,7 @@ function layout(path, body, { ld = [], title, description, noindex = false, extr
 <main>${body}</main>
 <footer><div class="wrap">
 <div><b style="color:var(--ink)">${esc(brand())}</b><p>An assistant for your website and WhatsApp that answers customers, takes orders and hands the tricky ones to you. Set up for you.</p></div>
-<div><ul><li><a href="/#how-it-works">How it works</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/takeaways">For takeaways</a></li><li><a href="/whatsapp-cost-calculator">WhatsApp cost calculator</a></li><li><a href="/demo">Book a demo</a></li></ul></div>
+<div><ul><li><a href="/#how-it-works">How it works</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/takeaways">For takeaways</a></li><li><a href="/whatsapp-cost-calculator">WhatsApp cost calculator</a></li><li><a href="/demo">Book a demo</a></li></ul><p style="margin:14px 0 6px;color:var(--ink)"><b>Compare</b></p><ul>${COMPARISONS.map((c) => `<li><a href="/${c.slug}">${esc(c.name)} alternative</a></li>`).join('')}</ul></div>
 <div><ul><li><a href="/legal/privacy">Privacy</a></li><li><a href="/legal/terms">Terms</a></li><li><a href="/legal/dpa">Data processing agreement</a></li>${config.supportEmail ? `<li><a href="mailto:${esc(config.supportEmail)}">${esc(config.supportEmail)}</a></li>` : ''}${config.contactPhone ? `<li><a href="tel:${esc(config.contactPhone.replace(/[^\d+]/g, ''))}">${esc(config.contactPhone)}</a></li>` : ''}</ul></div>
 <div>${l.company ? `<p>${esc(l.company)}${l.number ? `<br>Registered in England and Wales, company no. ${esc(l.number)}` : ''}${l.address ? `<br>${esc(l.address)}` : ''}</p>` : ''}</div>
 </div></footer>${chat}
@@ -394,6 +396,48 @@ ${field('m', 'How many marketing messages a month, if any?', i.marketing, 'Put 0
   });
 }
 
+// ---------------- Comparison pages ----------------
+function comparePage(c) {
+  const B = esc(brand());
+  const src = `<a href="${esc(c.pricingUrl)}" rel="nofollow noopener" target="_blank">${esc(c.name)}'s pricing page</a>`;
+  const faq = [...c.faq, [`Where do these ${c.name} facts come from?`, `From ${c.name}'s own website, read on ${CHECKED_ON}. Prices and plans change, so check their pricing page before you decide.`]];
+  return layout(`/${c.slug}`, `
+<section class="hero"><div class="wrap">
+<p class="pill">${esc(c.name)} alternative</p>
+<h1>${esc(c.name)} or ${B}? An honest comparison</h1>
+<p class="lead">${esc(c.intro)}</p>
+<p><a class="btn" href="/demo">Book a 20-minute demo</a></p>
+</div></section>
+
+<section><div class="wrap grid" style="align-items:start">
+<div class="card"><h2>Where ${esc(c.name)} is better</h2><ul class="plain">${c.better.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+<div class="card"><h2>Where ${B} is different</h2><ul class="ticks">${c.different.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+</div></section>
+
+<section><div class="wrap">
+<h2>Side by side</h2>
+<div class="tablewrap"><table>
+<thead><tr><th></th><th>${esc(c.name)}</th><th>${B}</th></tr></thead>
+<tbody>${c.rows.map(([k, them, us]) => `<tr><th scope="row">${esc(k)}</th><td>${esc(them)}</td><td>${esc(us)}</td></tr>`).join('')}</tbody>
+</table></div>
+<p class="mute" style="font-size:15px">${esc(c.name)} details from ${src}, checked on ${esc(CHECKED_ON)}. Prices change; check theirs before you decide. Our prices are on our <a href="/pricing">pricing page</a>, and you can estimate Meta's fees with the <a href="/whatsapp-cost-calculator">cost calculator</a>.</p>
+</div></section>
+
+<section><div class="wrap grid">
+<div class="card"><h2>Pick ${esc(c.name)} if…</h2><p>${esc(c.pickThem)}</p></div>
+<div class="card"><h2>Pick ${B} if…</h2><p>${esc(c.pickUs)}</p></div>
+</div></section>
+
+<section><div class="wrap"><h2>Questions</h2>${faqHtml(faq)}</div></section>
+
+<section><div class="wrap">
+<h2>See it on your own business first</h2>
+<p class="lead">Twenty minutes. We load your website in live on the call, and you ask it what your customers ask you. Then compare it with ${esc(c.name)} for yourself.</p>
+<p><a class="btn" href="/demo">Book a demo</a></p>
+<p class="mute" style="font-size:14px">${esc(c.name)} is a trademark of its owner. This page is our own comparison and is not endorsed by ${esc(c.name)}.</p>
+</div></section>`, { ld: [faqLd(faq), { '@type': 'WebPage', name: c.title(brand()), url: url(`/${c.slug}`), dateModified: BUILT, about: [{ '@type': 'SoftwareApplication', name: c.name, url: c.pricingUrl.replace(/\/pricing$/, '') }, { '@type': 'SoftwareApplication', name: brand(), url: url('/') }] }] });
+}
+
 // ---------------- Demo ----------------
 function demo({ sent = false, error = '' } = {}) {
   const B = esc(brand());
@@ -443,6 +487,7 @@ export function siteRouter() {
   r.get('/takeaways', (req, res) => html(res, takeaways()));
   r.get('/whatsapp-cost-calculator', (req, res) => html(res, calculator(req.query)));
   r.get('/demo', (req, res) => html(res, demo()));
+  for (const c of COMPARISONS) r.get(`/${c.slug}`, (req, res) => html(res, comparePage(comparison(c.slug))));
   r.get('/sitemap.xml', (req, res) => res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(sitemapXml()));
   r.get('/robots.txt', (req, res) => res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(robotsTxt()));
 

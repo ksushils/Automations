@@ -79,3 +79,21 @@ test('homepage assistant: created from Setup, then the chat appears on the homep
   const again = await (await fetch(base + '/api/system/site-assistant', { method: 'POST', headers: { Authorization: 'Bearer super-admin-test-key' } })).json();
   assert.equal(again.tenantId, r.tenantId, 'running it again refreshes the same assistant');
 }));
+
+test('comparison pages: honest structure, sourced, in the sitemap and footer', () => withServer(async (base) => {
+  for (const [slug, name] of [['wati-alternative', 'Wati'], ['interakt-alternative', 'Interakt'], ['aisensy-alternative', 'AiSensy']]) {
+    const r = await fetch(`${base}/${slug}`);
+    assert.equal(r.status, 200, slug);
+    const h = await r.text();
+    assert.match(h, new RegExp(`<title>${name} alternative for UK small businesses`));
+    assert.match(h, new RegExp(`Where ${name} is better`), 'concedes real ground first');
+    assert.match(h, /checked on 10 November 2026/);
+    assert.match(h, /rel="nofollow noopener"/);
+    assert.match(h, /is not endorsed by/);
+    assert.equal((h.match(/<h1>/g) || []).length, 1);
+    assert.match(h, /"@type":"FAQPage"/);
+  }
+  const sm = await (await fetch(base + '/sitemap.xml')).text();
+  assert.ok(sm.includes('/wati-alternative</loc>') && sm.includes('/aisensy-alternative</loc>'));
+  assert.match(await (await fetch(base + '/')).text(), /href="\/interakt-alternative"/);
+}));
