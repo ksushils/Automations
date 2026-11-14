@@ -164,7 +164,7 @@ test('OpenRouter routing: zero retention + provider allowlist', async () => {
   const prev = { ...config };
   Object.assign(config, { aiBaseUrl: 'https://openrouter.ai/api/v1', aiZeroRetention: true, aiProviderOrder: ['openai'] });
   try {
-    assert.deepEqual(providerPrefs(), { data_collection: 'deny', zdr: true, order: ['openai'], allow_fallbacks: false });
+    assert.deepEqual(providerPrefs(), { data_collection: 'deny', order: ['openai'], allow_fallbacks: false });
     config.aiBaseUrl = 'https://api.openai.com/v1';
     assert.equal(providerPrefs(), undefined);
   } finally { Object.assign(config, prev); }

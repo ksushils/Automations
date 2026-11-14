@@ -135,20 +135,18 @@ export function setupStatus() {
 }
 
 /** Check the AI key really works. */
+/** Check the AI key really works, using exactly the same model and privacy routing as real customer chats. */
 export async function testAi() {
   if (!config.aiApiKey) return { ok: false, error: 'No AI key saved yet' };
   try {
-    const res = await fetch(`${config.aiBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${config.aiApiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': config.publicUrl, 'X-Title': config.productName },
-      body: JSON.stringify({ model: config.aiModel, messages: [{ role: 'user', content: 'Reply with the single word: ready' }], max_tokens: 5 }),
-      signal: AbortSignal.timeout(30000),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { if ([401, 402, 403].includes(res.status)) setAiCheck(false); return { ok: false, error: data.error?.message || `AI provider said ${res.status}` }; }
+    const { chatCompletion } = await import('./ai/direct.js');
+    const data = await chatCompletion({ messages: [{ role: 'user', content: 'Reply with the single word: ready' }], maxTokens: 5, temperature: 0 });
     setAiCheck(true);
     return { ok: true, reply: data.choices?.[0]?.message?.content?.trim() || '', model: data.model || config.aiModel };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) {
+    if ([401, 402, 403].includes(e.status)) setAiCheck(false);
+    return { ok: false, error: String(e.message || e).replace(/^AI \d+: /, '') };
+  }
 }
 
 // ---------- Stripe: create the plans and the webhook for you ----------

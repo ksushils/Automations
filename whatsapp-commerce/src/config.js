@@ -82,6 +82,7 @@ Object.assign(config, {
   // OpenRouter routing: only these providers (comma list, e.g. "openai,anthropic") and no data retention / training
   aiProviderOrder: (env.AI_PROVIDER_ORDER || '').split(',').map((s) => s.trim()).filter(Boolean),
   aiZeroRetention: env.AI_ZERO_RETENTION !== 'false',
+  aiRequireZdr: env.AI_REQUIRE_ZDR === 'true', // only zero-data-retention endpoints (check your model + providers support it first)
   embeddingsBaseUrl: (env.EMBEDDINGS_BASE_URL || env.AI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
   embeddingsApiKey: env.EMBEDDINGS_API_KEY || env.AI_API_KEY || '',
   embeddingsModel: env.EMBEDDINGS_MODEL || '', // e.g. text-embedding-3-small – empty = keyword (FTS) search only

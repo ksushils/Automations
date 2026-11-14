@@ -16,7 +16,10 @@ export const directConfigured = () => !!config.aiApiKey;
 export function providerPrefs() {
   if (!/openrouter\.ai/.test(config.aiBaseUrl)) return undefined;
   const p = {};
-  if (config.aiZeroRetention) Object.assign(p, { data_collection: 'deny', zdr: true }); // no logging / training by the model provider
+  if (config.aiZeroRetention) p.data_collection = 'deny'; // only providers that don't train on or sell prompts
+  // Strict zero-data-retention endpoints only. Off by default: OpenAI's own endpoint keeps data briefly for abuse checks,
+  // so with zdr on (and the provider list limited to OpenAI) no endpoint is left and every AI reply fails.
+  if (config.aiRequireZdr) p.zdr = true;
   if (config.aiProviderOrder.length) Object.assign(p, { order: config.aiProviderOrder, allow_fallbacks: false }); // named sub-processors only
   return Object.keys(p).length ? p : undefined;
 }
