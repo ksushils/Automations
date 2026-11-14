@@ -318,6 +318,9 @@ async function orderStatus(ctx, ref) {
   const sym = ctx.S.business.currencySymbol || '£';
   if (ref) {
     const live = await ctx.store.getOrderStatus(ref, realPhone(ctx)).catch(() => null);
+    if (live?.unavailable) {
+      return ctx.reply(mainMenu(ctx, `I can't look up website orders in this chat yet. Your order confirmation email has a link to track order ${ref}, or type *human* and our team will check for you.`));
+    }
     if (live?.verify) {
       // Found it, but we can't tell it's theirs: ask for the email or postcode on the order (privacy).
       ctx.conv.state = 'order_verify';
@@ -340,7 +343,7 @@ async function orderStatus(ctx, ref) {
 async function verifyOrder(ctx, text) {
   const v = ctx.conv.data.orderVerify;
   const live = await ctx.store.getOrderStatus(v.ref, realPhone(ctx), String(text).trim().slice(0, 200)).catch(() => null);
-  if (live && !live.verify) {
+  if (live && !live.verify && !live.unavailable) {
     ctx.conv.state = 'idle'; delete ctx.conv.data.orderVerify;
     return ctx.reply({ type: 'text', text: liveOrderText(live) });
   }

@@ -118,7 +118,7 @@ export function shopifyPublicStore(settings, { currency = 'GBP' } = {}) {
     // Order status needs a read-only Admin API key (Settings → Store, or the guide). The Admin API lives on the
     // shop's *.myshopify.com address, which we read from the public meta.json when it isn't saved.
     async getOrderStatus(ref, phone, proof) {
-      if (!settings.adminToken) return null;
+      if (!settings.adminToken) return { unavailable: true };
       return (await admin()).getOrderStatus(ref, phone, proof);
     },
     async testOrders() {

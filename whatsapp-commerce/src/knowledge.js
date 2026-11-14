@@ -156,6 +156,25 @@ const SYMBOLS = { GBP: '£', USD: '$', EUR: '€', AED: 'AED ', INR: '₹', AUD:
  * New shop gives us its website → we fill in the business details, connect the catalogue (Shopify: no token
  * needed) and import policy / FAQ / about pages into the knowledge base. Returns a summary of what happened.
  */
+/**
+ * The shop's information pages from its sitemap (Shopify: sitemap_pages_*.xml; others: short top-level URLs),
+ * so seller terms, marketplace policies, guides etc. are learnt too, not only a fixed list of usual paths.
+ */
+export async function sitemapPages(origin, { limit = 25 } = {}) {
+  const locs = (xml) => [...String(xml).matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1].replace(/&amp;/g, '&'));
+  const root = await safeFetch(`${origin}/sitemap.xml`).catch(() => null);
+  if (!root || root.status !== 200) return [];
+  let urls = locs(root.body);
+  const pageMaps = urls.filter((u) => /sitemap_pages|page-sitemap|pages?\.xml/i.test(u));
+  if (pageMaps.length) {
+    urls = [];
+    for (const m of pageMaps.slice(0, 3)) { const r = await safeFetch(m).catch(() => null); if (r?.status === 200) urls.push(...locs(r.body)); }
+  } else if (urls.some((u) => /\.xml(\?|$)/.test(u))) return []; // an index of sitemaps we can't classify: skip
+  const host = new URL(origin).host;
+  const skip = /\/(products?|collections?|shop|cart|account|checkout|tags?|category|categories|blogs?\/[^/]+\/.+|search)(\/|$)|opt-out|unsubscribe|\.(jpg|png|pdf|xml)$/i;
+  return [...new Set(urls)].filter((u) => { try { const x = new URL(u); return x.host === host && !skip.test(x.pathname) && x.pathname.split('/').filter(Boolean).length <= 2; } catch { return false; } }).slice(0, limit);
+}
+
 export async function onboardFromWebsite(tenantId, url) {
   const site = await detectWebsite(url);
   const t = getTenant(tenantId);
@@ -176,7 +195,8 @@ export async function onboardFromWebsite(tenantId, url) {
     : ['/', '/about', '/about-us', '/faq', '/faqs', '/delivery', '/shipping', '/returns', '/refund-policy', '/contact', '/terms'];
   const imported = [];
   const skipped = [];
-  for (const path of pages) {
+  const fromSitemap = (await sitemapPages(site.origin).catch(() => [])).map((u) => new URL(u).pathname);
+  for (const path of [...new Set([...pages, ...fromSitemap])]) {
     try {
       const d = await importUrl(tenantId, site.origin + path);
       imported.push({ path, name: d.name });

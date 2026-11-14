@@ -103,7 +103,7 @@ test('Shopify order status: phone match, or email/postcode proof; website chat m
     assert.equal((await s.getOrderStatus('1001', null, 'n89dj')).payment, 'paid', 'postcode, any spacing/case');
     assert.equal((await s.getOrderStatus('1001', null, 'wrong@x.com')).failed, true);
     assert.equal(await s.getOrderStatus('9999', null), null);
-    assert.equal(await shopifyPublicStore({ domain: 'rcshop.example' }).getOrderStatus('1001', null), null, 'no key: no lookup');
+    assert.deepEqual(await shopifyPublicStore({ domain: 'rcshop.example' }).getOrderStatus('1001', null), { unavailable: true }, 'no key: say so');
 
     // in the chat: website visitor asks, is asked for proof, then sees status + tracking
     const t = makeTenant({ store: { type: 'shopify_public', shopify: { domain: 'rcshop.example', adminToken: 'shpat_test', myshopifyDomain: 'rc-test.myshopify.com' } } });
