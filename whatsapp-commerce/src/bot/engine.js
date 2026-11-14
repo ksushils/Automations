@@ -306,24 +306,50 @@ function setAddress(ctx, text) {
 }
 
 // ---------- order status ----------
+const realPhone = (ctx) => (String(ctx.conv.waId).startsWith('web:') ? null : ctx.conv.waId); // website chat has no phone
+const fmtDay = (iso) => { try { return new Date(iso).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }); } catch { return ''; } };
+function liveOrderText(live) {
+  const t = live.tracking?.length ? `\nTracking: ${live.tracking.map((x) => [x.company, x.number].filter(Boolean).join(' ') + (x.url ? `\n${x.url}` : '')).join('\n')}` : '';
+  const when = live.deliveredAt ? `\nDelivered: ${fmtDay(live.deliveredAt)}` : live.estimatedDeliveryAt ? `\nExpected: ${fmtDay(live.estimatedDeliveryAt)}` : '';
+  return `📦 Order *${live.name}*\nStatus: ${live.status || 'processing'}${when}\nPayment: ${live.payment || '-'}${t}`;
+}
+
 async function orderStatus(ctx, ref) {
   const sym = ctx.S.business.currencySymbol || '£';
   if (ref) {
-    const live = await ctx.store.getOrderStatus(ref, ctx.conv.waId).catch(() => null);
-    if (live) {
-      const t = live.tracking?.length ? `\nTracking: ${live.tracking.map((x) => [x.company, x.number, x.url].filter(Boolean).join(' ')).join('\n')}` : '';
-      return ctx.reply({ type: 'text', text: `📦 Order *${live.name}*\nStatus: ${live.status || 'processing'}\nPayment: ${live.payment || '-'}${t}` });
+    const live = await ctx.store.getOrderStatus(ref, realPhone(ctx)).catch(() => null);
+    if (live?.verify) {
+      // Found it, but we can't tell it's theirs: ask for the email or postcode on the order (privacy).
+      ctx.conv.state = 'order_verify';
+      ctx.conv.data.orderVerify = { ref: String(ref), tries: 0 };
+      return ctx.reply({ type: 'text', text: `I found order *${live.name}*. To keep your details private, please type the *email address* or *postcode* used on the order.` });
     }
+    if (live) return ctx.reply({ type: 'text', text: liveOrderText(live) });
   }
   const orders = listOrders(ctx.tenant.id, { waId: ctx.conv.waId, limit: 3 });
   const match = ref ? orders.filter((o) => String(o.store_order_name).replace(/\D/g, '') === String(ref).replace(/\D/g, '')) : orders;
   if (!match.length) {
-    return ctx.reply(mainMenu(ctx, ref ? `I couldn't find order ${ref} for this WhatsApp number.` : "You don't have any orders with us yet."));
+    return ctx.reply(mainMenu(ctx, ref ? `I couldn't find order ${ref}. Please check the number on your order confirmation email, or type *human* to ask our team.` : "You don't have any orders with us yet. To check an order, type its number, e.g. *order 1001*."));
   }
   ctx.reply({
     type: 'text',
     text: match.map((o) => `📦 *${o.store_order_name}* — ${STATUS_TEXT[o.status] || o.status}\n${money(o.subtotal, sym)} · ${o.payment_status}${o.checkout_url && o.payment_status !== 'paid' ? `\nPay: ${o.checkout_url}` : ''}`).join('\n\n'),
   });
+}
+
+async function verifyOrder(ctx, text) {
+  const v = ctx.conv.data.orderVerify;
+  const live = await ctx.store.getOrderStatus(v.ref, realPhone(ctx), String(text).trim().slice(0, 200)).catch(() => null);
+  if (live && !live.verify) {
+    ctx.conv.state = 'idle'; delete ctx.conv.data.orderVerify;
+    return ctx.reply({ type: 'text', text: liveOrderText(live) });
+  }
+  v.tries = (v.tries || 0) + 1;
+  if (v.tries >= 3 || !live) {
+    ctx.conv.state = 'idle'; delete ctx.conv.data.orderVerify;
+    return ctx.reply(mainMenu(ctx, "Sorry, those details don't match that order. Type *human* and our team will help you."));
+  }
+  return ctx.reply({ type: 'text', text: "That doesn't match the order. Please try the email address or postcode you used when ordering (or type *menu* to stop)." });
 }
 
 // ---------- AI ----------
@@ -484,6 +510,7 @@ async function handleText(ctx, raw) {
   if (!t) return ctx.reply(mainMenu(ctx));
 
   // State-driven input first
+  if (ctx.conv.state === 'order_verify' && ctx.conv.data.orderVerify && !GREETING.test(t) && !COMMANDS.has(t)) return verifyOrder(ctx, text);
   if (ctx.conv.state === 'awaiting_address' && !GREETING.test(t) && !COMMANDS.has(t) && !/^(order status|track|remove \d+)/.test(t)) return setAddress(ctx, text);
   if (ctx.conv.state === 'awaiting_qty' && /^\d{1,2}$/.test(t)) return addPending(ctx, Number(t));
   if (ctx.conv.state === 'checkout_confirm' && ctx.conv.data.checkout) {
@@ -697,6 +724,8 @@ function aiAvailable(ctx) {
 }
 
 /** Direct AI mode (OpenRouter / OpenAI-compatible, local knowledge search, in-process store tools). */
+const GENERIC_WORDS = new Set(['with', 'from', 'pack', 'pcs', 'size', 'colour', 'color', 'black', 'white', 'blue', 'red', 'green', 'set', 'kit', 'new', 'for', 'the', 'and', 'edition', 'version', 'one', 'two', 'any', 'all', 'our', 'you', 'can', 'get', 'out', 'off', 'per', 'mm']);
+const S_agent = (ctx) => (ctx.S.ai?.mode || ctx.S.dify?.mode) === 'agent';
 async function askDirect(ctx, text) {
   saveConversation(ctx.conv); // agent tools read/write the cart in the DB
   const { answer, products } = await directTurn(ctx, text);
@@ -707,7 +736,12 @@ async function askDirect(ctx, text) {
     ctx.reply({ type: 'text', text: out.replace(/\[HANDOVER\]/gi, '').trim() || 'Let me get a team member for you.' });
     return handover(ctx);
   }
-  if (products.length && !ctx.conv.humanHandover) ctx.reply(productList(ctx, products, out || 'Here are some products you might like:'));
+  // Show the tappable product list only when the AI actually recommended products (it ends with "View products"),
+  // not for questions like "how do I register as a seller" that happen to match some product words.
+  const said = out.toLowerCase();
+  const named = products.some((p) => String(p.title || '').toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length >= 3 && !GENERIC_WORDS.has(w) && said.includes(w)));
+  const recommends = /view products/i.test(out) || named || (S_agent(ctx) && products.length);
+  if (products.length && recommends && !ctx.conv.humanHandover) ctx.reply(productList(ctx, products, out || 'Here are some products you might like:'));
   else ctx.reply({ type: 'text', text: out || "Sorry, I didn't catch that. Type *menu* to see options." });
 }
 

@@ -1,4 +1,4 @@
-import { httpJson, stripHtml, phonesMatch, splitName } from './http.js';
+import { httpJson, stripHtml, phonesMatch, splitName, orderAccess } from './http.js';
 import { config } from '../config.js';
 
 /**
@@ -104,22 +104,38 @@ export function shopifyStore(settings) {
       if (!order) throw new Error('Shopify: ' + (c.draftOrderComplete.userErrors || []).map((e) => e.message).join('; '));
       return { orderId: order.id, orderName: order.name, checkoutUrl: null, total, currency: curr };
     },
-    async getOrderStatus(ref, phone) {
+    async getOrderStatus(ref, phone, proof) {
       const name = String(ref).replace(/^#?/, '#');
       const d = await gql(
-        `query($q: String!) { orders(first: 1, query: $q) { nodes { id name phone customer { phone } displayFinancialStatus displayFulfillmentStatus cancelledAt
-           fulfillments(first: 5) { trackingInfo(first: 3) { number url company } } } } }`,
+        `query($q: String!) { orders(first: 1, query: $q) { nodes { name email phone
+           customer { defaultPhoneNumber { phoneNumber } defaultEmailAddress { emailAddress } }
+           shippingAddress { zip phone } billingAddress { zip phone }
+           displayFinancialStatus displayFulfillmentStatus cancelledAt
+           fulfillments(first: 5) { displayStatus deliveredAt estimatedDeliveryAt trackingInfo(first: 3) { number url company } } } } }`,
         { q: `name:${name}` },
       );
       const o = d.orders.nodes[0];
-      if (!o || !(phonesMatch(o.phone, phone) || phonesMatch(o.customer?.phone, phone))) return null;
-      const tracking = o.fulfillments.flatMap((f) => f.trackingInfo).filter((t) => t.number || t.url);
+      if (!o) return null;
+      const access = orderAccess({
+        phones: [o.phone, o.customer?.defaultPhoneNumber?.phoneNumber, o.shippingAddress?.phone, o.billingAddress?.phone],
+        emails: [o.email, o.customer?.defaultEmailAddress?.emailAddress],
+        postcodes: [o.shippingAddress?.zip, o.billingAddress?.zip],
+      }, phone, proof);
+      if (access !== 'ok') return { name: o.name, verify: true, failed: access === 'failed' };
+      const f = o.fulfillments.at(-1);
+      const tracking = o.fulfillments.flatMap((x) => x.trackingInfo).filter((t) => t.number || t.url);
       return {
         name: o.name,
-        status: o.cancelledAt ? 'cancelled' : String(o.displayFulfillmentStatus || '').toLowerCase(),
-        payment: String(o.displayFinancialStatus || '').toLowerCase(),
+        status: o.cancelledAt ? 'cancelled' : String(f?.displayStatus || o.displayFulfillmentStatus || '').toLowerCase().replace(/_/g, ' '),
+        payment: String(o.displayFinancialStatus || '').toLowerCase().replace(/_/g, ' '),
+        deliveredAt: f?.deliveredAt || null,
+        estimatedDeliveryAt: f?.deliveredAt ? null : f?.estimatedDeliveryAt || null,
         tracking,
       };
+    },
+    async testOrders() {
+      const d = await gql('{ orders(first: 1, reverse: true) { nodes { name } } }');
+      return { ok: true, latest: d.orders.nodes[0]?.name || null };
     },
   };
 }

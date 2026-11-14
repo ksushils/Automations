@@ -31,3 +31,21 @@ export function splitName(full) {
   const parts = String(full || 'WhatsApp Customer').trim().split(/\s+/);
   return { first: parts[0], last: parts.slice(1).join(' ') || '-' };
 }
+
+const normEmail = (e) => String(e || '').trim().toLowerCase();
+const normPostcode = (p) => String(p || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/**
+ * May this customer see this order? Yes if their WhatsApp number matches a phone on the order, or if the
+ * proof they typed (email or postcode) matches the order. Website chat has no phone, so it always needs proof.
+ * Returns 'ok', 'verify' (ask for proof) or 'failed' (proof given but wrong).
+ */
+export function orderAccess({ phones = [], emails = [], postcodes = [] }, phone, proof) {
+  if (phone && phones.some((p) => phonesMatch(p, phone))) return 'ok';
+  if (proof) {
+    const e = normEmail(proof), pc = normPostcode(proof);
+    if ((e.includes('@') && emails.some((x) => normEmail(x) === e)) || (pc.length >= 4 && postcodes.some((x) => normPostcode(x) === pc))) return 'ok';
+    return 'failed';
+  }
+  return 'verify';
+}

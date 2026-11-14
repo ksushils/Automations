@@ -1,4 +1,5 @@
 import { httpJson, stripHtml } from './http.js';
+import { shopifyStore } from './shopify.js';
 
 /**
  * "Just enter your shop URL" Shopify adapter – no admin token needed.
@@ -114,8 +115,23 @@ export function shopifyPublicStore(settings, { currency = 'GBP' } = {}) {
       const total = items.reduce((s, i) => s + i.price * i.quantity, 0);
       return { orderId: null, orderName: null, checkoutUrl: `${base}/cart/${lines}?${params}`, total, currency };
     },
-    async getOrderStatus() { return null; },
+    // Order status needs a read-only Admin API key (Settings → Store, or the guide). The Admin API lives on the
+    // shop's *.myshopify.com address, which we read from the public meta.json when it isn't saved.
+    async getOrderStatus(ref, phone, proof) {
+      if (!settings.adminToken) return null;
+      return (await admin()).getOrderStatus(ref, phone, proof);
+    },
+    async testOrders() {
+      if (!settings.adminToken) return { ok: false, error: 'No Shopify key saved yet' };
+      return (await admin()).testOrders();
+    },
   };
+
+  async function admin() {
+    let myshopify = settings.myshopifyDomain;
+    if (!myshopify) myshopify = (await httpJson(`${base}/meta.json`).catch(() => null))?.myshopify_domain || domain;
+    return shopifyStore({ ...settings, domain: myshopify });
+  }
 }
 
 const STOP = new Set(['the', 'and', 'for', 'you', 'have', 'do', 'any', 'with', 'what', 'is', 'are', 'can', 'get', 'got', 'need', 'want', 'looking', 'please', 'me', 'my', 'some', 'show', 'sell', 'buy', 'hi', 'hello', 'a', 'an', 'of', 'in', 'to', 'it', 'this', 'that']);

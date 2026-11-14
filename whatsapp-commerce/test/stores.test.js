@@ -53,7 +53,7 @@ test('woocommerce: creates COD order with variation + phone-checked status', asy
   assert.deepEqual(posted.line_items, [{ product_id: 5, variation_id: 9, quantity: 2 }]);
   assert.equal(posted.shipping_lines[0].total, '3.00');
   assert.equal((await s.getOrderStatus('77', '447700900000')).status, 'processing');
-  assert.equal(await s.getOrderStatus('77', '447999999999'), null);
+  assert.deepEqual(await s.getOrderStatus('77', '447999999999'), { name: '#77', verify: true, failed: false }, 'found, but not their phone: ask for proof');
   f.mock.restore();
 });
 
@@ -79,4 +79,40 @@ test('crypto: signatures, encryption, session tokens', () => {
   const tok = createSessionToken('t1', '4477');
   assert.deepEqual(verifySessionToken(tok), { tenantId: 't1', waId: '4477' });
   assert.equal(verifySessionToken(tok.slice(0, -2) + 'xx'), null);
+});
+
+test('Shopify order status: phone match, or email/postcode proof; website chat must verify; shown in chat', async () => {
+  const { shopifyPublicStore } = await import('../src/stores/shopifyPublic.js');
+  const { say, makeTenant } = await import('./helpers.js');
+  const ORDER = { name: '#1001', email: 'nik@example.com', phone: null, customer: { defaultPhoneNumber: null, defaultEmailAddress: { emailAddress: 'nik@example.com' } }, shippingAddress: { zip: 'N8 9DJ', phone: '+44 7700 900111' }, billingAddress: { zip: 'N8 9DJ', phone: null }, displayFinancialStatus: 'PAID', displayFulfillmentStatus: 'FULFILLED', cancelledAt: null, fulfillments: [{ displayStatus: 'DELIVERED', deliveredAt: '2026-09-02T12:37:50Z', estimatedDeliveryAt: '2026-09-02T15:00:00Z', trackingInfo: [{ number: 'QB768126034GB', url: 'https://www.royalmail.com/track?n=QB768126034GB', company: 'Royal Mail' }] }] };
+  const f = mock.method(globalThis, 'fetch', async (url, opts = {}) => {
+    const u = String(url);
+    if (u.endsWith('/meta.json')) return ok({ name: 'RC', myshopify_domain: 'rc-test.myshopify.com' });
+    if (u.startsWith('https://rc-test.myshopify.com/admin/api/')) {
+      assert.equal(opts.headers['X-Shopify-Access-Token'], 'shpat_test');
+      const q = JSON.parse(opts.body).variables?.q;
+      return ok({ data: { orders: { nodes: q === 'name:#1001' ? [ORDER] : [] } } });
+    }
+    throw new Error('unexpected ' + u);
+  });
+  try {
+    const s = shopifyPublicStore({ domain: 'rcshop.example', adminToken: 'shpat_test' });
+    assert.equal((await s.getOrderStatus('1001', '447700900111')).status, 'delivered', 'phone on the order matches');
+    assert.deepEqual(await s.getOrderStatus('1001', null), { name: '#1001', verify: true, failed: false }, 'website chat: ask for proof');
+    assert.equal((await s.getOrderStatus('1001', null, ' NIK@example.com ')).tracking[0].number, 'QB768126034GB');
+    assert.equal((await s.getOrderStatus('1001', null, 'n89dj')).payment, 'paid', 'postcode, any spacing/case');
+    assert.equal((await s.getOrderStatus('1001', null, 'wrong@x.com')).failed, true);
+    assert.equal(await s.getOrderStatus('9999', null), null);
+    assert.equal(await shopifyPublicStore({ domain: 'rcshop.example' }).getOrderStatus('1001', null), null, 'no key: no lookup');
+
+    // in the chat: website visitor asks, is asked for proof, then sees status + tracking
+    const t = makeTenant({ store: { type: 'shopify_public', shopify: { domain: 'rcshop.example', adminToken: 'shpat_test', myshopifyDomain: 'rc-test.myshopify.com' } } });
+    let r = await say(t, 'web:abc123', 'check order number - #1001-F1');
+    assert.match(r[0].text, /found order \*#1001\*.*email address\* or \*postcode/s);
+    r = await say(t, 'web:abc123', 'someone@else.com');
+    assert.match(r[0].text, /doesn't match/);
+    r = await say(t, 'web:abc123', 'N8 9DJ');
+    assert.match(r[0].text, /Order \*#1001\*\nStatus: delivered\nDelivered: Wednesday,? 2 September/);
+    assert.match(r[0].text, /Royal Mail QB768126034GB/);
+  } finally { f.mock.restore(); }
 });

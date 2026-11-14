@@ -1,4 +1,4 @@
-import { httpJson, stripHtml, phonesMatch, splitName } from './http.js';
+import { httpJson, stripHtml, phonesMatch, orderAccess, splitName } from './http.js';
 
 /**
  * WooCommerce adapter (WordPress on your VPS). Uses the WC REST API v3 with a read/write API key
@@ -101,11 +101,13 @@ export function wooStore(settings) {
         currency: order.currency,
       };
     },
-    async getOrderStatus(ref, phone) {
+    async getOrderStatus(ref, phone, proof) {
       const id = String(ref).replace(/\D/g, '');
       if (!id) return null;
       const o = await api(`/orders/${id}`).catch(() => null);
-      if (!o || !phonesMatch(o.billing?.phone, phone)) return null;
+      if (!o) return null;
+      const access = orderAccess({ phones: [o.billing?.phone, o.shipping?.phone], emails: [o.billing?.email], postcodes: [o.billing?.postcode, o.shipping?.postcode] }, phone, proof);
+      if (access !== 'ok') return { name: '#' + (o.number || o.id), verify: true, failed: access === 'failed' };
       const tracking = (o.meta_data || [])
         .filter((m) => m.key === '_wc_shipment_tracking_items')
         .flatMap((m) => m.value || [])

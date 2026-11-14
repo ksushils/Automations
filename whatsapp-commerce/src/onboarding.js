@@ -50,7 +50,7 @@ export function onboardingStatus(tenant) {
 
   const steps = [
     { key: 'shop', phase: 'setup', title: 'Tell us about your shop', why: 'We read your website and set most things up for you.', done: !!s.business?.website || storeConnected, data: { website: s.business?.website || '' } },
-    { key: 'products', phase: 'setup', title: 'Add your products', why: 'So the assistant can show and sell them.', done: storeConnected, data: { storeType: s.store.type, products } },
+    { key: 'products', phase: 'setup', title: 'Add your products', why: 'So the assistant can show and sell them.', done: storeConnected, data: { storeType: s.store.type, products, orderKey: !!s.store.shopify?.adminToken } },
     { key: 'orders', phase: 'setup', title: 'How customers pay and get their order', why: 'Card, bank transfer or cash; delivery or collection.', done: ownCheckout || !!s.onboarding?.ordersSet, data: { ownCheckout, storeType: s.store.type, paymentMethods: O.paymentMethods || [], fulfilment: O.fulfilment || [], deliveryFee: O.deliveryFee || 0, freeDeliveryOver: O.freeDeliveryOver || 0, pickupAddress: O.pickupAddress || '', bankDetails: O.bankDetails || '', paymentLinkUrl: O.paymentLinkUrl || '', stripe: !!s.payments?.stripe?.secretKey, alertEmails: alertEmails(tenant), emailOn: emailConfigured() } },
     { key: 'assistant', phase: 'setup', title: 'Teach your assistant', why: 'Delivery, returns, opening hours: what customers ask most.', done: !!(s.ai?.about || s.ai?.faq) || docs > 0, data: { docs, aiReady: directConfigured() } },
     { key: 'test', phase: 'setup', title: 'Try it like a customer', why: 'Check the answers before real customers see them.', done: tested > 0 },

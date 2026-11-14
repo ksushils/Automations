@@ -484,6 +484,7 @@ export function adminRouter() {
     const t = req.tenant;
     try {
       if (req.params.what === 'store') return res.json(await getStore(t).testConnection());
+      if (req.params.what === 'orders') { const s = getStore(t); return res.json(s.testOrders ? await s.testOrders() : { ok: false, error: 'This store type can\'t look up orders' }); }
       if (req.params.what === 'dify') return res.json({ ok: true, app: await difyInfo(t.settings.dify) });
       if (req.params.what === 'whatsapp') {
         const to = String(req.body?.to || '').replace(/\D/g, '');

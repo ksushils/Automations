@@ -759,7 +759,17 @@ async function shopGuide(t) {
         <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="g-site" style="flex:1;min-width:200px" placeholder="yourshop.co.uk" value="${esc(d.website)}"><button class="btn" id="g-sitego">Set up from my website</button></div>
         <div id="g-res" class="mute" style="margin-top:8px"></div><p class="mute">No website? That's fine. ${skip}</p>`;
       case 'products': return st.done
-        ? `<p>✅ Products come from <b>${esc(STORE_NAMES[d.storeType] || d.storeType)}</b>${d.products != null ? ` (${d.products} products)` : ''}.</p><p><button class="btn ghost" id="g-store">Check my products</button> <span id="g-res" class="mute"></span></p>`
+        ? `<p>✅ Products come from <b>${esc(STORE_NAMES[d.storeType] || d.storeType)}</b>${d.products != null ? ` (${d.products} products)` : ''}.</p><p><button class="btn ghost" id="g-store">Check my products</button> <span id="g-res" class="mute"></span></p>${d.storeType === 'shopify_public' ? `
+          <div class="card" style="margin:10px 0 0">
+            <b>📦 Let customers check their orders ${d.orderKey ? '✅' : '(optional)'}</b>
+            <p class="mute">${d.orderKey ? 'Customers can ask "where is my order 1001?" in the chat. They confirm the email or postcode on the order before seeing anything.' : 'So customers can ask "where is my order?" in the chat. Create a read-only key in Shopify once:'}</p>
+            ${d.orderKey ? '' : `<ol class="mute" style="padding-left:18px;margin:6px 0">
+              <li>Shopify admin → <b>Settings → Apps and sales channels → Develop apps</b> → <b>Create an app</b> (name it "Order status").</li>
+              <li><b>Configure Admin API scopes</b>: tick <code>read_orders</code> (and <code>read_all_orders</code> if offered, for orders older than 60 days). Save.</li>
+              <li><b>Install app</b>, then <b>reveal the Admin API access token</b> (starts with <code>shpat_</code>) and paste it here.</li></ol>`}
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><input id="g-okey" type="password" placeholder="${d.orderKey ? 'Saved (paste a new key to replace it)' : 'shpat_…'}" style="flex:1;min-width:200px"><button class="btn ghost" id="g-okeygo">${d.orderKey ? 'Replace and test' : 'Save and test'}</button></div>
+            <div id="g-ores" class="mute" style="margin-top:6px"></div>
+          </div>` : ''}`
         : `<p>Pick the one that fits you:</p>
           <div class="row">
             <div class="card" style="margin:0"><b>🟢 I use Shopify</b><p class="mute">Just type your shop address. Nothing to install.</p><input id="g-shop" placeholder="yourshop.co.uk or yourshop.myshopify.com"><p><button class="btn" id="g-shopgo">Connect Shopify</button></p></div>
@@ -868,6 +878,16 @@ async function shopGuide(t) {
     const r = await api(T('/onboarding/website'), { method: 'POST', body: { url: $('#g-site').value } });
     res(`✅ Found <b>${esc(r.site.name || r.site.domain)}</b>${r.store ? ' and connected its products' : ''}. Imported ${r.imported.length} page(s): ${esc(r.imported.map((x) => x.name).join(', ') || 'none')}`);
     setTimeout(() => reload(false), 2500);
+  });
+  on('g-okeygo', async () => {
+    const key = $('#g-okey').value.trim();
+    const out = (h) => { $('#g-ores').innerHTML = h; };
+    if (!/^shp(at|ca|pa)_/.test(key)) return out('⚠️ That doesn\'t look like a Shopify Admin API token. It starts with shpat_.');
+    out('Checking with Shopify…');
+    await patch({ store: { shopify: { adminToken: key } } });
+    const r = await api(T('/test/orders'), { method: 'POST', body: {} });
+    if (!r.ok) return out('⚠️ Shopify said: ' + esc(r.error || 'error') + '. Check the key and that <code>read_orders</code> is ticked.');
+    out(`✅ Connected${r.latest ? `: your latest order is ${esc(r.latest)}` : ''}.`); setTimeout(() => reload(true), 1500);
   });
   on('g-store', async () => { res('Checking…'); const r = await api(T('/test/store'), { method: 'POST', body: {} }); res(r.ok ? `✅ Connected${r.name ? ' to ' + esc(r.name) : ''}${r.products != null ? `, ${r.products} products` : ''}` : '⚠️ ' + esc(r.error)); });
   on('g-shopgo', async () => {
