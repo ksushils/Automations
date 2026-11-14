@@ -36,6 +36,8 @@ export function toWhatsAppFormatting(s) {
 
 const wasPrice = (p, sym) => (p.compareAtPrice ? ` (was ${money(p.compareAtPrice, sym)})` : '');
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/[!?.]+$/g, '');
+// A chat handed to a person goes back to the assistant if no staff member replies within this time.
+export const HANDOVER_TIMEOUT_MS = 15 * 60000;
 
 function availablePaymentMethods(tenant, store) {
   if (store.type === 'shopify_public') return ['payment_link']; // paid on the shop's own Shopify checkout
@@ -377,7 +379,9 @@ async function askAi(ctx, text) {
 function handover(ctx, text) {
   ctx.conv.humanHandover = true;
   ctx.conv.state = 'idle';
-  ctx.reply({ type: 'text', text: text || `🙋 A member of our team will reply here shortly${ctx.S.business.supportHours ? ` (${ctx.S.business.supportHours})` : ''}. Your cart is saved.` });
+  ctx.conv.data = { ...(ctx.conv.data || {}), handoverAt: new Date().toISOString(), handoverAckAt: null };
+  // a shop's own handover wording (flow builder) is sent as written; the standard one explains how to get back
+  ctx.reply({ type: 'text', text: text || `🙋 A member of our team will reply here shortly${ctx.S.business.supportHours ? ` (${ctx.S.business.supportHours})` : ''}. Your cart is saved.\n\nWant an answer now? Type *menu* to go back to the assistant.` });
   const staff = ctx.S.notifications?.staffWaIds || [];
   for (const s of staff) staffAlert(ctx.tenant, String(s).replace(/\D/g, ''), `🙋 Customer +${ctx.conv.waId} (${ctx.customer.name || 'unknown'}) asked to talk to a person. Reply from the dashboard.`, ctx.rawSend);
   const who = String(ctx.conv.waId).startsWith('web:') ? 'A website visitor' : `Customer +${ctx.conv.waId}`;
@@ -586,8 +590,24 @@ export async function handleInbound(tenant, event, send) {
 
   if (conv.humanHandover) {
     // A human is handling this chat – the bot stays quiet. "menu" lets the customer return to the bot.
+    // But a customer must never talk to silence: until a staff member has actually replied, they get a short
+    // acknowledgement, and after HANDOVER_TIMEOUT_MS with no staff reply the assistant takes the chat back.
+    const since = Date.parse(conv.data.handoverAt || '') || 0; // 0 = an older handover with no start time
+    const staffActive = !!conv.data.staffActiveAt && Date.parse(conv.data.staffActiveAt) >= since;
     if (event.kind === 'text' && ['menu', 'bot'].includes(norm(event.text))) conv.humanHandover = false;
-    else return replies;
+    else if (!staffActive && Date.now() - since > HANDOVER_TIMEOUT_MS) {
+      conv.humanHandover = false; // nobody picked it up: the assistant answers this message normally
+      conv.data.handoverAt = null;
+    } else {
+      const lastAck = Date.parse(conv.data.handoverAckAt || '') || 0;
+      if (!staffActive && Date.now() - lastAck > 10 * 60000) {
+        conv.data.handoverAckAt = new Date().toISOString();
+        saveConversation(conv);
+        const hours = tenant.settings.business.supportHours;
+        await send(conv.waId, { type: 'text', text: `Thanks, your message is with our team${hours ? ` (${hours})` : ''} and they'll reply here.\n\nWant an answer now? Type *menu* to go back to the assistant.` }).catch(() => {});
+      } else saveConversation(conv);
+      return replies;
+    }
   }
   if (!withinLimit(tenant, 'inbound')) {
     // Plan limit reached: never leave a customer in silence – acknowledge once a day, hand to a human, tell the owner.

@@ -91,10 +91,38 @@ test('human handover silences bot until "menu"', async () => {
   const wa = '447700900006';
   let r = await say(t, wa, 'talk to a human');
   assert.match(r[0].text, /team will reply/);
+  assert.match(r[0].text, /Type \*menu\* to go back to the assistant/);
   r = await say(t, wa, 'hello?');
-  assert.equal(r.length, 0);
+  assert.equal(r.length, 1, 'customer is told their message is with the team, not left in silence');
+  assert.match(r[0].text, /your message is with our team/);
+  r = await say(t, wa, 'u there');
+  assert.equal(r.length, 0, 'acknowledged at most every 10 minutes');
   r = await say(t, wa, 'menu');
   assert.equal(r.length, 1);
+});
+
+test('handover: assistant takes the chat back after 15 minutes with no staff reply; stays quiet once staff reply', async () => {
+  const { getConversation, saveConversation, setHandover } = await import('../src/bot/state.js');
+  const t = makeTenant();
+  const wa = '447700900016';
+  await say(t, wa, 'talk to a human');
+  const c = getConversation(t.id, wa);
+  c.data.handoverAt = new Date(Date.now() - 16 * 60000).toISOString();
+  saveConversation(c);
+  let r = await say(t, wa, 'menu please');
+  assert.ok(r.length >= 1);
+  assert.equal(getConversation(t.id, wa).humanHandover, false, 'nobody replied, so the assistant is back');
+
+  // a staff member replies: the bot stays silent even after 15 minutes
+  const wa2 = '447700900017';
+  await say(t, wa2, 'talk to a human');
+  setHandover(t.id, wa2, true); // e.g. an Inbox reply
+  const c2 = getConversation(t.id, wa2);
+  c2.data.handoverAt = new Date(Date.now() - 60 * 60000).toISOString();
+  saveConversation(c2);
+  r = await say(t, wa2, 'thanks');
+  assert.equal(r.length, 0);
+  assert.equal(getConversation(t.id, wa2).humanHandover, true);
 });
 
 test('remove line and opt-in/out', async () => {

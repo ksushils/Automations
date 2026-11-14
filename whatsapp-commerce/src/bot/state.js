@@ -26,9 +26,11 @@ export function saveConversation(c) {
     .run(c.state, JSON.stringify(c.data || {}), JSON.stringify(c.cart || []), c.difyConversationId || null, c.humanHandover ? 1 : 0, c.id);
 }
 
+/** Staff take over (Inbox reply, "Take over", or a reply from the WhatsApp Business app) or give the chat back. */
 export function setHandover(tenantId, waId, on) {
   const c = getConversation(tenantId, waId);
   c.humanHandover = !!on;
+  if (on) c.data = { ...(c.data || {}), staffActiveAt: new Date().toISOString() };
   if (!on) c.state = 'idle';
   saveConversation(c);
   return c;
