@@ -169,3 +169,15 @@ test('OpenRouter routing: zero retention + provider allowlist', async () => {
     assert.equal(providerPrefs(), undefined);
   } finally { Object.assign(config, prev); }
 });
+
+test('knowledge retrieval: "deliver" finds a page that only says "delivery" and "ship", and plurals still match', async () => {
+  const { indexDoc, retrieve } = await import('../src/ai/rag.js');
+  const { getDb } = await import('../src/db.js');
+  const t = makeTenant();
+  const d = getDb();
+  const add = (name, text) => { const id = d.prepare("INSERT INTO knowledge_docs (tenant_id, name, source, status, text) VALUES (?, ?, 'text', 'ready', ?)").run(t.id, name, text).lastInsertRowid; return indexDoc(d.prepare('SELECT * FROM knowledge_docs WHERE id = ?').get(id)); };
+  await add('Shipping', 'We ship from Hertford worldwide. Delivery costs are shown at checkout once you enter your address.');
+  await add('Returns', 'You can return unused items within 30 days.');
+  assert.deepEqual((await retrieve(t.id, 'do you deliver to Ireland?', { k: 2 })).map((h) => h.doc), ['Shipping']);
+  assert.equal((await retrieve(t.id, 'what is your returns policy?', { k: 1 }))[0]?.doc, 'Returns');
+});

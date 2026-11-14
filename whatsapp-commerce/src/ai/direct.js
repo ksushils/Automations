@@ -73,7 +73,10 @@ export async function directTurn(ctx, text) {
   const agent = (S.ai?.mode || S.dify?.mode) === 'agent';
   const sym = S.business.currencySymbol || '£';
   const [kb, products] = await Promise.all([
-    retrieve(ctx.tenant.id, text, { k: 4 }).catch(() => []),
+    retrieve(ctx.tenant.id, text, { k: 4 }).catch(() => [])
+      // Nothing in the search index? Fall back to the keyword search with synonyms (deliver ≈ shipping ≈ postage…),
+      // so the AI isn't told "nothing relevant" and left to guess.
+      .then(async (hits) => (hits.length ? hits : (await import('../knowledge.js')).searchKnowledge(ctx.tenant.id, text, { limit: 3 }).map((h) => ({ doc: h.doc, url: h.url, text: h.text })))),
     agent ? Promise.resolve([]) : ctx.store.searchProducts(text, { limit: 5 }).catch(() => []),
   ]);
   const data = [

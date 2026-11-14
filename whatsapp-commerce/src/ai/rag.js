@@ -92,7 +92,8 @@ export async function reindexTenant(tenantId, { force = false } = {}) {
 // ---------- retrieval ----------
 const ftsQuery = (q) => {
   const terms = String(q || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
-  return terms.length ? terms.map((t) => `"${t}"`).join(' OR ') : null;
+  // Each word as written (stemmed: "returns" finds "return") and as a prefix ("deliver" finds "delivery", which stems differently).
+  return terms.length ? terms.map((t) => `"${t}" OR "${t}"*`).join(' OR ') : null;
 };
 const STOP = new Set('the and for you your are was were have has had can could would should will what when where which who why how does did do this that with from about into our not but any all get got there their them they its it is me my we us an a of to in on at by be or if'.split(' '));
 
