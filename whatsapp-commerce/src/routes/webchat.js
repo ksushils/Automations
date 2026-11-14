@@ -76,6 +76,7 @@ export function webchatRouter() {
       color: /^#[0-9a-f]{3,8}$/i.test(W.color || '') ? W.color : t.settings.storefront?.brandColor || '#128c4a',
       position: W.position === 'left' ? 'left' : 'right',
       greeting: W.greeting || 'Hi',
+      launcher: String(W.launcherText ?? DEFAULT_LAUNCHER).slice(0, 120), // speech bubble beside the button; '' hides it
       whatsapp: t.settings.business.whatsappNumber ? String(t.settings.business.whatsappNumber).replace(/\D/g, '') : null,
     };
     res.send(WIDGET.replace('__CFG__', JSON.stringify(cfg).replace(/</g, '\\u003c')));
@@ -83,14 +84,20 @@ export function webchatRouter() {
   return r;
 }
 
+export const DEFAULT_LAUNCHER = "Hello! I'm the chat assistant. Talk to me anytime.";
+
 const WIDGET = String.raw`(function(){
 if(window.__waChat)return;window.__waChat=1;
 var C=__CFG__,d=document,K='wachat-'+C.tenant,sid,last=0,open=false,polling,busy=0;
 try{sid=localStorage.getItem(K)}catch(e){}
 if(!sid){sid=(crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()).replace(/[^A-Za-z0-9]/g,'').slice(0,32);try{localStorage.setItem(K,sid)}catch(e){}}
 var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#111}'+
-'.wc-b{width:58px;height:58px;border-radius:50%;border:0;background:'+C.color+';color:#fff;font-size:26px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25)}'+
-'.wc-p{position:absolute;bottom:72px;'+C.position+':0;width:min(370px,calc(100vw - 32px));height:min(560px,calc(100vh - 110px));background:#fff;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.25);display:none;flex-direction:column;overflow:hidden}'+
+'.wc-b{width:68px;height:68px;border-radius:50%;border:0;background:'+C.color+';color:#fff;font-size:32px;line-height:1;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.25);transition:transform .15s}.wc-b:hover{transform:scale(1.06)}.wc-b:focus-visible{outline:3px solid #fff;outline-offset:2px}'+
+'.wc-l{position:absolute;bottom:12px;'+C.position+':80px;width:max-content;max-width:min(240px,calc(100vw - 120px));background:#fff;color:#111;padding:10px 30px 10px 14px;border-radius:14px;box-shadow:0 6px 20px rgba(0,0,0,.18);font-size:14px;line-height:1.35;cursor:pointer;animation:wcin .3s ease-out}'+
+'.wc-l:after{content:"";position:absolute;bottom:16px;'+(C.position==='left'?'left:-6px':'right:-6px')+';width:12px;height:12px;background:#fff;transform:rotate(45deg)}'+
+'.wc-lx{position:absolute;top:4px;right:6px;border:0;background:none;color:#889;font-size:16px;line-height:1;cursor:pointer;padding:2px}.wc.open .wc-l{display:none}'+
+'@keyframes wcin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}@media (prefers-reduced-motion:reduce){.wc-l{animation:none}.wc-b{transition:none}}'+
+'.wc-p{position:absolute;bottom:84px;'+C.position+':0;width:min(370px,calc(100vw - 32px));height:min(560px,calc(100vh - 110px));background:#fff;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.25);display:none;flex-direction:column;overflow:hidden}'+
 '.wc-p.on{display:flex}.wc-h{background:'+C.color+';color:#fff;padding:12px 14px}.wc-h b{display:block;font-size:15px}.wc-h span{opacity:.85;font-size:12px}.wc-x{float:right;background:none;border:0;color:#fff;font-size:20px;cursor:pointer}'+
 '.wc-m{flex:1;overflow-y:auto;padding:12px;background:#f4f6f5;display:flex;flex-direction:column;gap:6px}.wc-q{max-width:85%;padding:8px 10px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word}'+
 '.wc-q.u{align-self:flex-end;background:'+C.color+';color:#fff}.wc-q.a{align-self:flex-start;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,.06)}.wc-q img{max-width:100%;border-radius:8px;display:block;margin-bottom:4px}'+
@@ -99,7 +106,7 @@ var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;f
 '.wc-w{font-size:12px;text-align:center;padding:4px;color:#667}.wc-w a{color:inherit}.wc-t{align-self:flex-start;color:#889;font-size:12px}';
 var st=d.createElement('style');st.textContent=css;d.head.appendChild(st);
 var w=d.createElement('div');w.className='wc';
-w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button><b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f"><input placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.whatsapp?'<div class="wc-w">Prefer WhatsApp? <a target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Chat there</a></div>':'')+'</div><button class="wc-b" aria-label="Open chat">💬</button>';
+w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button><b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f"><input placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.whatsapp?'<div class="wc-w">Prefer WhatsApp? <a target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Chat there</a></div>':'')+'</div>'+(C.launcher?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
 w.querySelector('.wc-h b').textContent=C.title;w.querySelector('.wc-h span').textContent=C.subtitle;
 var P=w.querySelector('.wc-p'),M=w.querySelector('.wc-m'),F=w.querySelector('form'),I=F.querySelector('input');
 function esc(s){var e=d.createElement('div');e.textContent=s==null?'':String(s);return e.innerHTML}
@@ -126,8 +133,13 @@ function send(body,label){
 function poll(){if(busy)return;fetch(C.api+'/poll?sessionId='+sid+'&after='+last).then(function(r){return r.json()}).then(function(r){if(last&&r.messages)r.messages.forEach(render);last=Math.max(last,r.lastId||0)}).catch(function(){})}
 M.addEventListener('click',function(e){var b=e.target.closest('button[data-a]');if(b)send({actionId:b.dataset.a},b.dataset.l)});
 F.onsubmit=function(e){e.preventDefault();var v=I.value.trim();if(!v)return;I.value='';send({text:v},v)};
-function toggle(){open=!open;P.classList.toggle('on',open);if(open){I.focus();if(!M.children.length)send({text:C.greeting});clearInterval(polling);polling=setInterval(poll,8000);poll()}else clearInterval(polling)}
+function toggle(){open=!open;P.classList.toggle('on',open);w.classList.toggle('open',open);if(open){I.focus();if(!M.children.length)send({text:C.greeting});clearInterval(polling);polling=setInterval(poll,8000);poll()}else clearInterval(polling)}
 w.querySelector('.wc-b').onclick=toggle;w.querySelector('.wc-x').onclick=toggle;
+var L=w.querySelector('.wc-l');
+if(L){var hid=0;try{hid=localStorage.getItem(K+'-hint')==='1'}catch(e){}
+  if(hid)L.remove();else{L.querySelector('span').textContent=C.launcher;
+    L.onclick=function(e){if(e.target.closest('.wc-lx')){e.stopPropagation();L.remove();try{localStorage.setItem(K+'-hint','1')}catch(e2){}return}toggle()};
+    L.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}}}}
 (d.body||d.documentElement).appendChild(w);
 })();`;
 
