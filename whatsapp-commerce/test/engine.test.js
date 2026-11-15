@@ -148,6 +148,7 @@ test('bookings shop (store type "none"): booking menu, booking link, no basket, 
   const t = makeTenant({ store: { type: 'none' }, business: { bookingUrl: 'https://karat.example/experiences' } });
   let r = await say(t, '447700900020', 'menu');
   assert.deepEqual(r[0].buttons.map((b) => b.id), ['book', 'ask', 'human']);
+  assert.equal(r[0].buttons[0].title, '📅 How to book');
   r = await say(t, '447700900020', { action: 'book' });
   assert.equal(r[0].type, 'cta');
   assert.equal(r[0].url, 'https://karat.example/experiences');
@@ -157,4 +158,12 @@ test('bookings shop (store type "none"): booking menu, booking link, no basket, 
   assert.match(p, /never offer a basket, cart or checkout/);
   assert.match(p, /bookings: https:\/\/karat\.example\/experiences/);
   assert.doesNotMatch(p, /Fulfilment options/);
+});
+
+test('bookings shop: menu and link button labels can be changed (e.g. a shop with its own checkout)', async () => {
+  const t = makeTenant({ store: { type: 'none' }, business: { bookingUrl: 'https://shop.example/products', bookingButton: '🛒 How to buy', bookingLinkText: 'Shop now' } });
+  let r = await say(t, '447700900021', 'menu');
+  assert.equal(r[0].buttons[0].title, '🛒 How to buy');
+  r = await say(t, '447700900021', { action: 'book' });
+  assert.equal(r[0].buttonText, 'Shop now');
 });

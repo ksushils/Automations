@@ -52,7 +52,7 @@ function mainMenu(ctx, intro) {
     return {
       type: 'buttons',
       text: intro || `What would you like to do? You can also just type your question (e.g. "${ctx.S.business.exampleQuery || 'how much is a test day?'}").`,
-      buttons: [{ id: 'book', title: '📅 How to book' }, { id: 'ask', title: '❓ Ask a question' }, { id: 'human', title: '🙋 Talk to a person' }],
+      buttons: [{ id: 'book', title: String(ctx.S.business.bookingButton || '📅 How to book').slice(0, 20) }, { id: 'ask', title: '❓ Ask a question' }, { id: 'human', title: '🙋 Talk to a person' }],
     };
   }
   const n = ctx.conv.cart.reduce((s, i) => s + i.quantity, 0);
@@ -317,7 +317,7 @@ function setAddress(ctx, text) {
 function bookInfo(ctx) {
   const url = ctx.S.business.bookingUrl || ctx.S.business.website;
   const text = ctx.S.business.bookingInfo || `You can book online${url ? ' here' : ''}. Tell me what you're interested in and I'll point you to the right page.`;
-  if (url) return ctx.reply({ type: 'cta', text, buttonText: 'Book online', url });
+  if (url) return ctx.reply({ type: 'cta', text, buttonText: String(ctx.S.business.bookingLinkText || 'Book online').slice(0, 20), url });
   return ctx.reply(mainMenu(ctx, text));
 }
 
