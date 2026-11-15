@@ -39,8 +39,11 @@ export function addTextDoc(tenantId, { name, text, source = 'text', url = null }
   const clean = String(text || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
   if (clean.length < 20) throw Object.assign(new Error('The text is too short to be useful'), { status: 400 });
   if (clean.length > 500000) throw Object.assign(new Error('Text is too long (max 500,000 characters) – split it into several documents'), { status: 400 });
-  // re-importing the same URL / name replaces the old version
-  const existing = getDb().prepare("SELECT id FROM knowledge_docs WHERE tenant_id = ? AND status != 'deleted' AND ((url IS NOT NULL AND url = ?) OR (source = ? AND name = ?))").get(tenantId, url, source, String(name));
+  // re-importing the same page replaces the old version: web pages are matched by address (two pages can share a
+  // title, e.g. "Hot Deals"), typed documents by name
+  const existing = url
+    ? getDb().prepare("SELECT id FROM knowledge_docs WHERE tenant_id = ? AND status != 'deleted' AND url = ?").get(tenantId, url)
+    : getDb().prepare("SELECT id FROM knowledge_docs WHERE tenant_id = ? AND status != 'deleted' AND url IS NULL AND source = ? AND name = ?").get(tenantId, source, String(name));
   if (existing) {
     getDb().prepare("UPDATE knowledge_docs SET text = ?, size = ?, status = 'pending', error = NULL, updated_at = datetime('now') WHERE id = ?").run(clean, Buffer.byteLength(clean), existing.id);
     reindex(existing.id);

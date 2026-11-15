@@ -62,3 +62,16 @@ test('weekly website re-read: updates changed pages, keeps unchanged, removes pa
     server.close();
   }
 });
+
+test('two web pages with the same title are kept as two documents (matched by address, not title)', async () => {
+  const { addTextDoc, listDocs } = await import('../src/knowledge.js');
+  const t = makeTenant();
+  addTextDoc(t.id, { name: 'Hot Deals', text: 'Deals page: graphics cards from AED 749 and more offers.', source: 'url', url: 'https://shop.example/deals' });
+  addTextDoc(t.id, { name: 'Hot Deals', text: 'Collection page: hot deals on monitors and laptops this week.', source: 'url', url: 'https://shop.example/collections/hot-deals' });
+  assert.equal(listDocs(t.id).filter((d) => d.name === 'Hot Deals').length, 2);
+  addTextDoc(t.id, { name: 'Hot Deals', text: 'Deals page updated: graphics cards from AED 699 and more offers.', source: 'url', url: 'https://shop.example/deals' });
+  assert.equal(listDocs(t.id).filter((d) => d.name === 'Hot Deals').length, 2, 're-importing a page replaces that page only');
+  addTextDoc(t.id, { name: 'Opening hours', text: 'Open Monday to Saturday, 9am to 6pm.' });
+  addTextDoc(t.id, { name: 'Opening hours', text: 'Open Monday to Saturday, 9am to 7pm.' });
+  assert.equal(listDocs(t.id).filter((d) => d.name === 'Opening hours').length, 1, 'typed documents still replace by name');
+});
