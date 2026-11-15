@@ -781,7 +781,7 @@ async function askDirect(ctx, text) {
   // or looked up by the bolded names it wrote), else — only if it pointed to the list — the search results.
   const named = await namedProducts(ctx, out, products);
   const shown = named.length ? named : /view products/i.test(out) || S_agent(ctx) ? products : [];
-  const say = shown.length ? out : out.replace(/\n*\s*Tap \*?View products\*? below to order 👇\s*$/i, '').trim();
+  const say = shown.length ? out : out.replace(/\n*\s*Tap \*?View products\*? below to order\s*👇?[.!\s]*$/i, '').trim();
   if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(productList(ctx, shown, say || 'Here are some products you might like:')); }
   else ctx.reply({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." });
 }

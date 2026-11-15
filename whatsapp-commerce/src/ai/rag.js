@@ -90,8 +90,22 @@ export async function reindexTenant(tenantId, { force = false } = {}) {
 }
 
 // ---------- retrieval ----------
+// Words people use for a topic that pages title differently ("my son is 14" → under-18s; "included" → "involves").
+const EXPAND = [
+  [/\b(son|daughter|child|children|kid|kids|teen|teenager|junior|1[0-7]|aged?|young)\b/, ['under', '18s', 'junior', 'age', 'minimum']],
+  [/\b(included|include|includes|what do i get|what you get)\b/, ['includes', 'involves', 'included']],
+  [/\b(cost|price|prices|how much|fee|fees)\b/, ['price', 'cost', 'fee']],
+  [/\b(rain|raining|weather|wet)\b/, ['weather', 'rain', 'wet']],
+  [/\b(refund|cancel|cancellation|reschedule|change my booking)\b/, ['cancellation', 'refund', 'change']],
+];
+export function queryTerms(q) {
+  const text = String(q || '').toLowerCase();
+  const terms = text.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
+  for (const [re, extra] of EXPAND) if (re.test(text)) terms.push(...extra);
+  return [...new Set(terms)];
+}
 const ftsQuery = (q) => {
-  const terms = String(q || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));
+  const terms = queryTerms(q);
   // Each word as written (stemmed: "returns" finds "return") and as a prefix ("deliver" finds "delivery", which stems differently).
   return terms.length ? terms.map((t) => `"${t}" OR "${t}"*`).join(' OR ') : null;
 };
@@ -114,6 +128,19 @@ export async function retrieve(tenantId, query, { k = 4 } = {}) {
     } catch (e) {
       console.warn('[rag] query embedding failed:', e.message);
     }
+  }
+  // Pages whose *title* matches the question rank higher: on a site with 30 test-day programmes, the guide called
+  // "What a test day involves" should win "what's included in a test day?".
+  const terms = queryTerms(query).filter((t) => t.length > 2);
+  if (terms.length) {
+    const words = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/);
+    const hits = (name) => { const w = words(name); return terms.filter((t) => w.some((x) => x === t || (t.length >= 4 && x.startsWith(t.slice(0, Math.max(4, t.length - 2)))))).length; };
+    const docs = d.prepare("SELECT id, name FROM knowledge_docs WHERE tenant_id = ? AND status NOT IN ('deleted', 'to_delete')").all(tenantId)
+      .map((x) => ({ ...x, h: hits(x.name) })).filter((x) => x.h >= Math.min(2, terms.length)).sort((a, b) => b.h - a.h).slice(0, 3);
+    docs.forEach((doc, i) => {
+      const first = d.prepare('SELECT id FROM knowledge_chunks WHERE doc_id = ? ORDER BY idx LIMIT 2').all(doc.id);
+      first.forEach((c) => { add(c.id, i); add(c.id, i); }); // counts like being top in two searches
+    });
   }
   const top = [...ranked.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([id]) => id);
   if (!top.length) return [];

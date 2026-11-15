@@ -181,3 +181,16 @@ test('knowledge retrieval: "deliver" finds a page that only says "delivery" and 
   assert.deepEqual((await retrieve(t.id, 'do you deliver to Ireland?', { k: 2 })).map((h) => h.doc), ['Shipping']);
   assert.equal((await retrieve(t.id, 'what is your returns policy?', { k: 1 }))[0]?.doc, 'Returns');
 });
+
+test('knowledge ranking: a page whose title matches the question wins over many pages that only mention the words', async () => {
+  const { indexDoc, retrieve } = await import('../src/ai/rag.js');
+  const { getDb } = await import('../src/db.js');
+  const t = makeTenant();
+  const d = getDb();
+  const add = async (name, text) => { const id = d.prepare("INSERT INTO knowledge_docs (tenant_id, name, source, status, text) VALUES (?, ?, 'text', 'ready', ?)").run(t.id, name, text).lastInsertRowid; await indexDoc(d.prepare('SELECT * FROM knowledge_docs WHERE id = ?').get(id)); };
+  for (let i = 1; i <= 12; i++) await add(`GB${i} test day programme`, `A test day in the GB${i}. Each test day includes track time. Book a test day today. Test day test day.`);
+  await add('What a test day involves', 'You get an engineer, a mechanic, tyres and fuel, and data and video afterwards.');
+  await add('Under 18s', 'Drivers aged 8 to 17 can book karting with a parent or guardian present.');
+  assert.ok((await retrieve(t.id, "what's included in a test day?", { k: 3 })).some((h) => h.doc === 'What a test day involves'));
+  assert.equal((await retrieve(t.id, 'my son is 14, can he do karting with you?', { k: 3 }))[0]?.doc, 'Under 18s');
+});
