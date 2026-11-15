@@ -27,7 +27,7 @@ export function onboardingStatus(tenant) {
   const d = getDb();
   const count = (sql, ...a) => d.prepare(sql).get(...a).n;
   const products = s.store.type === 'manual' ? (s.store.manual?.products || []).length : null;
-  const storeConnected = s.store.type === 'manual' ? products > 0
+  const storeConnected = s.store.type === 'none' ? true : s.store.type === 'manual' ? products > 0
     : s.store.type === 'shopify_public' ? !!s.store.shopify?.domain
       : s.store.type === 'shopify' ? !!(s.store.shopify?.domain && s.store.shopify?.adminToken)
         : s.store.type === 'woocommerce' ? !!(s.store.woocommerce?.url && s.store.woocommerce?.consumerKey)
@@ -45,7 +45,7 @@ export function onboardingStatus(tenant) {
   const skipped = s.onboarding?.skipped || {};
   const seen = json(d.prepare('SELECT value FROM kv WHERE key = ?').get(`widget_seen:${tenant.id}`)?.value, null);
   // Shopify (website) and WooCommerce orders go through the shop's own checkout, which already handles payment and delivery.
-  const ownCheckout = ['shopify_public', 'woocommerce'].includes(s.store.type);
+  const ownCheckout = ['shopify_public', 'woocommerce', 'none'].includes(s.store.type);
   const O = s.ordering || {};
 
   const steps = [

@@ -142,3 +142,19 @@ test('remove line and opt-in/out', async () => {
   r = await say(t, wa, 'stop');
   assert.equal(latestConsent(t.id, wa).status, 'withdrawn');
 });
+
+test('bookings shop (store type "none"): booking menu, booking link, no basket, AI told not to sell', async () => {
+  const { buildPrompt } = await import('../src/dify/provision.js');
+  const t = makeTenant({ store: { type: 'none' }, business: { bookingUrl: 'https://karat.example/experiences' } });
+  let r = await say(t, '447700900020', 'menu');
+  assert.deepEqual(r[0].buttons.map((b) => b.id), ['book', 'ask', 'human']);
+  r = await say(t, '447700900020', { action: 'book' });
+  assert.equal(r[0].type, 'cta');
+  assert.equal(r[0].url, 'https://karat.example/experiences');
+  r = await say(t, '447700900020', { action: 'browse' });
+  assert.equal(r[0].type, 'cta', 'browse goes to booking too');
+  const p = buildPrompt(tenants.getTenant(t.id));
+  assert.match(p, /never offer a basket, cart or checkout/);
+  assert.match(p, /bookings: https:\/\/karat\.example\/experiences/);
+  assert.doesNotMatch(p, /Fulfilment options/);
+});

@@ -563,9 +563,9 @@ async function catalogue() {
 
 // ---------- settings ----------
 const FIELDS = [
-  ['Business', [['business.name', 'Business name'], ['business.currency', 'Currency code (GBP)'], ['business.currencySymbol', 'Currency symbol'], ['business.welcomeMessage', 'Welcome message ({{name}} = first name)', 'textarea'], ['business.supportHours', 'Support hours'], ['business.exampleQuery', 'Example search shown to customers'], ['business.whatsappNumber', 'Public WhatsApp number (for storefront buttons, e.g. 447700900123)'], ['business.timezone', 'Timezone (e.g. Europe/London)'], ['business.tagline', 'Storefront tagline'], ['business.logoUrl', 'Logo image URL'], ['business.customDomain', 'Custom storefront domain (CNAME to this server)']]],
+  ['Business', [['business.name', 'Business name'], ['business.currency', 'Currency code (GBP)'], ['business.currencySymbol', 'Currency symbol'], ['business.welcomeMessage', 'Welcome message ({{name}} = first name)', 'textarea'], ['business.supportHours', 'Support hours'], ['business.exampleQuery', 'Example search shown to customers'], ['business.whatsappNumber', 'Public WhatsApp number (for storefront buttons, e.g. 447700900123)'], ['business.timezone', 'Timezone (e.g. Europe/London)'], ['business.tagline', 'Storefront tagline'], ['business.logoUrl', 'Logo image URL'], ['business.customDomain', 'Custom storefront domain (CNAME to this server)'], ['business.bookingUrl', 'Booking page (for "enquiries and bookings" shops)']]],
   ['WhatsApp Cloud API (Meta)', [['whatsapp.phoneNumberId', 'Phone number ID'], ['whatsapp.wabaId', 'WhatsApp Business Account ID'], ['whatsapp.accessToken', 'Permanent access token (System User)', 'secret'], ['whatsapp.appSecret', 'App secret (verifies webhook signatures)', 'secret'], ['whatsapp.verifyToken', 'Webhook verify token']]],
-  ['Store connection', [['store.type', 'Store type (shopify_public = just your Shopify website address)', 'select', ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom']], ['store.shopify.domain', 'Shopify domain (yourshop.co.uk or yourshop.myshopify.com)'], ['store.shopify.adminToken', 'Shopify Admin API access token (shpat_…)', 'secret'], ['store.woocommerce.url', 'WooCommerce site URL (https://…)'], ['store.woocommerce.consumerKey', 'WooCommerce consumer key (ck_…)', 'secret'], ['store.woocommerce.consumerSecret', 'WooCommerce consumer secret (cs_…)', 'secret'], ['store.custom.baseUrl', 'Custom VPS store API base URL'], ['store.custom.apiKey', 'Custom store API key', 'secret']]],
+  ['Store connection', [['store.type', 'Store type (shopify_public = just your Shopify website address)', 'select', ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom', 'none']], ['store.shopify.domain', 'Shopify domain (yourshop.co.uk or yourshop.myshopify.com)'], ['store.shopify.adminToken', 'Shopify Admin API access token (shpat_…)', 'secret'], ['store.woocommerce.url', 'WooCommerce site URL (https://…)'], ['store.woocommerce.consumerKey', 'WooCommerce consumer key (ck_…)', 'secret'], ['store.woocommerce.consumerSecret', 'WooCommerce consumer secret (cs_…)', 'secret'], ['store.custom.baseUrl', 'Custom VPS store API base URL'], ['store.custom.apiKey', 'Custom store API key', 'secret']]],
   ['AI (Dify)', [['dify.enabled', 'Enable AI replies', 'bool'], ['dify.baseUrl', 'Dify API base URL'], ['dify.apiKey', 'Dify app API key (app-…)', 'secret'], ['dify.mode', 'Mode', 'select', ['assist', 'agent']]]],
   ['Ordering & payment', [['ordering.paymentMethods', 'Payment methods (comma: payment_link,cod,bank_transfer)', 'csv'], ['ordering.paymentLinkUrl', 'Payment link for built-in catalogue (e.g. Stripe link; {total} {order})'], ['ordering.bankDetails', 'Bank transfer details', 'textarea'], ['ordering.fulfilment', 'Fulfilment (comma: delivery,pickup)', 'csv'], ['ordering.deliveryFee', 'Delivery fee', 'number'], ['ordering.freeDeliveryOver', 'Free delivery over (0 = never)', 'number'], ['ordering.minOrder', 'Minimum order (0 = none)', 'number'], ['ordering.pickupAddress', 'Collection address'], ['ordering.paymentReminderMinutes', 'Remind unpaid orders after minutes (0 = off)', 'number'], ['ordering.askNote', 'Let customers add an order note', 'bool'], ['ordering.lowStockAlert', 'Low-stock alert at (built-in catalogue)', 'number']]],
   ['Promo codes & delivery zones', [['ordering.promoCodes', 'Promo codes (JSON) – [{"code":"WELCOME10","type":"percent|fixed|free_delivery","value":10,"minSpend":0,"expires":"2026-12-31","maxUses":0,"oncePerCustomer":true}]', 'json'], ['ordering.deliveryZones', 'Delivery zones (JSON, empty = deliver anywhere) – [{"name":"Central London","postcodes":["SW1","W1","EC"],"fee":3.5,"minOrder":15,"freeOver":50}]', 'json']]],
@@ -736,7 +736,7 @@ async function templates() {
 }
 
 // ---------- shop owner: step-by-step guide (top of Overview) ----------
-const STORE_NAMES = { manual: 'your own product list', shopify_public: 'your Shopify shop', shopify: 'your Shopify shop', woocommerce: 'your WooCommerce shop', custom: 'your shop system' };
+const STORE_NAMES = { none: 'nothing: you take bookings and enquiries on your website', manual: 'your own product list', shopify_public: 'your Shopify shop', shopify: 'your Shopify shop', woocommerce: 'your WooCommerce shop', custom: 'your shop system' };
 async function shopGuide(t) {
   const el = $('#guide');
   if (!el) return;
@@ -774,6 +774,7 @@ async function shopGuide(t) {
           <div class="row">
             <div class="card" style="margin:0"><b>🟢 I use Shopify</b><p class="mute">Just type your shop address. Nothing to install.</p><input id="g-shop" placeholder="yourshop.co.uk or yourshop.myshopify.com"><p><button class="btn" id="g-shopgo">Connect Shopify</button></p></div>
             <div class="card" style="margin:0"><b>🟣 I use WooCommerce</b><p class="mute">In WordPress go to WooCommerce → Settings → Advanced → REST API → Add key (Read). Paste the two keys.</p><input id="g-wurl" placeholder="https://yourshop.co.uk"><input id="g-wck" placeholder="Consumer key ck_…" style="margin-top:6px"><input id="g-wcs" type="password" placeholder="Consumer secret cs_…" style="margin-top:6px"><p><button class="btn" id="g-woogo">Connect WooCommerce</button></p></div>
+            <div class="card" style="margin:0"><b>📅 We take bookings, not orders</b><p class="mute">Services, experiences, appointments. The assistant answers questions and sends people to your booking page.</p><input id="g-book" placeholder="Booking page, e.g. https://yoursite.co.uk/book"><p><button class="btn" id="g-bookgo">Use bookings</button></p></div>
             <div class="card" style="margin:0"><b>✍️ Neither</b><p class="mute">Add your products here, one by one or from a spreadsheet (CSV).</p><p><button class="btn" data-gtab="catalogue">Add products</button></p></div>
           </div><div id="g-res" class="mute" style="margin-top:8px"></div>`;
       case 'assistant': return `<p>Your assistant answers from what you write here. Short and plain is best.</p>
@@ -878,6 +879,11 @@ async function shopGuide(t) {
     const r = await api(T('/onboarding/website'), { method: 'POST', body: { url: $('#g-site').value } });
     res(`✅ Found <b>${esc(r.site.name || r.site.domain)}</b>${r.store ? ' and connected its products' : ''}. Imported ${r.imported.length} page(s): ${esc(r.imported.map((x) => x.name).join(', ') || 'none')}`);
     setTimeout(() => reload(false), 2500);
+  });
+  on('g-bookgo', async () => {
+    let url = $('#g-book').value.trim(); if (url && !/^https?:\/\//.test(url)) url = 'https://' + url;
+    await patch({ store: { type: 'none' }, business: { bookingUrl: url, welcomeMessage: `Hi{{name}}! 👋 Welcome to ${s.business.name}. Ask me anything, or tap below.` } });
+    toast('Saved: enquiries and bookings'); reload(false);
   });
   on('g-okeygo', async () => {
     const key = $('#g-okey').value.trim();

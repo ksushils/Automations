@@ -77,7 +77,7 @@ export async function directTurn(ctx, text) {
       // Nothing in the search index? Fall back to the keyword search with synonyms (deliver ≈ shipping ≈ postage…),
       // so the AI isn't told "nothing relevant" and left to guess.
       .then(async (hits) => (hits.length ? hits : (await import('../knowledge.js')).searchKnowledge(ctx.tenant.id, text, { limit: 3 }).map((h) => ({ doc: h.doc, url: h.url, text: h.text })))),
-    agent ? Promise.resolve([]) : ctx.store.searchProducts(text, { limit: 5 }).catch(() => []),
+    agent || S.store?.type === 'none' ? Promise.resolve([]) : ctx.store.searchProducts(text, { limit: 5 }).catch(() => []),
   ]);
   const data = [
     kb.length ? `Knowledge base:\n${kb.map((c, i) => `[${i + 1}] (${c.doc}${c.url ? ` – ${c.url}` : ''})\n${c.text}`).join('\n\n')}` : 'Knowledge base: (nothing relevant found)',

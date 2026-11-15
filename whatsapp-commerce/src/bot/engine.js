@@ -46,7 +46,15 @@ function availablePaymentMethods(tenant, store) {
 }
 
 // ---------- screens ----------
+const bookingsOnly = (ctx) => ctx.S.store?.type === 'none';
 function mainMenu(ctx, intro) {
+  if (bookingsOnly(ctx)) {
+    return {
+      type: 'buttons',
+      text: intro || `What would you like to do? You can also just type your question (e.g. "${ctx.S.business.exampleQuery || 'how much is a test day?'}").`,
+      buttons: [{ id: 'book', title: '📅 How to book' }, { id: 'ask', title: '❓ Ask a question' }, { id: 'human', title: '🙋 Talk to a person' }],
+    };
+  }
   const n = ctx.conv.cart.reduce((s, i) => s + i.quantity, 0);
   return {
     type: 'buttons',
@@ -305,6 +313,14 @@ function setAddress(ctx, text) {
   return nextCheckoutStep(ctx);
 }
 
+// ---------- enquiries & bookings shops ----------
+function bookInfo(ctx) {
+  const url = ctx.S.business.bookingUrl || ctx.S.business.website;
+  const text = ctx.S.business.bookingInfo || `You can book online${url ? ' here' : ''}. Tell me what you're interested in and I'll point you to the right page.`;
+  if (url) return ctx.reply({ type: 'cta', text, buttonText: 'Book online', url });
+  return ctx.reply(mainMenu(ctx, text));
+}
+
 // ---------- order status ----------
 const realPhone = (ctx) => (String(ctx.conv.waId).startsWith('web:') ? null : ctx.conv.waId); // website chat has no phone
 const fmtDay = (iso) => { try { return new Date(iso).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }); } catch { return ''; } };
@@ -426,7 +442,9 @@ async function handleAction(ctx, id) {
   switch (cmd) {
     case 'menu': return ctx.reply(mainMenu(ctx));
     case 'more': return ctx.reply(moreMenu());
-    case 'browse': return showCategories(ctx);
+    case 'browse': if (bookingsOnly(ctx)) return bookInfo(ctx); return showCategories(ctx);
+    case 'book': return bookInfo(ctx);
+    case 'ask': return ctx.reply({ type: 'text', text: 'Sure, type your question and I\'ll answer from our information. 🙂' });
     case 'cat': return showCategory(ctx, arg);
     case 'p': return showProduct(ctx, arg);
     case 'v': { const [pid, vid] = arg.split('|'); return chooseVariant(ctx, pid, vid); }
