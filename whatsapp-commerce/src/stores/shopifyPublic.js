@@ -76,13 +76,27 @@ export function shopifyPublicStore(settings, { currency = 'GBP' } = {}) {
       return { ok: true, name: meta?.name, products: n, currency: meta?.currency };
     },
     async searchProducts(q, { limit = 10 } = {}) {
-      const words = String(q || '').toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, ' ').split(/\s+/).filter((w) => w.length > 1 && !STOP.has(w));
-      const list = await all();
+      const text = String(q || '').toLowerCase();
+      const { max, min } = priceLimits(text);
+      const raw = text.replace(/(under|below|less than|up to|max(imum)?|over|above|more than|min(imum)?|from)\s*£?\s*\d+(\.\d+)?/g, ' ')
+        .replace(/[^\p{L}\p{N}\s-]/gu, ' ').split(/\s+/).filter((w) => w.length > 1 && !STOP.has(w) && !/^\d+$/.test(w));
+      // each word plus its singular and UK/US spelling: "batteries" finds "Battery", "tyres" finds "Tire"
+      const forms = raw.map((w) => [...new Set([w, singular(w), ...(SPELL[w] || []), ...(SPELL[singular(w)] || [])])]);
+      const words = [...new Set(forms.flat())];
+      const wantsCar = /\b(car|cars|kit|kits|chassis|rtr|ready to run|starter|beginner|new to)\b/.test(text) && !/\b(part|parts|spare|spares|for my|upgrade)\b/.test(text);
+      let list = (await all()).filter((p) => !SERVICE.test(p.title) && !SERVICE.test(p.type || '') && p.price > 0);
+      if (max) list = list.filter((p) => p.price <= max);
+      if (min) list = list.filter((p) => p.price >= min);
       if (!words.length) return list.filter((p) => p.available).slice(0, limit);
-      // must match the title/tags/brand, in-stock first, and drop weak matches relative to the best one
-      const scored = list.map((p) => [p, score(p, words)]).filter(([p, s]) => s >= 2 && words.some((w) => `${p.title} ${p.tags.join(' ')} ${p.vendor || ''} ${p.type || ''}`.toLowerCase().includes(w)));
-      const top = Math.max(0, ...scored.map(([, s]) => s));
-      return scored.filter(([, s]) => s >= top * 0.5).sort((a, b) => (b[0].available - a[0].available) || b[1] - a[1]).slice(0, limit).map(([p]) => p);
+      const scored = list.map((p) => {
+        const hay = `${p.title} ${p.tags.join(' ')} ${p.vendor || ''} ${p.type || ''}`.toLowerCase();
+        // a concept counts once whichever form matched, so plurals don't outweigh real matches
+        let s2 = forms.reduce((acc, f) => acc + Math.max(...f.map((w) => score(p, [w]))), 0);
+        if (wantsCar && CAR.test(p.title) && p.price >= 80) s2 += 15; // a whole car, not a part with "kit" in its name
+        return [p, s2, forms.some((f) => f.some((w) => hay.includes(w)))];
+      }).filter(([, s2, hit]) => s2 >= 2 && hit);
+      const top = Math.max(0, ...scored.map(([, s2]) => s2));
+      return scored.filter(([, s2]) => s2 >= top * 0.5).sort((x, y) => (y[0].available - x[0].available) || y[1] - x[1]).slice(0, limit).map(([p]) => p);
     },
     async listCategories() {
       return cached(`${domain}:cols`, 600000, async () => {
@@ -134,4 +148,14 @@ export function shopifyPublicStore(settings, { currency = 'GBP' } = {}) {
   }
 }
 
-const STOP = new Set(['the', 'and', 'for', 'you', 'have', 'do', 'any', 'with', 'what', 'is', 'are', 'can', 'get', 'got', 'need', 'want', 'looking', 'please', 'me', 'my', 'some', 'show', 'sell', 'buy', 'hi', 'hello', 'a', 'an', 'of', 'in', 'to', 'it', 'this', 'that']);
+const stem = (w) => (w.length > 6 && w.endsWith('ing') ? w.slice(0, -3) : w); // drifting -> drift
+const singular = (w) => stem(w.length > 4 && w.endsWith('ies') ? w.slice(0, -3) + 'y' : w.length > 4 && /(ches|shes|sses|xes)$/.test(w) ? w.slice(0, -2) : w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w);
+const SPELL = { tyre: ['tire'], tire: ['tyre'], tyres: ['tires'], tires: ['tyres'], colour: ['color'], color: ['colour'], aluminium: ['aluminum', 'alum'], aluminum: ['aluminium', 'alum'], tyers: ['tyre', 'tire'], battery: ['li-po', 'lipo', 'nimh', 'li-ion'], lipo: ['li-po', 'battery'], charger: ['charger', 'charging'] };
+const SERVICE = /^(shipping|postage|delivery) service|gift ?card|^service\b/i;
+const CAR = /(drift car|car kit|chassis kit|\brtr\b|ready.to.run|rwd drift car|awd drift car|\bkit\b.*(rwd|awd|drift))/i;
+export function priceLimits(text) {
+  const n = (re) => { const m = String(text).match(re); return m ? Number(m[2]) : null; };
+  return { max: n(/(under|below|less than|up to|max(?:imum)?|cheaper than)\s*£?\s*(\d+(?:\.\d+)?)/), min: n(/(over|above|more than|min(?:imum)?|at least)\s*£?\s*(\d+(?:\.\d+)?)/) };
+}
+
+const STOP = new Set(['the', 'and', 'for', 'you', 'have', 'do', 'any', 'with', 'what', 'is', 'are', 'can', 'get', 'got', 'need', 'want', 'looking', 'please', 'me', 'my', 'some', 'show', 'sell', 'buy', 'hi', 'hello', 'a', 'an', 'of', 'in', 'to', 'it', 'this', 'that', 'best', 'good', 'cheap', 'new', 'which', 'recommend', 'suggest', 'under', 'over', 'stock', 'price', 'much', 'how', 'your', 'there', 'they', 'them']);

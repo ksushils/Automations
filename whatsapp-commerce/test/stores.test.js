@@ -116,3 +116,21 @@ test('Shopify order status: phone match, or email/postcode proof; website chat m
     assert.match(r[0].text, /Royal Mail QB768126034GB/);
   } finally { f.mock.restore(); }
 });
+
+test('Shopify website search: plurals, tyre/tire, battery=LiPo, price limits, whole cars first, no shipping-service items', async () => {
+  const { shopifyPublicStore } = await import('../src/stores/shopifyPublic.js');
+  const P = (id, title, price, extra = {}) => ({ id, handle: 'h' + id, title, body_html: '', tags: '', vendor: '', product_type: 'simple', images: [], variants: [{ id: id * 10, title: 'Default Title', price: String(price), available: true }], ...extra });
+  const products = [P(1, 'Gens Ace Li-Po 2S 5300mAh', 35.99), P(2, 'Smart AC/DC Charger', 149.99), P(3, 'Reve D HG Drift Tire AS-01', 8.99), P(4, 'Reve D RDX RWD Drift car kit', 239.99), P(5, 'MC3 Conversion Kit', 349.99), P(6, 'Alu. Rear Hub for RWD Drift', 59.99), P(7, 'Shipping Service International Express', 19.99), P(8, 'Futaba Transmitter Battery 6.6V', 76.49)];
+  const f = mock.method(globalThis, 'fetch', async (url) => ok({ products: String(url).includes('page=1') ? products : [] }));
+  try {
+    const s = shopifyPublicStore({ domain: 'search-test.example' });
+    const titles = async (q) => (await s.searchProducts(q, { limit: 5 })).map((p) => p.title);
+    assert.ok((await titles('do you sell batteries and chargers')).includes('Smart AC/DC Charger'));
+    const bat = await titles('batteries');
+    assert.ok(bat.includes('Futaba Transmitter Battery 6.6V') && bat.includes('Gens Ace Li-Po 2S 5300mAh'), 'plural + LiPo synonym');
+    assert.deepEqual(await titles('drift tyres'), ['Reve D HG Drift Tire AS-01', 'Reve D RDX RWD Drift car kit', 'Alu. Rear Hub for RWD Drift'].filter((t) => t.includes('Tire')).concat((await titles('drift tyres')).filter((t) => !t.includes('Tire'))), 'UK "tyres" finds US "Tire" first');
+    assert.equal((await titles('best drift car under £300'))[0], 'Reve D RDX RWD Drift car kit', 'whole car first, within budget');
+    assert.ok(!(await titles('best drift car under £300')).includes('MC3 Conversion Kit'), 'over budget is left out');
+    assert.ok(!(await titles('shipping to usa')).some((t) => /Shipping Service/.test(t)), 'service items are never offered');
+  } finally { f.mock.restore(); }
+});

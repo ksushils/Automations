@@ -332,7 +332,7 @@ async function orderStatus(ctx, ref) {
   const orders = listOrders(ctx.tenant.id, { waId: ctx.conv.waId, limit: 3 });
   const match = ref ? orders.filter((o) => String(o.store_order_name).replace(/\D/g, '') === String(ref).replace(/\D/g, '')) : orders;
   if (!match.length) {
-    return ctx.reply(mainMenu(ctx, ref ? `I couldn't find order ${ref}. Please check the number on your order confirmation email, or type *human* to ask our team.` : "You don't have any orders with us yet. To check an order, type its number, e.g. *order 1001*."));
+    return ctx.reply(mainMenu(ctx, ref ? `I couldn't find order ${ref}. Please check the number on your order confirmation email, or type *human* to ask our team.` : "To check an order, type its number (it's in your order confirmation email), e.g. *order 1001*."));
   }
   ctx.reply({
     type: 'text',
@@ -565,6 +565,12 @@ async function handleText(ctx, raw) {
   if (['subscribe', 'start offers', 'offers'].includes(t)) return handleAction(ctx, 'subscribe');
   if (t === 'cancel') return handleAction(ctx, 'cancel');
   if (['yes', 'confirm', 'place order'].includes(t) && ctx.conv.state === 'checkout_confirm') return handleAction(ctx, 'confirm');
+  const ord = t.match(/^(?:please\s+)?add\s+(?:the\s+)?(first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th|[1-9])(?:\s+one)?(?:\s+(?:to|in)(?:\s+my)?\s+(?:cart|basket))?$/);
+  if (ord && ctx.conv.data.lastList?.length) {
+    const idx = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, '1st': 0, '2nd': 1, '3rd': 2, '4th': 3, '5th': 4 }[ord[1]] ?? Number(ord[1]) - 1;
+    const id = ctx.conv.data.lastList[idx];
+    if (id) return handleAction(ctx, `p:${id}`);
+  }
   const rm = t.match(/^(remove|delete)\s+(\d+)$/);
   if (rm) { removeFromCart(ctx.conv.cart, Number(rm[2]) - 1); return showCart(ctx); }
   const os = t.match(/(?:order|track|tracking|status)\D{0,15}#?\s*(\d{3,})/) || (t.match(/^#(\d{3,})$/));
@@ -728,6 +734,20 @@ function aiAvailable(ctx) {
 
 /** Direct AI mode (OpenRouter / OpenAI-compatible, local knowledge search, in-process store tools). */
 const GENERIC_WORDS = new Set(['with', 'from', 'pack', 'pcs', 'size', 'colour', 'color', 'black', 'white', 'blue', 'red', 'green', 'set', 'kit', 'new', 'for', 'the', 'and', 'edition', 'version', 'one', 'two', 'any', 'all', 'our', 'you', 'can', 'get', 'out', 'off', 'per', 'mm']);
+// Product names the AI wrote in *bold* / _italics_ (or that appear in its text), resolved to real products.
+async function namedProducts(ctx, out, candidates) {
+  const said = out.toLowerCase();
+  const sig = (t) => String(t || '').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !GENERIC_WORDS.has(w));
+  const strong = (title, text) => { const w = sig(title); const hit = w.filter((x) => text.includes(x)).length; return w.length && hit / w.length >= 0.6; };
+  const picked = candidates.filter((p) => strong(p.title, said));
+  const marked = [...out.matchAll(/[*_]([^*_\n]{4,90})[*_]/g)].map((m) => m[1].trim()).filter((x) => !/view products|menu|cart|checkout|human/i.test(x));
+  for (const name of marked.slice(0, 4)) {
+    if (picked.some((p) => strong(p.title, name.toLowerCase()) || strong(name, p.title.toLowerCase()))) continue;
+    const hit = (await ctx.store.searchProducts(name, { limit: 3 }).catch(() => [])).find((p) => strong(name, p.title.toLowerCase()));
+    if (hit && !picked.some((p) => p.id === hit.id)) picked.push(hit);
+  }
+  return picked.slice(0, 10);
+}
 const S_agent = (ctx) => (ctx.S.ai?.mode || ctx.S.dify?.mode) === 'agent';
 async function askDirect(ctx, text) {
   saveConversation(ctx.conv); // agent tools read/write the cart in the DB
@@ -739,13 +759,13 @@ async function askDirect(ctx, text) {
     ctx.reply({ type: 'text', text: out.replace(/\[HANDOVER\]/gi, '').trim() || 'Let me get a team member for you.' });
     return handover(ctx);
   }
-  // Show the tappable product list only when the AI actually recommended products (it ends with "View products"),
-  // not for questions like "how do I register as a seller" that happen to match some product words.
-  const said = out.toLowerCase();
-  const named = products.some((p) => String(p.title || '').toLowerCase().split(/[^a-z0-9]+/).some((w) => w.length >= 3 && !GENERIC_WORDS.has(w) && said.includes(w)));
-  const recommends = /view products/i.test(out) || named || (S_agent(ctx) && products.length);
-  if (products.length && recommends && !ctx.conv.humanHandover) ctx.reply(productList(ctx, products, out || 'Here are some products you might like:'));
-  else ctx.reply({ type: 'text', text: out || "Sorry, I didn't catch that. Type *menu* to see options." });
+  // The tappable list should be the products the AI talked about: those it named (matched against what it was shown,
+  // or looked up by the bolded names it wrote), else — only if it pointed to the list — the search results.
+  const named = await namedProducts(ctx, out, products);
+  const shown = named.length ? named : /view products/i.test(out) || S_agent(ctx) ? products : [];
+  const say = shown.length ? out : out.replace(/\n*\s*Tap \*?View products\*? below to order 👇\s*$/i, '').trim();
+  if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(productList(ctx, shown, say || 'Here are some products you might like:')); }
+  else ctx.reply({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." });
 }
 
 /** Tell the shop owner (once a day per kind) that a plan limit was reached. */
