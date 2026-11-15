@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { getDb, redactSettings, json } from '../db.js';
 import { safeEqual, sha256 } from '../crypto.js';
 import { onboardingStatus, connectShopStripe } from '../onboarding.js';
+import { refreshWebsite, refreshRunning, lastRefresh } from '../refresh.js';
 import { sendEmail, alertEmails, emailConfigured } from '../email.js';
 import { siteAssistantKnowledge } from '../site.js';
 import { setupStatus, savePlatformSetup, testAi, autoSetupStripe } from '../platformSetup.js';
@@ -212,7 +213,13 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/knowledge', requireTenant, (req, res) => {
     const d = req.tenant.settings.dify || {};
     const prov = req.tenant.settings.ai?.provider || (d.enabled && d.apiKey ? 'dify' : 'direct');
-    res.json({ provider: prov, docs: listDocs(req.tenant.id), limit: PLANS[req.tenant.plan]?.knowledgeDocs ?? 20, aiConnected: consoleConfigured(), datasetId: d.datasetId || null, attached: !!d.datasetAttached && d.datasetAttached === d.datasetId });
+    res.json({ provider: prov, docs: listDocs(req.tenant.id), limit: PLANS[req.tenant.plan]?.knowledgeDocs ?? 20, aiConnected: consoleConfigured(), datasetId: d.datasetId || null, attached: !!d.datasetAttached && d.datasetAttached === d.datasetId, refresh: { last: lastRefresh(req.tenant.id), running: refreshRunning(req.tenant.id), auto: req.tenant.settings.knowledge?.autoRefresh !== false } });
+  });
+  // "Re-read my website now": runs in the background; the Knowledge tab polls GET /knowledge for the result
+  r.post('/tenants/:tenantId/knowledge/refresh', requireTenant, requireOwner, (req, res) => {
+    if (refreshRunning(req.tenant.id)) return res.status(409).json({ error: 'Already reading your website – give it a minute' });
+    refreshWebsite(req.tenant.id, { onChange: (id) => kbChanged(id) }).catch((e) => console.warn('[kb refresh]', e.message));
+    res.status(202).json({ started: true });
   });
   r.post('/tenants/:tenantId/knowledge/text', requireTenant, requireOwner, (req, res) => {
     try { res.status(201).json({ doc: addTextDoc(req.tenant.id, { name: req.body?.name, text: req.body?.text }) }); kbChanged(req.tenant.id); } catch (e) { kbErr(res, e); }

@@ -964,10 +964,19 @@ async function knowledge() {
   const owner = S.role === 'owner';
   const badge = { pending: '⏳ waiting', indexing: '🔄 learning', ready: '✅ ready', error: '⚠️ error', to_delete: '🗑️ removing' };
   const kb = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+  const rf = k.refresh || {}; const L = rf.last;
+  const when = (iso) => { try { return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+  const refreshCard = `<div class="card"><h2>🔄 Keep up to date with your website</h2>
+    <p class="mute">Once a week the assistant re-reads every page it learnt from your website, picks up changes (prices, dates, policies), learns new pages from your sitemap and drops pages that are gone.</p>
+    <p>${rf.running ? '⏳ Reading your website now…' : L ? `Last checked ${esc(when(L.finishedAt || L.startedAt))}: ${L.ok === false ? `<span class="pill warn">${esc(L.error || 'failed')}</span>` : `${L.updated} updated, ${L.added} new, ${L.removed} removed, ${L.unchanged} unchanged${L.failed ? `, ${L.failed} couldn't be read (kept as they were)` : ''}`}` : 'Not checked yet.'}</p>
+    ${L?.changedPages?.length ? `<details><summary class="mute">What changed</summary><ul class="mute">${L.changedPages.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
+    ${owner ? `<p><button class="btn ghost" id="krefresh" ${rf.running ? 'disabled' : ''}>Re-read my website now</button>
+      <label style="display:inline-flex;gap:6px;align-items:center;margin-left:10px;color:var(--ink)"><input type="checkbox" id="kauto" style="width:auto" ${rf.auto ? 'checked' : ''}> Re-read automatically every week</label></p>` : ''}</div>`;
   $('#app').innerHTML = `<div class="card"><h2>📚 Knowledge base</h2>
       <p class="mute">Everything your AI chatbot should know: delivery & returns policies, FAQs, size guides, product manuals, opening hours… It is searched automatically for every customer question.</p>
       <p>${k.docs.length} / ${k.limit} documents · ${k.provider === 'direct' ? '✅ Searched in-app by your AI chatbot (direct mode)' : k.aiConnected ? (k.attached ? '✅ Connected to your AI chatbot' : '🔄 Will connect to your AI chatbot after the next sync') : '<span class="pill warn">AI not connected on the server – documents are saved and the built-in search answers simple questions</span>'}
       ${owner && k.aiConnected ? ' <button class="btn ghost" id="ksync">Sync now</button>' : ''}</p></div>
+    ${refreshCard}
     ${owner ? `<div class="row">
       <div class="card"><h2>🌐 From your website</h2><label>Page addresses (one per line)</label><textarea id="kurls" placeholder="https://yourshop.co.uk/pages/faq\nhttps://yourshop.co.uk/policies/refund-policy"></textarea>
         <p><button class="btn" id="kurl">Import pages</button> <button class="btn ghost" id="kauto">Auto-import my site</button></p></div>
@@ -985,6 +994,12 @@ async function knowledge() {
   $('#kqgo').onclick = async () => { const r = await api(T('/knowledge/search?q=' + encodeURIComponent($('#kq').value))); $('#kqres').innerHTML = r.hits.map((h) => `<div class="card" style="margin:6px 0"><b>${esc(h.doc)}</b><div style="white-space:pre-wrap">${esc(h.text)}</div></div>`).join('') || 'Nothing found – add a document that answers this.'; };
   $('#app').querySelectorAll('[data-kdel]').forEach((b) => (b.onclick = async () => { if (confirm('Remove this document?')) { await api(T('/knowledge/' + b.dataset.kdel), { method: 'DELETE' }); again(); } }));
   if (!owner) return;
+  if ($('#krefresh')) $('#krefresh').onclick = async () => {
+    try { await api(T('/knowledge/refresh'), { method: 'POST' }); toast('Reading your website…'); } catch (e) { toast(e.message); }
+    const poll = setInterval(async () => { try { const k2 = await api(T('/knowledge')); if (!k2.refresh?.running) { clearInterval(poll); if (S.tab === 'knowledge') knowledge(); } } catch { clearInterval(poll); } }, 4000);
+    knowledge();
+  };
+  if ($('#kauto')) $('#kauto').onchange = async (e) => { try { S.tenant = (await api(T('/settings?sync=0'), { method: 'PATCH', body: { knowledge: { autoRefresh: e.target.checked } } })).tenant; toast(e.target.checked ? 'Weekly re-read on' : 'Weekly re-read off'); } catch (err) { toast(err.message); } };
   if ($('#ksync')) $('#ksync').onclick = async () => { res('Syncing…'); const r = await api(T('/knowledge/sync'), { method: 'POST' }); res(r.ok ? `✅ Synced ${r.synced || 0}, removed ${r.deleted || 0}${r.failed ? `, ${r.failed} failed` : ''}` : '⚠️ ' + r.error); again(); };
   $('#kurl').onclick = async () => {
     const urls = $('#kurls').value.split(/\s+/).filter(Boolean); if (!urls.length) return toast('Enter at least one address');

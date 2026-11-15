@@ -160,7 +160,7 @@ const SYMBOLS = { GBP: '£', USD: '$', EUR: '€', AED: 'AED ', INR: '₹', AUD:
  * The shop's information pages from its sitemap (Shopify: sitemap_pages_*.xml; others: short top-level URLs),
  * so seller terms, marketplace policies, guides etc. are learnt too, not only a fixed list of usual paths.
  */
-export async function sitemapPages(origin, { limit = 25 } = {}) {
+export async function sitemapPages(origin, { limit = 25, catalogue = false } = {}) {
   const locs = (xml) => [...String(xml).matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1].replace(/&amp;/g, '&'));
   const root = await safeFetch(`${origin}/sitemap.xml`).catch(() => null);
   if (!root || root.status !== 200) return [];
@@ -171,7 +171,7 @@ export async function sitemapPages(origin, { limit = 25 } = {}) {
     for (const m of pageMaps.slice(0, 3)) { const r = await safeFetch(m).catch(() => null); if (r?.status === 200) urls.push(...locs(r.body)); }
   } else if (urls.some((u) => /\.xml(\?|$)/.test(u))) return []; // an index of sitemaps we can't classify: skip
   const host = new URL(origin).host;
-  const skip = /\/(products?|collections?|shop|cart|account|checkout|tags?|category|categories|blogs?\/[^/]+\/.+|search)(\/|$)|opt-out|unsubscribe|\.(jpg|png|pdf|xml)$/i;
+  const skip = catalogue ? /\/(cart|account|checkout|tags?|blogs?\/[^/]+\/.+|search)(\/|$)|opt-out|unsubscribe|\.(jpg|png|pdf|xml)$/i : /\/(products?|collections?|shop|cart|account|checkout|tags?|category|categories|blogs?\/[^/]+\/.+|search)(\/|$)|opt-out|unsubscribe|\.(jpg|png|pdf|xml)$/i;
   return [...new Set(urls)].filter((u) => { try { const x = new URL(u); return x.host === host && !skip.test(x.pathname) && x.pathname.split('/').filter(Boolean).length <= 2; } catch { return false; } }).slice(0, limit);
 }
 

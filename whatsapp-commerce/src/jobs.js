@@ -12,6 +12,7 @@ import { runAbandonedCheckouts } from './routes/storeWebhooks.js';
 import { enforceTrials } from './platform.js';
 import { HAS_CONSENT_SQL } from './consent.js';
 import { applyRetention } from './privacy.js';
+import { runWeeklyRefresh } from './refresh.js';
 
 /** Scheduled work: flow delays and campaigns. */
 export async function runScheduled() {
@@ -76,6 +77,10 @@ export function startJobs() {
     runWinBack().catch((e) => console.error('[jobs]', e));
     try { const n = enforceTrials(); if (n) console.log(`[billing] paused ${n} expired trial(s)`); } catch (e) { console.error('[jobs]', e); }
     try { const r = applyRetention(); if (Object.values(r).some(Boolean)) console.log('[retention]', JSON.stringify(r)); } catch (e) { console.error('[jobs]', e); }
+    // keep knowledge bases in step with the shops' websites (weekly per shop, one shop per hour)
+    import('./dify/provision.js').then(({ knowledgeChanged }) => runWeeklyRefresh({ onChange: (id) => knowledgeChanged(id) }))
+      .then((r) => r && console.log('[kb refresh]', JSON.stringify({ updated: r.updated, added: r.added, removed: r.removed, failed: r.failed })))
+      .catch((e) => console.error('[kb refresh]', e.message));
   }, 3600000);
   timer.unref();
   daily.unref();
