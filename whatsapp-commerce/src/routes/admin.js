@@ -23,6 +23,7 @@ import { toCsv, productsFromCsv } from '../csv.js';
 import { analytics } from '../analytics.js';
 import { valueReport, reportText, listUnanswered, getUnanswered, setUnanswered } from '../insights.js';
 import { listBookings, setBookingStatus } from '../bookings.js';
+import { claimDemo, isDemo } from '../instantDemo.js';
 import { listFlows, getFlow, saveFlow, deleteFlow, validateFlow, getContact, updateContact } from '../bot/flows.js';
 import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaignStats } from '../campaigns.js';
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile, templateWarnings, cachedTemplates } from '../templates.js';
@@ -119,6 +120,16 @@ export function adminRouter() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Please enter a valid email' });
     if (!req.body?.acceptTerms) return res.status(400).json({ error: 'Please accept the terms' });
     const plan = PLANS[req.body?.plan] ? req.body.plan : 'starter';
+    // Came from "your assistant in 60 seconds": keep that shop (everything it learnt) instead of starting empty
+    const claimed = req.body?.demo ? claimDemo(String(req.body.demo), { name, email }) : null;
+    if (claimed) {
+      updateTenantMeta(claimed.tenant.id, { plan });
+      const website = claimed.tenant.settings.business?.website;
+      if (website) onboardFromWebsite(claimed.tenant.id, website).catch((e) => console.warn('[signup onboarding]', e.message)); // the rest of the site
+      let checkoutUrl = null;
+      if (billingConfigured() && config.stripePrices[plan]) checkoutUrl = await createSubscriptionCheckout(getTenant(claimed.tenant.id), plan).catch(() => null);
+      return res.status(201).json({ tenantId: claimed.tenant.id, adminKey: claimed.adminKey, checkoutUrl, trialDays: config.trialDays, fromDemo: true });
+    }
     const { tenant, adminKey } = createTenant({ name, plan });
     getDb().prepare("UPDATE tenants SET owner_email = ?, trial_ends_at = datetime('now', ?), subscription_status = 'trialing' WHERE id = ?").run(email, `+${config.trialDays} days`, tenant.id);
     // Website given → detect the shop, connect its catalogue, import policy/FAQ pages; then build the AI chatbot
@@ -170,7 +181,7 @@ export function adminRouter() {
   }));
 
   // ----- super admin: tenant management -----
-  r.get('/tenants', requireSuper, (req, res) => res.json({ tenants: listTenants().map(view) }));
+  r.get('/tenants', requireSuper, (req, res) => { const all = listTenants(); res.json({ tenants: all.filter((t) => req.query.demos === '1' || !isDemo(t)).map(view), demos: all.filter(isDemo).length }); });
   r.post('/tenants', requireSuper, wrap(async (req, res) => {
     if (!req.body?.name) return res.status(400).json({ error: 'name required' });
     const { tenant, adminKey, toolKey } = createTenant({ name: String(req.body.name).slice(0, 80), plan: req.body.plan });

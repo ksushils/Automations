@@ -90,7 +90,7 @@ export async function refreshWebsite(tenantId, { onChange } = {}) {
 /** Hourly: re-read the website of the one shop most overdue (weekly), so shops are spread out over time. */
 export async function runWeeklyRefresh({ now = Date.now(), onChange } = {}) {
   const due = listTenants()
-    .filter((t) => t.active && t.settings.knowledge?.autoRefresh !== false)
+    .filter((t) => t.active && t.settings.knowledge?.autoRefresh !== false && !t.settings.demo?.expiresAt)
     .filter((t) => getDb().prepare("SELECT 1 FROM knowledge_docs WHERE tenant_id = ? AND source = 'url' AND status NOT IN ('deleted', 'to_delete') LIMIT 1").get(t.id))
     .map((t) => ({ t, last: Date.parse(lastRefresh(t.id)?.startedAt || '') || 0 }))
     .filter((x) => now - x.last >= REFRESH_EVERY_MS)

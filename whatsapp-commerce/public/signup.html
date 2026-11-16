@@ -43,7 +43,11 @@ const FEATURES = {
   growth: ['Everything in Starter', 'Campaigns, segments & retargeting', '5,000 messages · 3,000 AI replies / month'],
   pro: ['Everything in Growth', 'No limit on incoming messages · 20,000 AI replies / month', 'Changes made for you every month', 'Phone support, same day'],
 };
-let plan = new URLSearchParams(location.search).get('plan') || 'growth';
+const QS = new URLSearchParams(location.search);
+let plan = QS.get('plan') || 'growth';
+const demoToken = QS.get('demo') || '';
+if (QS.get('website')) document.querySelector('[name=website]').value = QS.get('website');
+if (demoToken) document.querySelector('h1').textContent = 'Keep your assistant 🎉';
 fetch('/api/plans').then((r) => r.json()).then((d) => {
   document.getElementById('trial').textContent = `${d.trialDays}-day free trial${d.billing ? '' : ''}.`;
   if (!d.signupEnabled) document.getElementById('f').innerHTML = '<p>Sign-up is currently closed – please contact us.</p>';
@@ -57,7 +61,7 @@ document.getElementById('f').onsubmit = async (e) => {
   const fd = Object.fromEntries(new FormData(e.target));
   const err = document.getElementById('err');
   err.textContent = '';
-  const res = await fetch('/api/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...fd, acceptTerms: !!fd.acceptTerms, plan }) });
+  const res = await fetch('/api/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...fd, acceptTerms: !!fd.acceptTerms, plan, demo: demoToken || undefined }) });
   const r = await res.json().catch(() => ({}));
   if (!res.ok) { err.textContent = r.error || 'Something went wrong'; return; }
   try { localStorage.setItem('wc_key', r.adminKey); localStorage.setItem('wc_tenant', r.tenantId); } catch {}

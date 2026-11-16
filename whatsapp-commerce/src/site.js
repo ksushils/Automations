@@ -6,6 +6,7 @@ import { getRates, FREE_SERVICE_PER_MONTH, RATES_CHECKED_ON } from './metaPricin
 import { sendEmail } from './email.js';
 import { rateLimit } from './routes/web.js';
 import { COMPARISONS, comparison, CHECKED_ON } from './compare.js';
+import { instantDemoRouter } from './instantDemo.js';
 
 /*
  * The public marketing website: home, pricing, takeaways, the WhatsApp cost calculator and "book a demo".
@@ -40,6 +41,7 @@ a{color:var(--brand)}.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
 header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
 header .wrap{display:flex;align-items:center;gap:18px;min-height:60px;flex-wrap:wrap}.logo{font-weight:700;font-size:18px;color:var(--ink);text-decoration:none;flex:1}
 nav{display:flex;gap:16px;flex-wrap:wrap;align-items:center}nav a{text-decoration:none;color:var(--mute);font-size:15px}nav a:hover,nav a[aria-current]{color:var(--ink)}
+.tryform{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;max-width:640px;margin-top:22px}.tlabel{display:block;font-size:17px;margin-bottom:10px}.trow{display:flex;gap:8px;flex-wrap:wrap}.trow input{flex:1;min-width:200px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;font:inherit}
 .btn{display:inline-block;background:var(--brand);color:#fff!important;text-decoration:none;padding:12px 20px;border-radius:12px;font-weight:600;border:0;cursor:pointer;font:inherit;font-weight:600}.btn:hover{background:var(--brand2)}
 .btn.small{padding:8px 14px;font-size:15px}.btn.ghost{background:none;color:var(--brand)!important;border:1px solid var(--line)}
 h1{font-size:clamp(32px,5vw,50px);line-height:1.1;margin:0 0 16px;letter-spacing:-.02em}h2{font-size:clamp(24px,3.4vw,34px);line-height:1.2;margin:0 0 12px;letter-spacing:-.01em}h3{font-size:19px;margin:0 0 6px}
@@ -128,7 +130,12 @@ function home() {
 <section class="hero"><div class="wrap">
 <h1>Your customers message at 11pm. Someone should answer.</h1>
 <p class="lead">${B} puts an assistant on your website and your WhatsApp that knows your products, your prices, your opening hours and your delivery areas. It answers instantly, takes orders, and passes anything tricky to you.</p>
-<p><a class="btn" href="/demo">Book a 20-minute demo</a>${siteChatTenant() ? ' <span class="mute">· Or try it now: the chat button in the corner is the real thing, answering questions about ' + B + '.</span>' : ''}</p>
+<form id="try" class="tryform" method="post" action="/try">
+<label for="tryurl" class="tlabel">See <b>your own</b> assistant in 60 seconds. Type your website:</label>
+<div class="trow"><input id="tryurl" name="website" required placeholder="yourshop.co.uk" autocomplete="url" inputmode="url"><input type="text" name="company_website" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true"><button class="btn">Build my assistant →</button></div>
+<p class="mute" style="font-size:13px;margin:6px 0 0">Free, no sign-up. We read a few public pages of your site and you chat with the result.</p>
+</form>
+<p style="margin-top:18px"><a href="/demo">Or book a 20-minute demo</a>${siteChatTenant() ? ' <span class="mute">· The chat button in the corner is the real thing, answering questions about ' + B + '.</span>' : ''}</p>
 </div></section>
 
 <section><div class="wrap grid">
@@ -482,6 +489,7 @@ export function robotsTxt() {
 export function siteRouter() {
   const r = express.Router();
   const html = (res, body, status = 200) => res.status(status).type('html').set('Cache-Control', 'public, max-age=300').send(body);
+  r.use(instantDemoRouter(layout)); // /try – your assistant in 60 seconds
   r.get('/', (req, res) => html(res, home()));
   r.get('/pricing', (req, res) => html(res, pricing()));
   r.get('/takeaways', (req, res) => html(res, takeaways()));

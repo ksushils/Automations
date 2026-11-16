@@ -15,6 +15,7 @@ import { applyRetention } from './privacy.js';
 import { runWeeklyRefresh } from './refresh.js';
 import { runMonthlyReports, runWeeklyUnanswered, runReviewRequests } from './insights.js';
 import { runBookingJobs } from './bookings.js';
+import { cleanupDemos } from './instantDemo.js';
 
 /** Scheduled work: flow delays and campaigns. */
 export async function runScheduled() {
@@ -79,6 +80,7 @@ export function startJobs() {
   minutely.unref();
   const daily = setInterval(() => {
     runWinBack().catch((e) => console.error('[jobs]', e));
+    try { const n = cleanupDemos(); if (n) console.log(`[instant demo] deleted ${n} expired demo(s)`); } catch (e) { console.error('[instant demo]', e); }
     runMonthlyReports().then((n) => n && console.log(`[value report] emailed ${n} shop(s)`), (e) => console.error('[value report]', e));
     runWeeklyUnanswered().then((n) => n && console.log(`[unanswered] emailed ${n} shop(s)`), (e) => console.error('[unanswered]', e));
     try { const n = enforceTrials(); if (n) console.log(`[billing] paused ${n} expired trial(s)`); } catch (e) { console.error('[jobs]', e); }

@@ -6,6 +6,7 @@ import { createSender, logMessage } from '../whatsapp/cloudApi.js';
 import { handleInbound } from '../bot/engine.js';
 import { enqueue } from '../whatsapp/webhook.js';
 import { rateLimit } from './web.js';
+import { isDemo, DEMO_MESSAGE_CAP } from '../instantDemo.js';
 
 /*
  * Website AI chat: the same bot (AI, knowledge base, catalogue, cart, flows, human hand-over) on the shop's own site.
@@ -35,6 +36,11 @@ export function webchatRouter() {
     const { sessionId, text, actionId } = req.body || {};
     if (!SESSION.test(String(sessionId || ''))) return res.status(400).json({ error: 'invalid session' });
     if (!text && !actionId) return res.status(400).json({ error: 'empty message' });
+    if (isDemo(t)) {
+      if (Date.parse(t.settings.demo.expiresAt) < Date.now()) return res.status(404).json({ error: 'This demo has expired' });
+      const used = getDb().prepare("SELECT COUNT(*) AS n FROM messages WHERE tenant_id = ? AND direction = 'in'").get(t.id).n;
+      if (used >= DEMO_MESSAGE_CAP) return res.json({ replies: [{ type: 'text', text: "That's the end of the demo 🙂 Start your free trial to keep this assistant and carry on." }] });
+    }
     if (!withinLimit(t, 'inbound')) return res.json({ replies: [{ type: 'text', text: `Thanks for your message! The ${t.settings.business.name} team will get back to you soon.` }] });
     const waId = visitorId(sessionId);
     const ev = actionId

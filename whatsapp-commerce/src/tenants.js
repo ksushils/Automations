@@ -181,7 +181,8 @@ export function rotateToolKey(id) {
 
 export function deleteTenant(id) {
   const d = getDb();
-  for (const table of ['messages', 'orders', 'conversations', 'customers', 'usage']) d.prepare(`DELETE FROM ${table} WHERE tenant_id = ?`).run(id);
+  d.prepare('DELETE FROM knowledge_fts WHERE tenant_id = ?').run(id);
+  for (const table of ['messages', 'orders', 'conversations', 'customers', 'usage', 'knowledge_chunks', 'knowledge_docs', 'bookings', 'unanswered', 'consents', 'store_events', 'flows', 'scheduled', 'campaigns', 'message_status', 'staff']) d.prepare(`DELETE FROM ${table} WHERE tenant_id = ?`).run(id);
   d.prepare('DELETE FROM tenants WHERE id = ?').run(id);
 }
 
