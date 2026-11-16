@@ -156,7 +156,8 @@ async function confirmDraft(ctx) {
   } else if (status === 'confirmed') {
     ctx.reply({ type: 'text', text: `✅ You're booked: *${whenText(b)}*${b.service ? ` – ${b.service}` : ''}.${Number(S.bookings?.reminderHours ?? 24) ? " We'll send you a reminder before." : ''} See you then!` });
   } else {
-    ctx.reply({ type: 'text', text: `📅 Thanks! We've received your booking request for *${whenText(b)}*${b.service ? ` – ${b.service}` : ''}. Our team will confirm it here shortly.` });
+    const web = String(ctx.conv.waId).startsWith('web:');
+    ctx.reply({ type: 'text', text: `📅 Thanks! We've received your booking request for *${whenText(b)}*${b.service ? ` – ${b.service}` : ''}. ${web ? 'Our team will contact you on the number you gave to confirm it.' : 'Our team will confirm it here shortly.'}` });
   }
   alertTeam(ctx.tenant, booking, deposit ? 'awaiting its deposit' : status === 'confirmed' ? 'confirmed automatically' : 'waiting for you to confirm');
   return true;
