@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { getDb } from '../db.js';
 import { bumpUsage } from '../tenants.js';
+import { trackMessage } from '../tracking.js';
 
 const clip = (s, n) => {
   s = String(s ?? '');
@@ -141,6 +142,7 @@ async function graphPost(tenant, pathPart, body) {
  */
 export function createSender(tenant, { sink } = {}) {
   return async function send(to, msg) {
+    if (!String(to).startsWith('qa:')) msg = trackMessage(tenant, to, msg);
     logMessage(tenant.id, to, 'out', msg);
     bumpUsage(tenant.id, 'outbound');
     if (sink) {

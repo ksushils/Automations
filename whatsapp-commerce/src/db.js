@@ -177,6 +177,28 @@ CREATE TABLE IF NOT EXISTS bookings (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_bookings ON bookings(tenant_id, starts_at);
+CREATE TABLE IF NOT EXISTS link_clicks (
+  code TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  wa_id TEXT,
+  url TEXT NOT NULL,
+  kind TEXT,                 -- checkout | link
+  clicks INTEGER NOT NULL DEFAULT 0,
+  first_click_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_link_clicks ON link_clicks(tenant_id, created_at);
+CREATE TABLE IF NOT EXISTS quality_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  score INTEGER NOT NULL,
+  good INTEGER NOT NULL DEFAULT 0,
+  weak INTEGER NOT NULL DEFAULT 0,
+  wrong INTEGER NOT NULL DEFAULT 0,
+  results TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_quality_runs ON quality_runs(tenant_id, id);
 CREATE TABLE IF NOT EXISTS unanswered (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id TEXT NOT NULL,

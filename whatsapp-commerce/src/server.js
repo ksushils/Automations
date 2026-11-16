@@ -15,6 +15,7 @@ import { webchatRouter } from './routes/webchat.js';
 import { securityHeaders, installCrashAlerts, alert, backup } from './ops.js';
 import { getDb } from './db.js';
 import { loadPlatformSetup } from './platformSetup.js';
+import { trackingRouter } from './tracking.js';
 import { siteRouter } from './site.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +32,7 @@ export function createApp() {
     try { getDb().prepare('SELECT 1').get(); res.json({ ok: true }); } catch (e) { res.status(503).json({ ok: false, error: e.message }); }
   });
   app.use(customDomainMiddleware());
+  app.use(trackingRouter()); // /go/:code – counted links to the shop's own website
   app.use(siteRouter()); // public website: /, /pricing, /takeaways, /whatsapp-cost-calculator, /demo, sitemap, robots
   app.use(publicRouter());
   app.use(webRouter());

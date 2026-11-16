@@ -137,5 +137,14 @@ export function shopifyStore(settings) {
       const d = await gql('{ orders(first: 1, reverse: true) { nodes { name } } }');
       return { ok: true, latest: d.orders.nodes[0]?.name || null };
     },
+    /** Orders whose visit came from the assistant's links (utm_source=ai-assistant or the WhatsApp cart link). */
+    async assistantSales({ from, to }) {
+      const q = `created_at:>='${from}' created_at:<'${to}'`;
+      const d = await gql(`query($q: String!) { orders(first: 250, query: $q) { nodes { name totalPriceSet { shopMoney { amount currencyCode } }
+        customerJourneySummary { firstVisit { landingPage utmParameters { source } } lastVisit { landingPage utmParameters { source } } } } } }`, { q });
+      const fromAssistant = (v) => v && (v.utmParameters?.source === 'ai-assistant' || /utm_source=ai-assistant|[?&]ref=whatsapp/.test(v.landingPage || ''));
+      const hits = d.orders.nodes.filter((o) => fromAssistant(o.customerJourneySummary?.lastVisit) || fromAssistant(o.customerJourneySummary?.firstVisit));
+      return { orders: hits.length, value: Math.round(hits.reduce((s, o) => s + Number(o.totalPriceSet?.shopMoney?.amount || 0), 0) * 100) / 100, currency: hits[0]?.totalPriceSet?.shopMoney?.currencyCode || null, checked: d.orders.nodes.length };
+    },
   };
 }

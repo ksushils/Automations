@@ -393,7 +393,25 @@ async function ai() {
       <p><button class="btn" id="aisave">${info.provider === 'direct' ? 'Save' : d.managed ? 'Save & update AI chatbot' : 'Save & create AI chatbot'}</button> <button class="btn ghost" id="aitest">Try it in Test bot →</button></p>
       <pre id="aires" class="mute" style="white-space:pre-wrap"></pre>
     </div>
+    <div class="card" id="qcard"><h2>✅ Answer check</h2><p class="mute">Loading…</p></div>
     <div class="card"><h2>Generated instructions (sent to the AI)</h2><pre style="white-space:pre-wrap" class="mute">${esc(info.prompt)}</pre></div>`;
+  const qcard = async () => {
+    const q = await api(T('/quality')).catch(() => null);
+    if (!q || !$('#qcard')) return;
+    const L = q.last;
+    const tone = (v) => (v === 'good' ? '✅' : v === 'weak' ? '🟡' : '❌');
+    $('#qcard').innerHTML = `<h2>✅ Answer check</h2><p class="mute">Every week we ask your assistant real questions your customers asked (nothing is sent to anyone) and a second AI marks each answer against your own information.</p>
+      ${q.running ? '<p>⏳ Checking your answers now… (about a minute)</p>' : L ? `<p style="font-size:1.1em"><b>${L.score}/100</b> · ${L.good} good · ${L.weak} could be better · ${L.wrong} wrong${L.previousScore != null ? ` <span class="mute">(last time ${L.previousScore})</span>` : ''} <span class="mute">· ${esc(L.at)} UTC</span></p>
+        ${L.results.filter((r) => r.verdict !== 'good').length ? `<p><b>To improve</b> – add the missing facts on the Knowledge base tab:</p>${L.results.filter((r) => r.verdict !== 'good').map((r) => `<details style="margin:6px 0"><summary>${tone(r.verdict)} ${esc(r.question)} <span class="mute">– ${esc(r.reason)}</span></summary><pre style="white-space:pre-wrap" class="mute">${esc(r.answer)}</pre></details>`).join('')}` : '<p>🎉 Every answer was good.</p>'}
+        <details><summary class="mute">All questions</summary>${L.results.map((r) => `<div class="mute">${tone(r.verdict)} ${esc(r.question)}</div>`).join('')}</details>` : '<p>Not checked yet.</p>'}
+      ${S.role === 'owner' ? `<p><button class="btn ghost" id="qrun" ${q.running ? 'disabled' : ''}>Check my answers now</button></p>` : ''}`;
+    if ($('#qrun')) $('#qrun').onclick = async () => {
+      try { await api(T('/quality/run'), { method: 'POST' }); toast('Checking your answers…'); } catch (e) { return toast(e.message); }
+      qcard();
+      const poll = setInterval(async () => { const s = await api(T('/quality')).catch(() => null); if (!s?.running) { clearInterval(poll); if (S.tab === 'ai') qcard(); } }, 5000);
+    };
+  };
+  qcard();
   $('#aitest').onclick = () => { S.tab = 'simulator'; render(); };
   $('#aiprov').onchange = async () => { S.tenant = (await api(T('/settings?sync=0'), { method: 'PATCH', body: { ai: { provider: $('#aiprov').value } } })).tenant; ai(); };
   $('#aisave').onclick = async () => {
@@ -1218,6 +1236,8 @@ async function analytics(days = Number(store.get('wc_days')) || 30) {
       <div><div class="mute">Helped out of hours</div><div class="stat">${v.afterHoursChats}</div><div class="mute">${esc(v.assumptions.hours)}</div></div>
       <div><div class="mute">Staff time saved</div><div class="stat">${v.hoursSaved} h</div><div class="mute">≈ ${M0(v.staffValue)}</div></div>
       <div><div class="mute">Orders in chat</div><div class="stat">${v.orders.count}</div><div class="mute">${M0(v.orders.value)}</div></div>
+      ${v.websiteSales ? `<div><div class="mute">Website sales from the chat</div><div class="stat">${M0(v.websiteSales.value)}</div><div class="mute">${v.websiteSales.orders} orders (Shopify)</div></div>` : ''}
+      ${v.links?.linksSent ? `<div><div class="mute">Shop links opened</div><div class="stat">${v.links.linksClicked}</div><div class="mute">${v.links.checkoutsStarted} checkouts started</div></div>` : ''}
       <div><div class="mute">Recovered sales</div><div class="stat">${M0(v.recovered)}</div><div class="mute">${v.recoveredCarts.count + v.recoveredCheckouts.count} carts · ${v.paidAfterReminder.count} chased payments</div></div></div>
     ${v.unanswered ? `<p class="mute">❓ ${v.unanswered} question${v.unanswered > 1 ? 's' : ''} it couldn't answer – add the answers on the <a href="#" data-goto="knowledge">Knowledge base</a> tab.</p>` : ''}
     <p class="mute" style="font-size:12px">Staff time counts ${v.assumptions.minutesPerReply} min per reply at ${sym}${v.assumptions.hourlyRate}/hour (change in Settings → Monthly report). This report is emailed to you on the 1st of each month.</p></div>` : '';

@@ -139,6 +139,10 @@ export function shopifyPublicStore(settings, { currency = 'GBP' } = {}) {
       if (!settings.adminToken) return { ok: false, error: 'No Shopify key saved yet' };
       return (await admin()).testOrders();
     },
+    async assistantSales(range) {
+      if (!settings.adminToken) return null;
+      return (await admin()).assistantSales(range);
+    },
   };
 
   async function admin() {

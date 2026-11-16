@@ -21,7 +21,8 @@ import { listOrders, updateOrder, orderUpdateMessage, sendOrderUpdate } from '..
 import { createStaff, listStaff, deleteStaff, authenticateStaff, ROLES } from '../staff.js';
 import { toCsv, productsFromCsv } from '../csv.js';
 import { analytics } from '../analytics.js';
-import { valueReport, reportText, listUnanswered, getUnanswered, setUnanswered } from '../insights.js';
+import { valueReport, reportText, listUnanswered, getUnanswered, setUnanswered, assistantSales } from '../insights.js';
+import { runQualityCheck, lastQuality, qualityRunning } from '../quality.js';
 import { listBookings, setBookingStatus } from '../bookings.js';
 import { claimDemo, isDemo } from '../instantDemo.js';
 import { wordpressPlugin, detectPlatform } from '../install.js';
@@ -440,9 +441,17 @@ export function adminRouter() {
   // ----- analytics & exports -----
   r.get('/tenants/:tenantId/analytics', requireTenant, (req, res) => res.json(analytics(req.tenant.id, req.query.days)));
   // "What your assistant did for you" – the monthly money-made report (also emailed on the 1st)
-  r.get('/tenants/:tenantId/value-report', requireTenant, (req, res) => {
+  r.get('/tenants/:tenantId/value-report', requireTenant, wrap(async (req, res) => {
     const rep = valueReport(req.tenant.id, req.query.month);
+    rep.websiteSales = await assistantSales(req.tenant, rep.month);
     res.json({ report: rep, text: reportText(rep, req.tenant.settings.business?.name || req.tenant.name) });
+  }));
+  // Automatic answer check (replays real questions, marks the answers)
+  r.get('/tenants/:tenantId/quality', requireTenant, (req, res) => res.json({ last: lastQuality(req.tenant.id), running: qualityRunning(req.tenant.id) }));
+  r.post('/tenants/:tenantId/quality/run', requireTenant, requireOwner, (req, res) => {
+    if (qualityRunning(req.tenant.id)) return res.status(409).json({ error: 'Already checking – give it a minute' });
+    runQualityCheck(req.tenant.id).catch((e) => console.warn('[quality]', e.message));
+    res.status(202).json({ started: true });
   });
   // Questions the assistant couldn't answer: answer once, and it knows from then on
   r.get('/tenants/:tenantId/unanswered', requireTenant, (req, res) => res.json({ items: listUnanswered(req.tenant.id, { status: req.query.status === 'answered' ? 'answered' : 'open' }) }));

@@ -97,7 +97,7 @@ function layout(path, body, { ld = [], title, description, noindex = false, extr
 </head>
 <body>
 <header><div class="wrap"><a class="logo" href="/">${esc(brand())}</a>
-<nav aria-label="Main">${navItems.map(([h, n]) => `<a href="${h}"${h === path ? ' aria-current="page"' : ''}>${n}</a>`).join('')}<a href="/demo">Book a demo</a><a class="btn small" href="/signup">Start free trial</a></nav></div></header>
+<nav aria-label="Main">${navItems.map(([h, n]) => `<a href="${h}"${h === path ? ' aria-current="page"' : ''}>${n}</a>`).join('')}<a class="btn small" href="/demo">Book a demo</a></nav></div></header>
 <main>${body}</main>
 <footer><div class="wrap">
 <div><b style="color:var(--ink)">${esc(brand())}</b><p>An assistant for your website and WhatsApp that answers customers, takes orders and hands the tricky ones to you. Set up for you.</p></div>

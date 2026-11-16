@@ -441,6 +441,7 @@ function handover(ctx, text) {
   ctx.conv.data = { ...(ctx.conv.data || {}), handoverAt: new Date().toISOString(), handoverAckAt: null };
   // a shop's own handover wording (flow builder) is sent as written; the standard one explains how to get back
   ctx.reply({ type: 'text', text: text || `🙋 A member of our team will reply here shortly${ctx.S.business.supportHours ? ` (${ctx.S.business.supportHours})` : ''}. Your cart is saved.\n\nWant an answer now? Type *menu* to go back to the assistant.` });
+  if (String(ctx.conv.waId).startsWith('qa:')) return; // automatic answer check: nobody to alert
   const staff = ctx.S.notifications?.staffWaIds || [];
   for (const s of staff) staffAlert(ctx.tenant, String(s).replace(/\D/g, ''), `🙋 Customer +${ctx.conv.waId} (${ctx.customer.name || 'unknown'}) asked to talk to a person. Reply from the dashboard.`, ctx.rawSend);
   const who = String(ctx.conv.waId).startsWith('web:') ? 'A website visitor' : `Customer +${ctx.conv.waId}`;

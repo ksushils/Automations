@@ -2,6 +2,8 @@ import { getDb, json } from './db.js';
 import { getTenant, listTenants, PLANS } from './tenants.js';
 import { emailShop } from './email.js';
 import { createSender, notify } from './whatsapp/cloudApi.js';
+import { clickStats } from './tracking.js';
+import { getStore } from './stores/index.js';
 
 /*
  * What the assistant did for the shop, in money and hours – the report every renewal depends on – plus the
@@ -32,6 +34,20 @@ function afterHours(utcSql, tz, open = 9, close = 17) {
   const wd = parts.find((p) => p.type === 'weekday')?.value;
   const h = Number(parts.find((p) => p.type === 'hour')?.value);
   return wd === 'Sat' || wd === 'Sun' || h < open || h >= close;
+}
+
+/** Website sales that came through the assistant's links (Shopify with a read-only key). Cached 6h. */
+export async function assistantSales(tenant, month) {
+  const { month: m, start, end } = range(month);
+  if (!['shopify_public', 'shopify'].includes(tenant.settings.store?.type)) return null;
+  const key = `asales:${tenant.id}:${m}`;
+  const hit = getDb().prepare('SELECT value FROM kv WHERE key = ?').get(key);
+  if (hit) { const j = json(hit.value, null); if (j && Date.now() - Date.parse(j.at) < 6 * 3600000) return j.data; }
+  const store = getStore(tenant);
+  if (!store.assistantSales) return null;
+  const data = await store.assistantSales({ from: start.replace(' ', 'T') + 'Z', to: end.replace(' ', 'T') + 'Z' }).catch((e) => { console.warn('[assistant sales]', e.message); return null; });
+  if (data) getDb().prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, JSON.stringify({ at: new Date().toISOString(), data }));
+  return data;
 }
 
 /** The monthly "money made" report. `month` is YYYY-MM (default: this month so far). */
@@ -102,6 +118,7 @@ export function valueReport(tenantId, month) {
     roi,
     unanswered,
     reviewRequests: reviews,
+    links: clickStats(tenantId, start, end),
     assumptions: { minutesPerReply, hourlyRate, hours: `${R.openHour ?? 9}:00–${R.closeHour ?? 17}:00 Mon–Fri` },
   };
 }
@@ -120,6 +137,8 @@ export function reportText(r, shopName) {
     `⏱️ About ${r.hoursSaved} hours of replies saved ≈ ${money(r.staffValue, s)} of staff time`,
   ];
   if (r.orders.count) lines.push(`🛒 ${r.orders.count} orders taken in chat: ${money(r.orders.value, s)}`);
+  if (r.websiteSales?.orders) lines.push(`🌐 ${r.websiteSales.orders} website orders after chatting with the assistant: ${money(r.websiteSales.value, s)}`);
+  if (r.links?.linksClicked) lines.push(`🔗 ${r.links.linksClicked} shop links opened from the chat${r.links.checkoutsStarted ? `, ${r.links.checkoutsStarted} checkouts started` : ''}`);
   if (r.recovered) lines.push(`💷 ${money(r.recovered, s)} recovered from abandoned carts and payment reminders`);
   if (r.reviewRequests) lines.push(`⭐ ${r.reviewRequests} review requests sent`);
   if (r.roi) lines.push('', `Your ${r.plan.label} plan costs £${r.plan.priceGbp}/month. This month the assistant returned about *${r.roi}×* that.`);
@@ -136,6 +155,7 @@ export function isUnsure(answer) { return UNSURE.test(String(answer || '')); }
 
 /** Remember a question the assistant couldn't answer (one row per question per chat per day). */
 export function recordUnanswered(tenantId, waId, question, answer, reason = 'unsure') {
+  if (String(waId).startsWith('qa:')) return false; // the automatic answer check reports its own results
   const q = String(question || '').trim().slice(0, 500);
   if (q.length < 6 || /^(hi|hello|hey|menu|human|thanks?|thank you|ok|yes|no)\b/i.test(q)) return false;
   const d = getDb();
@@ -172,6 +192,7 @@ export async function runMonthlyReports(now = new Date()) {
     if (!t.active || t.settings.report?.monthlyEmail === false) continue;
     const r = valueReport(t.id, m);
     if (!r || !r.chats) continue;
+    r.websiteSales = await assistantSales(t, m);
     if (!once(`value_report:${t.id}:${m}`)) continue;
     const name = t.settings.business?.name || t.name;
     await emailShop(t, `${name}: your assistant in ${monthName(m)}${r.roi ? ` – about ${r.roi}× its cost` : ''}`, reportText(r, name), { button: 'See the full report', path: '/admin/' })
