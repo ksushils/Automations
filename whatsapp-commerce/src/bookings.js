@@ -81,7 +81,8 @@ export async function bookingAction(ctx, cmd, arg) {
     ctx.conv.data.booking = {};
     const list = services(S);
     if (list.length > 1) {
-      return ctx.reply({ type: 'list', text: '📅 What would you like to book?', button: 'Choose', sections: [{ title: 'Services', rows: list.map((s, i) => ({ id: `bsvc:${i}`, title: s.name.slice(0, 24), description: [s.minutes ? `${s.minutes} min` : '', s.price ? money(s.price, sym(S)) : '', s.deposit ? `${money(s.deposit, sym(S))} deposit` : ''].filter(Boolean).join(' · ').slice(0, 72) || undefined })) }] });
+      const web = S.bookings?.websiteNote || (S.business?.bookingUrl ? `Booking something else? You can also book online: ${S.business.bookingUrl}` : '');
+      return ctx.reply({ type: 'list', text: `📅 What would you like to book?${web ? `\n\n${web}` : ''}`, button: 'Choose', sections: [{ title: 'Services', rows: list.map((s, i) => ({ id: `bsvc:${i}`, title: s.name.slice(0, 24), description: [s.minutes ? `${s.minutes} min` : '', s.price ? money(s.price, sym(S)) : '', s.deposit ? `${money(s.deposit, sym(S))} deposit` : ''].filter(Boolean).join(' · ').slice(0, 72) || undefined })) }] });
     }
     return bookingAction(ctx, 'bsvc', list.length ? '0' : '');
   }

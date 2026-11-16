@@ -23,10 +23,12 @@ export function buildPrompt(tenant) {
   const ownCheckout = ['shopify_public', 'woocommerce'].includes(S.store?.type);
   const bookings = S.store?.type === 'none';
   const inChatBookings = !!(S.bookings?.enabled && (S.bookings.times || []).length);
-  const bookFact = inChatBookings ? `Bookings can be made right here in the chat: when someone wants to book, tell them to type *book* (or tap "📅 Book now") and they'll pick ${(S.bookings.services || []).length > 1 ? 'the service, ' : ''}a day and a time. Never confirm a booking or a time yourself – only the booking steps do that.` : null;
+  const bookable = (S.bookings?.services || []).map((x) => x?.name).filter(Boolean);
+  const bookFact = inChatBookings ? `${bookable.length ? `These can be booked right here in the chat: ${bookable.join(', ')}.` : 'Bookings can be made right here in the chat.'} When someone wants one of those, tell them to type *book* (or tap "${S.business.bookingButton || '📅 Book now'}") and they'll pick a day and a time. Never confirm a booking or a time yourself – only the booking steps do that.` : null;
   const facts = bookings ? [
     'This business takes bookings and enquiries on its website. Nothing is sold or ordered in this chat: never offer a basket, cart or checkout, and never take payment details.',
-    bookFact || 'When someone wants to book, buy a voucher or get a quote, give them the right page link from the shop\'s information' + (S.business.bookingUrl ? ` (bookings: ${S.business.bookingUrl})` : '') + ', or offer a person from the team.',
+    bookFact,
+    (bookFact ? 'For anything else (other bookings, vouchers, quotes), ' : 'When someone wants to book, buy a voucher or get a quote, ') + 'give them the right page link from the shop\'s information' + (S.business.bookingUrl ? ` (bookings: ${S.business.bookingUrl})` : '') + ', or offer a person from the team.',
     'Prices, dates and availability: only quote what the shop\'s information says, and say dates and availability are confirmed when booking.',
     S.business.supportHours && `Team support hours: ${S.business.supportHours}.`,
   ].filter(Boolean) : ownCheckout ? [
