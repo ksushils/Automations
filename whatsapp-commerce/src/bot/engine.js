@@ -18,6 +18,7 @@ import { directConfigured, directTurn } from '../ai/direct.js';
 import { isUnsure, recordUnanswered } from '../insights.js';
 import { voiceConfigured, transcribe } from '../ai/voice.js';
 import { bookingsEnabled, bookingAction, bookingText } from '../bookings.js';
+import { ownerCommand } from '../briefing.js';
 import { difyAllowed } from '../ai/gate.js';
 
 const consentWording = (ctx) => ctx.S.notifications?.consentWording || defaultWording(ctx.S.business.name);
@@ -658,6 +659,11 @@ export async function handleInbound(tenant, event, send) {
   // opens / extends the 24h customer-service window
   getDb().prepare("UPDATE customers SET last_inbound_at = datetime('now') WHERE tenant_id = ? AND wa_id = ?").run(tenant.id, conv.waId);
   if (event.kind === 'ignore') { saveConversation(conv); return replies; }
+  // The owner texting their own shop number: "briefing", "waiting"… (anything else is handled like a customer)
+  if (event.kind === 'text') {
+    const ownerReply = ownerCommand(tenant, conv.waId, event.text);
+    if (ownerReply) { saveConversation(conv); await send(conv.waId, { type: 'text', text: ownerReply }).catch(() => {}); return [{ type: 'text', text: ownerReply }]; }
+  }
 
   if (conv.humanHandover) {
     // A human is handling this chat – the bot stays quiet. "menu" lets the customer return to the bot.
