@@ -21,6 +21,7 @@ import { listOrders, updateOrder, orderUpdateMessage, sendOrderUpdate } from '..
 import { createStaff, listStaff, deleteStaff, authenticateStaff, ROLES } from '../staff.js';
 import { toCsv, productsFromCsv } from '../csv.js';
 import { analytics } from '../analytics.js';
+import { valueReport, reportText, listUnanswered, getUnanswered, setUnanswered } from '../insights.js';
 import { listFlows, getFlow, saveFlow, deleteFlow, validateFlow, getContact, updateContact } from '../bot/flows.js';
 import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaignStats } from '../campaigns.js';
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile, templateWarnings, cachedTemplates } from '../templates.js';
@@ -425,6 +426,28 @@ export function adminRouter() {
 
   // ----- analytics & exports -----
   r.get('/tenants/:tenantId/analytics', requireTenant, (req, res) => res.json(analytics(req.tenant.id, req.query.days)));
+  // "What your assistant did for you" – the monthly money-made report (also emailed on the 1st)
+  r.get('/tenants/:tenantId/value-report', requireTenant, (req, res) => {
+    const rep = valueReport(req.tenant.id, req.query.month);
+    res.json({ report: rep, text: reportText(rep, req.tenant.settings.business?.name || req.tenant.name) });
+  });
+  // Questions the assistant couldn't answer: answer once, and it knows from then on
+  r.get('/tenants/:tenantId/unanswered', requireTenant, (req, res) => res.json({ items: listUnanswered(req.tenant.id, { status: req.query.status === 'answered' ? 'answered' : 'open' }) }));
+  r.post('/tenants/:tenantId/unanswered/:id/answer', requireTenant, requireOwner, (req, res) => {
+    const q = getUnanswered(req.tenant.id, req.params.id);
+    if (!q) return res.status(404).json({ error: 'not found' });
+    const answer = String(req.body?.answer || '').trim();
+    if (answer.length < 2) return res.status(400).json({ error: 'Type the answer first' });
+    try {
+      const doc = addTextDoc(req.tenant.id, { name: `Q&A: ${q.question.slice(0, 80)}`, text: `Question: ${q.question}\nAnswer: ${answer}` });
+      // the same question asked by other customers is answered too
+      getDb().prepare("UPDATE unanswered SET status = 'answered' WHERE tenant_id = ? AND status = 'open' AND lower(question) = lower(?)").run(req.tenant.id, q.question);
+      setUnanswered(req.tenant.id, q.id, 'answered');
+      kbChanged(req.tenant.id);
+      res.json({ ok: true, doc });
+    } catch (e) { kbErr(res, e); }
+  });
+  r.post('/tenants/:tenantId/unanswered/:id/ignore', requireTenant, requireOwner, (req, res) => res.json({ ok: setUnanswered(req.tenant.id, req.params.id, 'ignored') }));
   r.get('/tenants/:tenantId/export/orders.csv', requireTenant, (req, res) => {
     const rows = listOrders(req.tenant.id, { limit: 100000 });
     res.type('text/csv').attachment(`orders-${req.tenant.id}.csv`).send(toCsv(rows, [
@@ -556,7 +579,7 @@ export function adminRouter() {
     if (!text) return res.status(400).json({ error: 'text required' });
     setHandover(req.tenant.id, req.params.waId, true);
     try {
-      await createSender(req.tenant)(req.params.waId, { type: 'text', text });
+      await createSender(req.tenant)(req.params.waId, { type: 'text', text, staff: req.staff?.name || (req.isSuper ? 'Support' : 'Owner') });
       res.json({ ok: true });
     } catch (e) {
       res.status(200).json({ ok: false, error: e.message, hint: 'Outside the 24h customer-service window you must use an approved template (Broadcast).' });

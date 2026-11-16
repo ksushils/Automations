@@ -119,5 +119,5 @@ export async function directTurn(ctx, text) {
     const searched = (await import('../bot/state.js')).getConversation(ctx.tenant.id, ctx.conv.waId).data.lastSearch;
     if (searched?.at >= startedAt) shown = searched.products.map((p) => ({ ...p, variants: [] }));
   }
-  return { answer, products: shown };
+  return { answer, products: shown, kbHits: kb.length };
 }

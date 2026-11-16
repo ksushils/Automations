@@ -87,6 +87,7 @@ export async function placeOrder({ tenant, store, conv, customer, fulfilment, pa
     )
     .run(tenant.id, conv.waId, result.orderId, result.orderName, paymentMethod, fulfilment, JSON.stringify(items), total, result.currency || S.business.currency, customer.name || null, address || null, result.checkoutUrl || null, q.discount, q.deliveryFee, q.promo?.code || null, slotLabel || null, note || null, token);
   const localId = Number(info.lastInsertRowid);
+  if (conv.data?.reminded) d.prepare('UPDATE orders SET recovered = 1 WHERE id = ?').run(localId);
   const ref = result.orderName || `WA-${localId}`;
   if (!result.orderName) d.prepare('UPDATE orders SET store_order_name = ? WHERE id = ?').run(ref, localId);
 

@@ -127,14 +127,14 @@ async function handleWebOrder(t, headers, body) {
     if (!waId || !info.checkoutUrl) return;
     const data = { firstName: info.firstName, url: info.checkoutUrl, total: info.total, consent: info.marketingConsent };
     if (!once(t.id, 'checkout', info.checkoutToken || info.id, waId, data, info.completed ? 'completed' : 'pending')) {
-      getDb().prepare("UPDATE store_events SET phone = ?, data = ?, status = CASE WHEN ? THEN 'completed' ELSE status END WHERE tenant_id = ? AND kind = 'checkout' AND ref = ?").run(waId, JSON.stringify(data), info.completed ? 1 : 0, t.id, String(info.checkoutToken || info.id));
+      getDb().prepare("UPDATE store_events SET phone = ?, data = ?, status = CASE WHEN ? THEN (CASE WHEN status = 'sent' THEN 'recovered' ELSE 'completed' END) ELSE status END WHERE tenant_id = ? AND kind = 'checkout' AND ref = ?").run(waId, JSON.stringify(data), info.completed ? 1 : 0, t.id, String(info.checkoutToken || info.id));
     }
     return;
   }
 
   const isCreate = /orders\/create|order\.created/.test(info.topic);
   if (isCreate && info.checkoutToken) {
-    getDb().prepare("UPDATE store_events SET status = 'completed' WHERE tenant_id = ? AND kind = 'checkout' AND ref = ?").run(t.id, String(info.checkoutToken));
+    getDb().prepare("UPDATE store_events SET status = CASE WHEN status IN ('sent', 'recovered') THEN 'recovered' ELSE 'completed' END WHERE tenant_id = ? AND kind = 'checkout' AND ref = ?").run(t.id, String(info.checkoutToken));
   }
   if (!waId) return;
   upsertWebCustomer(t.id, waId, info.firstName, info.email);

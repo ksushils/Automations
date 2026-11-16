@@ -125,7 +125,7 @@ $('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant',
 
 const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
 const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders', 'contacts']);
-const MAIN_TABS = new Set(['overview', 'inbox', 'orders', 'simulator', 'ai', 'settings']);
+const MAIN_TABS = new Set(['overview', 'analytics', 'inbox', 'orders', 'simulator', 'ai', 'settings']);
 function render() {
   const shopTabs = S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [];
   const showAll = store.get('wc_alltabs') === '1' || !MAIN_TABS.has(S.tab) && shopTabs.some(([k]) => k === S.tab);
@@ -572,6 +572,8 @@ const FIELDS = [
   ['Delivery / collection time slots', [['ordering.slots.enabled', 'Ask customers to pick a time slot', 'bool'], ['ordering.slots.times', 'Time windows (comma, e.g. 10:00-12:00,14:00-16:00)', 'csv'], ['ordering.slots.days', 'Days ahead to offer', 'number'], ['ordering.slots.leadHours', 'Minimum notice (hours)', 'number'], ['ordering.slots.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum']]],
   ['Card payments (Stripe – built-in catalogue & custom stores)', [['payments.stripe.secretKey', 'Stripe secret key (sk_live_… / rk_live_…)', 'secret'], ['payments.stripe.webhookSecret', 'Stripe webhook signing secret (whsec_…)', 'secret']]],
   ['Notifications', [['notifications.alertEmails', 'Email order alerts to (comma; empty = your sign-up email)', 'csv'], ['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Order webhook URL (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number'], ['notifications.defaultCountryCode', 'Default country code for local numbers (44 = UK)']]],
+  ['Google review requests', [['notifications.reviewRequest.enabled', 'Ask for a review after an order is delivered / completed', 'bool'], ['notifications.reviewRequest.url', 'Your Google review link (Google Business Profile → Ask for reviews)'], ['notifications.reviewRequest.afterHours', 'Hours after delivery', 'number'], ['notifications.reviewRequest.text', 'Message ({{name}} = first name, {{shop}} = shop name)', 'textarea'], ['notifications.reviewRequest.template', 'Template for customers outside the 24h window (vars: name, shop) – optional']]],
+  ['Monthly report', [['report.monthlyEmail', 'Email me the monthly "what your assistant did" report', 'bool'], ['report.unansweredEmail', 'Email me questions the assistant could not answer (Mondays)', 'bool'], ['report.minutesPerReply', 'Minutes a person would spend per reply (default 1.5)', 'number'], ['report.hourlyRate', 'Staff cost per hour (default £12.71)', 'number'], ['report.openHour', 'Working hours start (0–23, default 9)', 'number'], ['report.closeHour', 'Working hours end (0–23, default 17)', 'number']]],
   ['Messages outside the 24-hour window (approved templates)', [['notifications.templates.orderUpdate', 'Order update template (vars: name, order, status) – e.g. order_update'], ['notifications.templates.paymentReminder', 'Payment reminder template (vars: name, order, total, link)'], ['notifications.templates.staffAlert', 'Staff alert template (var: alert text) – e.g. staff_alert']]],
   ['Website order notifications (Shopify / WooCommerce)', [['notifications.storeTemplates.orderConfirmation.enabled', 'Send order confirmation on WhatsApp', 'bool'], ['notifications.storeTemplates.orderConfirmation.template', 'Confirmation template (vars: name, order, shop, total)'], ['notifications.storeTemplates.shipping.enabled', 'Send shipping update', 'bool'], ['notifications.storeTemplates.shipping.template', 'Shipping template (vars: name, order, tracking link)'], ['notifications.storeTemplates.abandonedCheckout.enabled', 'Recover abandoned Shopify checkouts', 'bool'], ['notifications.storeTemplates.abandonedCheckout.template', 'Abandoned checkout template (vars: name, shop, checkout link)'], ['notifications.storeTemplates.abandonedCheckout.afterMinutes', 'Send after minutes', 'number'], ['notifications.storeTemplates.abandonedCheckout.requireMarketingConsent', 'Only customers who accepted marketing', 'bool'], ['store.shopify.webhookSecret', 'Shopify webhook signing secret (optional)', 'secret'], ['store.woocommerce.webhookSecret', 'WooCommerce webhook secret (optional)', 'secret']]],
 ];
@@ -964,8 +966,13 @@ async function knowledge() {
   const owner = S.role === 'owner';
   const badge = { pending: '⏳ waiting', indexing: '🔄 learning', ready: '✅ ready', error: '⚠️ error', to_delete: '🗑️ removing' };
   const kb = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+  const gaps = (await api(T('/unanswered')).catch(() => ({ items: [] }))).items;
   const rf = k.refresh || {}; const L = rf.last;
   const when = (iso) => { try { return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+  const gapsCard = gaps.length ? `<div class="card"><h2>❓ Questions your assistant couldn't answer (${gaps.length})</h2>
+    <p class="mute">Real questions from customers where the assistant wasn't sure or passed the chat to your team. Type the answer once and it will use it from then on.</p>
+    ${gaps.slice(0, 30).map((g) => `<div style="border-top:1px solid var(--line);padding:10px 0"><div><b>${esc(g.question)}</b> <span class="mute" style="font-size:12px">${esc(when(g.created_at.replace(' ', 'T') + 'Z'))}${g.reason === 'handover' ? ' · passed to your team' : ''}</span></div>
+      ${owner ? `<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><input data-gap="${g.id}" placeholder="Type the answer…" style="flex:1;min-width:200px"><button class="btn" data-gapsave="${g.id}">Save answer</button><button class="btn ghost" data-gapignore="${g.id}">Ignore</button></div>` : ''}</div>`).join('')}</div>` : '';
   const refreshCard = `<div class="card"><h2>🔄 Keep up to date with your website</h2>
     <p class="mute">Once a week the assistant re-reads every page it learnt from your website, picks up changes (prices, dates, policies), learns new pages from your sitemap and drops pages that are gone.</p>
     <p>${rf.running ? '⏳ Reading your website now…' : L ? `Last checked ${esc(when(L.finishedAt || L.startedAt))}: ${L.ok === false ? `<span class="pill warn">${esc(L.error || 'failed')}</span>` : `${L.updated} updated, ${L.added} new, ${L.removed} removed, ${L.unchanged} unchanged${L.failed ? `, ${L.failed} couldn't be read (kept as they were)` : ''}`}` : 'Not checked yet.'}</p>
@@ -976,6 +983,7 @@ async function knowledge() {
       <p class="mute">Everything your AI chatbot should know: delivery & returns policies, FAQs, size guides, product manuals, opening hours… It is searched automatically for every customer question.</p>
       <p>${k.docs.length} / ${k.limit} documents · ${k.provider === 'direct' ? '✅ Searched in-app by your AI chatbot (direct mode)' : k.aiConnected ? (k.attached ? '✅ Connected to your AI chatbot' : '🔄 Will connect to your AI chatbot after the next sync') : '<span class="pill warn">AI not connected on the server – documents are saved and the built-in search answers simple questions</span>'}
       ${owner && k.aiConnected ? ' <button class="btn ghost" id="ksync">Sync now</button>' : ''}</p></div>
+    ${gapsCard}
     ${refreshCard}
     ${owner ? `<div class="row">
       <div class="card"><h2>🌐 From your website</h2><label>Page addresses (one per line)</label><textarea id="kurls" placeholder="https://yourshop.co.uk/pages/faq\nhttps://yourshop.co.uk/policies/refund-policy"></textarea>
@@ -994,6 +1002,12 @@ async function knowledge() {
   $('#kqgo').onclick = async () => { const r = await api(T('/knowledge/search?q=' + encodeURIComponent($('#kq').value))); $('#kqres').innerHTML = r.hits.map((h) => `<div class="card" style="margin:6px 0"><b>${esc(h.doc)}</b><div style="white-space:pre-wrap">${esc(h.text)}</div></div>`).join('') || 'Nothing found – add a document that answers this.'; };
   $('#app').querySelectorAll('[data-kdel]').forEach((b) => (b.onclick = async () => { if (confirm('Remove this document?')) { await api(T('/knowledge/' + b.dataset.kdel), { method: 'DELETE' }); again(); } }));
   if (!owner) return;
+  $('#app').querySelectorAll('[data-gapsave]').forEach((b) => (b.onclick = async () => {
+    const answer = $(`[data-gap="${b.dataset.gapsave}"]`).value.trim();
+    if (!answer) return toast('Type the answer first');
+    try { await api(T(`/unanswered/${b.dataset.gapsave}/answer`), { method: 'POST', body: { answer } }); toast('Saved – the assistant knows this now'); knowledge(); } catch (e) { toast(e.message); }
+  }));
+  $('#app').querySelectorAll('[data-gapignore]').forEach((b) => (b.onclick = async () => { try { await api(T(`/unanswered/${b.dataset.gapignore}/ignore`), { method: 'POST' }); knowledge(); } catch (e) { toast(e.message); } }));
   if ($('#krefresh')) $('#krefresh').onclick = async () => {
     try { await api(T('/knowledge/refresh'), { method: 'POST' }); toast('Reading your website…'); } catch (e) { toast(e.message); }
     const poll = setInterval(async () => { try { const k2 = await api(T('/knowledge')); if (!k2.refresh?.running) { clearInterval(poll); if (S.tab === 'knowledge') knowledge(); } } catch { clearInterval(poll); } }, 4000);
@@ -1148,7 +1162,24 @@ async function analytics(days = Number(store.get('wc_days')) || 30) {
   for (let i = days - 1; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10); series.push(byDay[d] || { day: d, orders: 0, revenue: 0 }); }
   const max = Math.max(1, ...series.map((d) => d.revenue));
   const fmtDay = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-  $('#app').innerHTML = `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Period</b>${[7, 30, 90].map((d) => `<button class="btn ${d === days ? '' : 'ghost'}" data-days="${d}">Last ${d} days</button>`).join('')}</div>
+  const vm = store.get('wc_vmonth') || 'this';
+  const now = new Date(); const ym = (d) => d.toISOString().slice(0, 7);
+  const month = vm === 'last' ? ym(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))) : ym(now);
+  const v = (await api(T(`/value-report?month=${month}`)).catch(() => ({}))).report;
+  const M0 = (n) => sym + Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: 0 });
+  const valueCard = v ? `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><h2 style="margin:0">💷 What your assistant did for you</h2>
+      <div>${[['this', 'This month'], ['last', 'Last month']].map(([k, l]) => `<button class="btn ${k === vm ? '' : 'ghost'}" data-vm="${k}">${l}</button>`).join(' ')}</div></div>
+    ${v.roi ? `<p style="font-size:1.15em;margin:12px 0">About <b>${v.roi}×</b> what your ${esc(v.plan.label)} plan costs (£${v.plan.priceGbp}/month)${v.partial ? ' so far this month' : ''}.</p>` : ''}
+    <div class="row">
+      <div><div class="mute">Conversations</div><div class="stat">${v.chats}</div><div class="mute">${v.whatsappChats} WhatsApp · ${v.webChats} website</div></div>
+      <div><div class="mute">Handled without your team</div><div class="stat">${v.handledByBot}</div><div class="mute">${v.botReplies} replies written for you</div></div>
+      <div><div class="mute">Helped out of hours</div><div class="stat">${v.afterHoursChats}</div><div class="mute">${esc(v.assumptions.hours)}</div></div>
+      <div><div class="mute">Staff time saved</div><div class="stat">${v.hoursSaved} h</div><div class="mute">≈ ${M0(v.staffValue)}</div></div>
+      <div><div class="mute">Orders in chat</div><div class="stat">${v.orders.count}</div><div class="mute">${M0(v.orders.value)}</div></div>
+      <div><div class="mute">Recovered sales</div><div class="stat">${M0(v.recovered)}</div><div class="mute">${v.recoveredCarts.count + v.recoveredCheckouts.count} carts · ${v.paidAfterReminder.count} chased payments</div></div></div>
+    ${v.unanswered ? `<p class="mute">❓ ${v.unanswered} question${v.unanswered > 1 ? 's' : ''} it couldn't answer – add the answers on the <a href="#" data-goto="knowledge">Knowledge base</a> tab.</p>` : ''}
+    <p class="mute" style="font-size:12px">Staff time counts ${v.assumptions.minutesPerReply} min per reply at ${sym}${v.assumptions.hourlyRate}/hour (change in Settings → Monthly report). This report is emailed to you on the 1st of each month.</p></div>` : '';
+  $('#app').innerHTML = valueCard + `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Period</b>${[7, 30, 90].map((d) => `<button class="btn ${d === days ? '' : 'ghost'}" data-days="${d}">Last ${d} days</button>`).join('')}</div>
     <div class="row">
       <div class="card"><div class="mute">Revenue (after discounts)</div><div class="stat">${m(a.revenue)}</div><div class="mute">${m(a.paid_revenue)} paid</div></div>
       <div class="card"><div class="mute">Orders</div><div class="stat">${a.orders}</div><div class="mute">avg ${m(a.aov)}</div></div>
@@ -1161,6 +1192,8 @@ async function analytics(days = Number(store.get('wc_days')) || 30) {
     <div class="row"><div class="card"><h2>Top products</h2><table><tr><th>Product</th><th>Qty</th><th>Sales (before discounts)</th></tr>${a.topProducts.map((p) => `<tr><td>${esc(p.title)}</td><td>${p.quantity}</td><td>${m(p.revenue)}</td></tr>`).join('') || '<tr><td colspan="3" class="mute">No sales yet</td></tr>'}</table></div>
       <div class="card"><h2>Promo codes</h2><table><tr><th>Code</th><th>Orders</th><th>Discount given</th></tr>${a.promos.map((p) => `<tr><td>${esc(p.code)}</td><td>${p.orders}</td><td>${m(p.discount)}</td></tr>`).join('') || '<tr><td colspan="3" class="mute">No promo orders</td></tr>'}</table></div></div>`;
   $('#app').querySelectorAll('[data-days]').forEach((b) => (b.onclick = () => { store.set('wc_days', b.dataset.days); analytics(Number(b.dataset.days)); }));
+  $('#app').querySelectorAll('[data-vm]').forEach((b) => (b.onclick = () => { store.set('wc_vmonth', b.dataset.vm); analytics(days); }));
+  $('#app').querySelectorAll('[data-goto]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); S.tab = a.dataset.goto; store.set('wc_tab', S.tab); render(); }));
 }
 
 // ---------- team ----------

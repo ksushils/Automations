@@ -13,6 +13,7 @@ import { enforceTrials } from './platform.js';
 import { HAS_CONSENT_SQL } from './consent.js';
 import { applyRetention } from './privacy.js';
 import { runWeeklyRefresh } from './refresh.js';
+import { runMonthlyReports, runWeeklyUnanswered, runReviewRequests } from './insights.js';
 
 /** Scheduled work: flow delays and campaigns. */
 export async function runScheduled() {
@@ -65,6 +66,7 @@ export function startJobs() {
     runAbandonedCartReminders().catch((e) => console.error('[jobs]', e));
     runPaymentReminders().catch((e) => console.error('[jobs]', e));
     runAbandonedCheckouts().catch((e) => console.error('[jobs]', e));
+    runReviewRequests().catch((e) => console.error('[jobs]', e));
   }, 5 * 60000);
   const minutely = setInterval(() => {
     runScheduled().catch((e) => console.error('[jobs]', e));
@@ -75,6 +77,8 @@ export function startJobs() {
   minutely.unref();
   const daily = setInterval(() => {
     runWinBack().catch((e) => console.error('[jobs]', e));
+    runMonthlyReports().then((n) => n && console.log(`[value report] emailed ${n} shop(s)`), (e) => console.error('[value report]', e));
+    runWeeklyUnanswered().then((n) => n && console.log(`[unanswered] emailed ${n} shop(s)`), (e) => console.error('[unanswered]', e));
     try { const n = enforceTrials(); if (n) console.log(`[billing] paused ${n} expired trial(s)`); } catch (e) { console.error('[jobs]', e); }
     try { const r = applyRetention(); if (Object.values(r).some(Boolean)) console.log('[retention]', JSON.stringify(r)); } catch (e) { console.error('[jobs]', e); }
     // keep knowledge bases in step with the shops' websites (weekly per shop, one shop per hour)

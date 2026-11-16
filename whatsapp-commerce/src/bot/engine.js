@@ -15,6 +15,7 @@ import { emailShop } from '../email.js';
 import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 import { recordConsent, defaultWording } from '../consent.js';
 import { directConfigured, directTurn } from '../ai/direct.js';
+import { isUnsure, recordUnanswered } from '../insights.js';
 import { difyAllowed } from '../ai/gate.js';
 
 const consentWording = (ctx) => ctx.S.notifications?.consentWording || defaultWording(ctx.S.business.name);
@@ -408,6 +409,7 @@ async function askAi(ctx, text) {
   ctx.conv.difyConversationId = res.conversationId || ctx.conv.difyConversationId;
 
   const answer = toWhatsAppFormatting(res.answer);
+  noteGap(ctx, text, answer);
   if (/\[HANDOVER\]/i.test(answer)) {
     ctx.reply({ type: 'text', text: answer.replace(/\[HANDOVER\]/gi, '').trim() || 'Let me get a team member for you.' });
     return handover(ctx);
@@ -419,6 +421,14 @@ async function askAi(ctx, text) {
   }
   if (products.length) ctx.reply(productList(ctx, products, answer || 'Here are some products you might like:'));
   else ctx.reply({ type: 'text', text: answer || "Sorry, I didn't catch that. Type *menu* to see options." });
+}
+
+/** Questions the assistant couldn't answer go on the owner's "fill the gaps" list (never breaks the reply). */
+function noteGap(ctx, question, answer) {
+  try {
+    if (isUnsure(answer)) recordUnanswered(ctx.tenant.id, ctx.conv.waId, question, answer, 'unsure');
+    else if (/\[HANDOVER\]/i.test(answer)) recordUnanswered(ctx.tenant.id, ctx.conv.waId, question, answer, 'handover');
+  } catch (e) { console.warn('[unanswered]', e.message); }
 }
 
 function handover(ctx, text) {
@@ -773,6 +783,7 @@ async function askDirect(ctx, text) {
   const fresh = getConversation(ctx.tenant.id, ctx.conv.waId);
   Object.assign(ctx.conv, { cart: fresh.cart, data: fresh.data, state: fresh.state, humanHandover: fresh.humanHandover });
   const out = toWhatsAppFormatting(answer);
+  noteGap(ctx, text, out);
   if (/\[HANDOVER\]/i.test(out)) {
     ctx.reply({ type: 'text', text: out.replace(/\[HANDOVER\]/gi, '').trim() || 'Let me get a team member for you.' });
     return handover(ctx);
