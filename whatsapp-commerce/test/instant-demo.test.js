@@ -80,3 +80,15 @@ test('instant demo: website → demo shop → chat → keep it on sign-up; expir
     assert.ok(tenants.getTenant(kept.id), 'kept shop untouched');
   } finally { Object.assign(config, prev); srv.close(); site.close(); llm.close(); }
 });
+
+test('a live shop cannot be deleted by an automated clean-up; demos can; the super admin can force it', async () => {
+  const { tenant: live } = tenants.createTenant({ name: 'Live Shop' });
+  assert.throws(() => tenants.deleteTenant(live.id), /live shop/);
+  assert.ok(tenants.getTenant(live.id));
+  const { tenant: demo } = tenants.createTenant({ name: 'Demo Shop' });
+  tenants.updateTenantSettings(demo.id, { demo: { source: 'demo-engine' } });
+  tenants.deleteTenant(demo.id);
+  assert.equal(tenants.getTenant(demo.id), undefined);
+  tenants.deleteTenant(live.id, { force: true });
+  assert.equal(tenants.getTenant(live.id), undefined);
+});

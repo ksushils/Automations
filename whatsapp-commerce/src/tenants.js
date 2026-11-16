@@ -179,7 +179,14 @@ export function rotateToolKey(id) {
   return toolKey;
 }
 
-export function deleteTenant(id) {
+/**
+ * Delete a shop and everything it owns. A real shop (not a demo) is protected: it is only deleted when the caller
+ * says so explicitly ({ force: true } – the super admin's Delete button). Automated clean-ups of demo shops can
+ * never take a live shop with them by mistake.
+ */
+export function deleteTenant(id, { force = false } = {}) {
+  const t = getTenant(id);
+  if (t && !force && !t.settings?.demo) throw Object.assign(new Error(`${id} is a live shop, not a demo – it can only be deleted from the super admin dashboard`), { status: 409 });
   const d = getDb();
   d.prepare('DELETE FROM knowledge_fts WHERE tenant_id = ?').run(id);
   for (const table of ['messages', 'orders', 'conversations', 'customers', 'usage', 'knowledge_chunks', 'knowledge_docs', 'bookings', 'unanswered', 'consents', 'store_events', 'flows', 'scheduled', 'campaigns', 'message_status', 'staff', 'link_clicks', 'quality_runs']) d.prepare(`DELETE FROM ${table} WHERE tenant_id = ?`).run(id);

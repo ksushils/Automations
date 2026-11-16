@@ -206,7 +206,7 @@ export function adminRouter() {
   r.get('/system/dead-letters', requireSuper, (req, res) => res.json({ messages: getDb().prepare("SELECT tenant_id, wa_id, wa_message_id, attempts, created_at, body FROM messages WHERE direction = 'in' AND processed = -1 ORDER BY id DESC LIMIT 200").all().map((m) => ({ ...m, body: json(m.body, {}) })) }));
   r.post('/system/dead-letters/retry', requireSuper, (req, res) => res.json({ requeued: getDb().prepare("UPDATE messages SET processed = 0, attempts = 0, created_at = datetime('now', '-1 minute') WHERE direction = 'in' AND processed = -1").run().changes }));
   r.post('/system/backup', requireSuper, (req, res) => { try { res.json(backup() || { skipped: 'in-memory database' }); } catch (e) { res.status(500).json({ error: e.message }); } });
-  r.delete('/tenants/:tenantId', requireSuper, (req, res) => { deleteTenant(req.params.tenantId); res.json({ ok: true }); });
+  r.delete('/tenants/:tenantId', requireSuper, (req, res) => { deleteTenant(req.params.tenantId, { force: true }); res.json({ ok: true }); });
 
   // ----- tenant scoped -----
   r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant), role: req.role, staffName: req.staff?.name || null, banner: billingBanner(req.tenant.id) }));

@@ -111,7 +111,8 @@ async function buildDemo(tenantId, token, origin) {
 export function claimDemo(token, { name, email }) {
   const t = demoTenantForToken(token);
   if (!t) return null;
-  updateTenantSettings(t.id, { demo: { expiresAt: null, claimedAt: new Date().toISOString() }, knowledge: { autoRefresh: true }, report: { monthlyEmail: true, unansweredEmail: true }, ...(name ? { business: { name } } : {}) });
+  // a kept demo becomes a live (protected) shop
+  updateTenantSettings(t.id, { demo: null, claimedFromDemoAt: new Date().toISOString(), knowledge: { autoRefresh: true }, report: { monthlyEmail: true, unansweredEmail: true }, ...(name ? { business: { name } } : {}) });
   if (name) getDb().prepare('UPDATE tenants SET name = ? WHERE id = ?').run(name, t.id);
   getDb().prepare("UPDATE tenants SET owner_email = ?, trial_ends_at = datetime('now', ?), subscription_status = 'trialing' WHERE id = ?").run(email, `+${config.trialDays} days`, t.id);
   getDb().prepare('DELETE FROM kv WHERE key = ?').run(`idemo:${token}`);
