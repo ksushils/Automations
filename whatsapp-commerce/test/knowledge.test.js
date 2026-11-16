@@ -86,8 +86,8 @@ test('NEW SHOP JOURNEY: sign up with website → catalogue + knowledge base + AI
     let m;
     if (p === '/v1/datasets' && req.method === 'POST') { const id = 'ds' + (Object.keys(S.datasets).length + 1); S.datasets[id] = JSON.parse(raw); return send(200, { id }); }
     if ((m = p.match(/^\/v1\/datasets\/(\w+)$/))) return S.datasets[m[1]] ? send(200, { id: m[1] }) : send(404, {});
-    if ((m = p.match(/^\/v1\/datasets\/(\w+)\/document\/create-by-text$/))) { const b = JSON.parse(raw); const id = 'doc' + (Object.keys(S.docs).length + 1); S.docs[id] = { ds: m[1], name: b.name, text: b.text, technique: b.indexing_technique }; return send(200, { document: { id, indexing_status: 'waiting' }, batch: 'b1' }); }
-    if ((m = p.match(/^\/v1\/datasets\/(\w+)\/document\/create-by-file$/))) { const id = 'doc' + (Object.keys(S.docs).length + 1); S.docs[id] = { ds: m[1], name: 'file', text: raw.toString('utf8'), file: true }; return send(200, { document: { id } }); }
+    if ((m = p.match(/^\/v1\/datasets\/(\w+)\/document\/create-by-text$/))) { const b = JSON.parse(raw); const id = 'doc' + (S.docSeq = (S.docSeq || 0) + 1); S.docs[id] = { ds: m[1], name: b.name, text: b.text, technique: b.indexing_technique }; return send(200, { document: { id, indexing_status: 'waiting' }, batch: 'b1' }); }
+    if ((m = p.match(/^\/v1\/datasets\/(\w+)\/document\/create-by-file$/))) { const id = 'doc' + (S.docSeq = (S.docSeq || 0) + 1); S.docs[id] = { ds: m[1], name: 'file', text: raw.toString('utf8'), file: true }; return send(200, { document: { id } }); }
     if ((m = p.match(/^\/v1\/datasets\/(\w+)\/documents$/))) return send(200, { data: Object.entries(S.docs).filter(([, d]) => d.ds === m[1]).map(([id]) => ({ id, indexing_status: 'completed' })) });
     if ((m = p.match(/^\/v1\/datasets\/(\w+)\/documents\/(\w+)$/)) && req.method === 'DELETE') { delete S.docs[m[2]]; return send(200, {}); }
     send(404, { message: p });

@@ -22,9 +22,11 @@ export function buildPrompt(tenant) {
   // defaults (delivery/collection, cash on delivery...) don't apply and must not be stated as facts.
   const ownCheckout = ['shopify_public', 'woocommerce'].includes(S.store?.type);
   const bookings = S.store?.type === 'none';
+  const inChatBookings = !!(S.bookings?.enabled && (S.bookings.times || []).length);
+  const bookFact = inChatBookings ? `Bookings can be made right here in the chat: when someone wants to book, tell them to type *book* (or tap "📅 Book now") and they'll pick ${(S.bookings.services || []).length > 1 ? 'the service, ' : ''}a day and a time. Never confirm a booking or a time yourself – only the booking steps do that.` : null;
   const facts = bookings ? [
     'This business takes bookings and enquiries on its website. Nothing is sold or ordered in this chat: never offer a basket, cart or checkout, and never take payment details.',
-    'When someone wants to book, buy a voucher or get a quote, give them the right page link from the shop\'s information' + (S.business.bookingUrl ? ` (bookings: ${S.business.bookingUrl})` : '') + ', or offer a person from the team.',
+    bookFact || 'When someone wants to book, buy a voucher or get a quote, give them the right page link from the shop\'s information' + (S.business.bookingUrl ? ` (bookings: ${S.business.bookingUrl})` : '') + ', or offer a person from the team.',
     'Prices, dates and availability: only quote what the shop\'s information says, and say dates and availability are confirmed when booking.',
     S.business.supportHours && `Team support hours: ${S.business.supportHours}.`,
   ].filter(Boolean) : ownCheckout ? [

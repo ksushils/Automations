@@ -5,6 +5,7 @@ import { getStore } from '../stores/index.js';
 import { findOrderByReceipt, getOrder, updateOrder, notifyStaff, STATUS_TEXT, paymentLabel } from '../bot/orders.js';
 import { money } from '../bot/cart.js';
 import { verifyStripeSignature } from '../payments/stripe.js';
+import { bookingDepositPaid } from '../bookings.js';
 import { handlePlatformStripeEvent } from '../platform.js';
 import { renderLegal } from '../legal.js';
 import { createSender, notify } from '../whatsapp/cloudApi.js';
@@ -164,6 +165,7 @@ export function renderReceipt(tenant, o, { justPaid } = {}) {
 export function publicRouter() {
   const r = express.Router();
 
+  r.get('/paid', (req, res) => res.type('html').send('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment received</title><body style="font:17px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:15vh auto;padding:0 16px;text-align:center"><h1>✅ Thank you!</h1><p>Your payment went through. You will get a confirmation in your chat in a moment – you can close this page.</p></body>'));
   r.get('/r/:token', (req, res) => {
     const o = findOrderByReceipt(req.params.token);
     const t = o && getTenant(o.tenant_id);
@@ -203,6 +205,7 @@ export function publicRouter() {
     if (!['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(ev.type)) return;
     const session = ev.data?.object || {};
     if (session.payment_status && session.payment_status !== 'paid') return;
+    if (await bookingDepositPaid(t, session).catch((e) => { console.warn('[booking deposit]', e.message); return true; })) return;
     const orderId = Number(session.metadata?.order_id);
     const row = getDb().prepare('SELECT id FROM orders WHERE tenant_id = ? AND (id = ? OR stripe_session_id = ?)').get(t.id, orderId || -1, session.id || '');
     const o = row && getOrder(t.id, row.id);

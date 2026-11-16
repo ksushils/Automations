@@ -22,6 +22,7 @@ import { createStaff, listStaff, deleteStaff, authenticateStaff, ROLES } from '.
 import { toCsv, productsFromCsv } from '../csv.js';
 import { analytics } from '../analytics.js';
 import { valueReport, reportText, listUnanswered, getUnanswered, setUnanswered } from '../insights.js';
+import { listBookings, setBookingStatus } from '../bookings.js';
 import { listFlows, getFlow, saveFlow, deleteFlow, validateFlow, getContact, updateContact } from '../bot/flows.js';
 import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaignStats } from '../campaigns.js';
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile, templateWarnings, cachedTemplates } from '../templates.js';
@@ -447,6 +448,13 @@ export function adminRouter() {
       res.json({ ok: true, doc });
     } catch (e) { kbErr(res, e); }
   });
+  // Bookings taken in the chat
+  r.get('/tenants/:tenantId/bookings', requireTenant, (req, res) => res.json({ bookings: listBookings(req.tenant.id, { past: req.query.past === '1' }) }));
+  r.post('/tenants/:tenantId/bookings/:id/status', requireTenant, wrap(async (req, res) => {
+    const b = await setBookingStatus(req.tenant, req.params.id, String(req.body?.status || ''));
+    if (!b) return res.status(404).json({ error: 'not found' });
+    res.json({ booking: b });
+  }));
   r.post('/tenants/:tenantId/unanswered/:id/ignore', requireTenant, requireOwner, (req, res) => res.json({ ok: setUnanswered(req.tenant.id, req.params.id, 'ignored') }));
   r.get('/tenants/:tenantId/export/orders.csv', requireTenant, (req, res) => {
     const rows = listOrders(req.tenant.id, { limit: 100000 });

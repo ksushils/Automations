@@ -14,6 +14,7 @@ import { HAS_CONSENT_SQL } from './consent.js';
 import { applyRetention } from './privacy.js';
 import { runWeeklyRefresh } from './refresh.js';
 import { runMonthlyReports, runWeeklyUnanswered, runReviewRequests } from './insights.js';
+import { runBookingJobs } from './bookings.js';
 
 /** Scheduled work: flow delays and campaigns. */
 export async function runScheduled() {
@@ -67,6 +68,7 @@ export function startJobs() {
     runPaymentReminders().catch((e) => console.error('[jobs]', e));
     runAbandonedCheckouts().catch((e) => console.error('[jobs]', e));
     runReviewRequests().catch((e) => console.error('[jobs]', e));
+    runBookingJobs().catch((e) => console.error('[jobs]', e));
   }, 5 * 60000);
   const minutely = setInterval(() => {
     runScheduled().catch((e) => console.error('[jobs]', e));

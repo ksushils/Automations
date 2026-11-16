@@ -82,6 +82,9 @@ Object.assign(config, {
   // OpenRouter routing: only these providers (comma list, e.g. "openai,anthropic") and no data retention / training
   aiProviderOrder: (env.AI_PROVIDER_ORDER || '').split(',').map((s) => s.trim()).filter(Boolean),
   aiZeroRetention: env.AI_ZERO_RETENTION !== 'false',
+  // Voice notes: a model that accepts audio (WhatsApp sends OGG/Opus). Empty AI_AUDIO_MODEL = voice notes off.
+  aiAudioModel: env.AI_AUDIO_MODEL ?? 'google/gemini-2.5-flash',
+  aiAudioProviders: (env.AI_AUDIO_PROVIDERS || '').split(',').map((s) => s.trim()).filter(Boolean),
   aiRequireZdr: env.AI_REQUIRE_ZDR === 'true', // only zero-data-retention endpoints (check your model + providers support it first)
   embeddingsBaseUrl: (env.EMBEDDINGS_BASE_URL || env.AI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
   embeddingsApiKey: env.EMBEDDINGS_API_KEY || env.AI_API_KEY || '',

@@ -7,7 +7,7 @@ import { addToCart, removeFromCart, subtotal, money, formatCart } from './cart.j
 import { placeOrder, listOrders, paymentLabel, STATUS_TEXT, findOrderByReceipt, receiptUrl } from './orders.js';
 import { quote, validatePromo, findPromo, upcomingSlots } from './pricing.js';
 import { findTriggeredFlow, startFlow, handleFlowButton, handleFlowAnswer, handleFlowForm, runFlow, getFlow, schedule } from './flows.js';
-import { notify } from '../whatsapp/cloudApi.js';
+import { notify, fetchMedia } from '../whatsapp/cloudApi.js';
 import { getDb } from '../db.js';
 import { config as appConfig } from '../config.js';
 import { alert } from '../ops.js';
@@ -16,6 +16,8 @@ import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 import { recordConsent, defaultWording } from '../consent.js';
 import { directConfigured, directTurn } from '../ai/direct.js';
 import { isUnsure, recordUnanswered } from '../insights.js';
+import { voiceConfigured, transcribe } from '../ai/voice.js';
+import { bookingsEnabled, bookingAction, bookingText } from '../bookings.js';
 import { difyAllowed } from '../ai/gate.js';
 
 const consentWording = (ctx) => ctx.S.notifications?.consentWording || defaultWording(ctx.S.business.name);
@@ -53,7 +55,7 @@ function mainMenu(ctx, intro) {
     return {
       type: 'buttons',
       text: intro || `What would you like to do? You can also just type your question (e.g. "${ctx.S.business.exampleQuery || 'how much is a test day?'}").`,
-      buttons: [{ id: 'book', title: String(ctx.S.business.bookingButton || '📅 How to book').slice(0, 20) }, { id: 'ask', title: '❓ Ask a question' }, { id: 'human', title: '🙋 Talk to a person' }],
+      buttons: [{ id: 'book', title: String(ctx.S.business.bookingButton || (bookingsEnabled(ctx.S) ? '📅 Book now' : '📅 How to book')).slice(0, 20) }, { id: 'ask', title: '❓ Ask a question' }, { id: 'human', title: '🙋 Talk to a person' }],
     };
   }
   const n = ctx.conv.cart.reduce((s, i) => s + i.quantity, 0);
@@ -452,8 +454,11 @@ async function handleAction(ctx, id) {
   switch (cmd) {
     case 'menu': return ctx.reply(mainMenu(ctx));
     case 'more': return ctx.reply(moreMenu());
-    case 'browse': if (bookingsOnly(ctx)) return bookInfo(ctx); return showCategories(ctx);
-    case 'book': return bookInfo(ctx);
+    case 'browse': if (bookingsOnly(ctx)) return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx); return showCategories(ctx);
+    case 'book': return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx);
+    case 'bstart': case 'bsvc': case 'bday': case 'btime': case 'bconfirm': case 'bcxl':
+      if (!bookingsEnabled(ctx.S) && cmd !== 'bcxl') return bookInfo(ctx);
+      return bookingAction(ctx, cmd, arg);
     case 'ask': return ctx.reply({ type: 'text', text: 'Sure, type your question and I\'ll answer from our information. 🙂' });
     case 'cat': return showCategory(ctx, arg);
     case 'p': return showProduct(ctx, arg);
@@ -541,6 +546,8 @@ async function handleText(ctx, raw) {
   if (!t) return ctx.reply(mainMenu(ctx));
 
   // State-driven input first
+  if (ctx.conv.state === 'booking_name' && !GREETING.test(t) && !COMMANDS.has(t)) return bookingText(ctx, text);
+  if (bookingsEnabled(ctx.S) && /^(book|booking|book now|make a booking|i want to book|i'?d like to book|reserve|book a (slot|table|session|appointment))[.!]?$/.test(t)) return bookingAction(ctx, 'bstart');
   if (ctx.conv.state === 'order_verify' && ctx.conv.data.orderVerify && !GREETING.test(t) && !COMMANDS.has(t)) return verifyOrder(ctx, text);
   if (ctx.conv.state === 'awaiting_address' && !GREETING.test(t) && !COMMANDS.has(t) && !/^(order status|track|remove \d+)/.test(t)) return setAddress(ctx, text);
   if (ctx.conv.state === 'awaiting_qty' && /^\d{1,2}$/.test(t)) return addPending(ctx, Number(t));
@@ -705,7 +712,7 @@ export async function handleInbound(tenant, event, send) {
       if (conv.state === 'awaiting_address') await setAddress(ctx, `${customer.name || ''}\n${event.text}\nhttps://maps.google.com/?q=${event.location.latitude},${event.location.longitude}`.trim());
       else ctx.reply(mainMenu(ctx, 'Thanks for sharing your location! 📍'));
     } else if (event.kind === 'media' && event.type === 'audio') {
-      ctx.reply({ type: 'buttons', text: "🎙️ Sorry, I can't listen to voice notes yet. Please type your message, or a team member can help.", buttons: [{ id: 'menu', title: '📋 Menu' }, { id: 'human', title: '🙋 Talk to us' }] });
+      await voiceNote(ctx, event);
     } else if (event.kind === 'media') {
       // Most likely a payment proof (bank transfer) or a photo for the team
       const unpaid = getDb().prepare("SELECT id, store_order_name FROM orders WHERE tenant_id = ? AND wa_id = ? AND payment_status = 'unpaid' AND payment_method = 'bank_transfer' AND status != 'cancelled' ORDER BY id DESC LIMIT 1").get(tenant.id, conv.waId);
@@ -754,6 +761,27 @@ function aiProvider(ctx) {
 }
 
 /** Is an AI engine configured for this shop (Dify app or direct provider)? */
+/** Voice note: transcribe it, show the customer what we heard, then answer it like a typed message. */
+async function voiceNote(ctx, event) {
+  const cantListen = (why) => ctx.reply({ type: 'buttons', text: why || "🎙️ Sorry, I couldn't listen to that voice note. Please type your message, or a team member can help.", buttons: [{ id: 'menu', title: '📋 Menu' }, { id: 'human', title: '🙋 Talk to us' }] });
+  if (!event.mediaId || ctx.S.ai?.voiceNotes === false || !voiceConfigured() || !aiAvailable(ctx)) return cantListen("🎙️ Sorry, I can't listen to voice notes here. Please type your message, or a team member can help.");
+  let text = '';
+  try {
+    const media = await fetchMedia(ctx.tenant, event.mediaId);
+    text = await transcribe(ctx.tenant.id, media.body, event.mime || media.mime);
+  } catch (e) {
+    console.warn(`[voice] tenant=${ctx.tenant.id}`, e.message);
+    return cantListen(e.tooLong ? '🎙️ That voice note is a bit long for me – could you send a shorter one, or type your question?' : null);
+  }
+  if (!text) return cantListen("🎙️ I couldn't make out any words in that voice note. Could you type your message, or try again?");
+  // keep the transcript with the message, so the inbox, the AI's chat history and reports see what was said
+  if (event.messageId) {
+    try { getDb().prepare("UPDATE messages SET body = json_set(body, '$.text', ?, '$.transcript', ?) WHERE tenant_id = ? AND wa_message_id = ? AND direction = 'in'").run(`🎙️ ${text}`, text, ctx.tenant.id, event.messageId); } catch {}
+  }
+  ctx.reply({ type: 'text', text: `🎙️ _"${text.length > 300 ? text.slice(0, 297) + '…' : text}"_` });
+  return handleText(ctx, text);
+}
+
 function aiAvailable(ctx) {
   const D = ctx.S.dify || {};
   if (aiProvider(ctx) === 'direct') return !!(ctx.S.ai?.enabled !== false && directConfigured());

@@ -25,6 +25,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;bord
 .tablewrap{overflow-x:auto}
 .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:var(--bg);border:1px solid var(--line)}
 .pill.warn{color:var(--warn);border-color:var(--warn)}
+.pill.ok{color:var(--brand);border-color:var(--brand)}
 .stat{font-size:22px;font-weight:600}.mute{color:var(--mute)}
 code{background:var(--bg);padding:2px 6px;border-radius:6px;word-break:break-all}
 .chat{background:var(--chat);border-radius:12px;padding:12px;height:440px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
@@ -123,8 +124,8 @@ async function boot() {
 }
 $('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant', null); store.set('wc_tab', null); S.key = null; S.tenant = null; S.tenantId = null; S.setup = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
-const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders', 'contacts']);
+const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
+const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'orders', 'bookings', 'contacts']);
 const MAIN_TABS = new Set(['overview', 'analytics', 'inbox', 'orders', 'simulator', 'ai', 'settings']);
 function render() {
   const shopTabs = S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [];
@@ -144,7 +145,7 @@ function render() {
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('') + (hasMore ? `<button id="moretabs">${showAll ? '‹ Fewer' : 'More ›'}</button>` : '');
   $('#nav').querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => { S.fromGuide = false; S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
   if ($('#moretabs')) $('#moretabs').onclick = () => { store.set('wc_alltabs', showAll ? null : '1'); if (showAll && !MAIN_TABS.has(S.tab)) S.tab = 'overview'; render(); };
-  ({ setup, tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ setup, tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, orders, bookings, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin: guided platform setup ----------
@@ -474,6 +475,26 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
 
 // ---------- orders ----------
 const STATUSES = ['new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivered', 'completed', 'cancelled'];
+async function bookings() {
+  const past = store.get('wc_bpast') === '1';
+  const { bookings: list } = await api(T(`/bookings${past ? '?past=1' : ''}`));
+  const sym = S.tenant.settings.business.currencySymbol || '£';
+  const on = S.tenant.settings.bookings?.enabled;
+  const pill = { requested: '<span class="pill warn">to confirm</span>', awaiting_deposit: '<span class="pill">awaiting deposit</span>', confirmed: '<span class="pill ok">confirmed</span>', cancelled: '<span class="pill">cancelled</span>', completed: '<span class="pill ok">done</span>', no_show: '<span class="pill warn">no-show</span>' };
+  const day = (b) => new Date(b.day + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const actions = (b) => (b.status === 'requested' ? [['confirmed', '✅ Confirm'], ['cancelled', 'Decline']] : b.status === 'confirmed' ? [['completed', 'Done'], ['no_show', 'No-show'], ['cancelled', 'Cancel']] : b.status === 'awaiting_deposit' ? [['confirmed', 'Confirm anyway'], ['cancelled', 'Cancel']] : [])
+    .map(([s, l]) => `<button class="btn ${s === 'confirmed' || s === 'completed' ? '' : 'ghost'}" data-bs="${b.id}" data-st="${s}">${l}</button>`).join(' ');
+  $('#app').innerHTML = `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><h2 style="margin:0">📅 Bookings</h2>
+      <div><button class="btn ${past ? 'ghost' : ''}" data-bp="0">Upcoming</button> <button class="btn ${past ? '' : 'ghost'}" data-bp="1">Past</button></div></div>
+    ${on ? '' : '<p class="mute">Bookings in the chat are off. Switch them on in Settings → Bookings in the chat: add your start times (and services), and customers can book by typing <b>book</b>.</p>'}
+    <div class="tablewrap"><table><tr><th>When</th><th>Customer</th><th>Service</th><th>Status</th><th></th></tr>
+    ${list.map((b) => `<tr><td><b>${esc(day(b))}</b> ${esc(b.time)}</td><td>${esc(b.name || '')}<div class="mute">${String(b.wa_id).startsWith('web:') ? 'website chat' : '+' + esc(b.wa_id)}</div></td><td>${esc(b.service || '–')}${b.deposit ? `<div class="mute">deposit ${sym}${Number(b.deposit).toFixed(2)} ${b.deposit_paid ? '✅ paid' : 'unpaid'}</div>` : ''}</td><td>${pill[b.status] || esc(b.status)}${b.reminded_at ? '<div class="mute">reminded</div>' : ''}</td><td style="white-space:nowrap">${actions(b)}</td></tr>`).join('') || `<tr><td colspan="5" class="mute">No ${past ? 'past' : 'upcoming'} bookings</td></tr>`}</table></div></div>`;
+  $('#app').querySelectorAll('[data-bp]').forEach((b) => (b.onclick = () => { store.set('wc_bpast', b.dataset.bp === '1' ? '1' : null); bookings(); }));
+  $('#app').querySelectorAll('[data-bs]').forEach((b) => (b.onclick = async () => {
+    try { await api(T(`/bookings/${b.dataset.bs}/status`), { method: 'POST', body: { status: b.dataset.st } }); toast(b.dataset.st === 'confirmed' ? 'Confirmed – the customer has been told' : b.dataset.st === 'cancelled' ? 'Cancelled – the customer has been told' : 'Updated'); bookings(); } catch (e) { toast(e.message); }
+  }));
+}
+
 async function orders() {
   const { orders } = await api(T('/orders?limit=100'));
   const sym = S.tenant.settings.business.currencySymbol || '£';
@@ -572,6 +593,7 @@ const FIELDS = [
   ['Delivery / collection time slots', [['ordering.slots.enabled', 'Ask customers to pick a time slot', 'bool'], ['ordering.slots.times', 'Time windows (comma, e.g. 10:00-12:00,14:00-16:00)', 'csv'], ['ordering.slots.days', 'Days ahead to offer', 'number'], ['ordering.slots.leadHours', 'Minimum notice (hours)', 'number'], ['ordering.slots.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum']]],
   ['Card payments (Stripe – built-in catalogue & custom stores)', [['payments.stripe.secretKey', 'Stripe secret key (sk_live_… / rk_live_…)', 'secret'], ['payments.stripe.webhookSecret', 'Stripe webhook signing secret (whsec_…)', 'secret']]],
   ['Notifications', [['notifications.alertEmails', 'Email order alerts to (comma; empty = your sign-up email)', 'csv'], ['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Order webhook URL (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number'], ['notifications.defaultCountryCode', 'Default country code for local numbers (44 = UK)']]],
+  ['Bookings in the chat', [['bookings.enabled', 'Take bookings in the chat (customers pick a day and time)', 'bool'], ['bookings.services', 'Services (JSON) – [{"name":"Test day","minutes":60,"price":120,"deposit":30}] (deposit needs Stripe)', 'json'], ['bookings.times', 'Start times (comma, e.g. 09:00,11:00,14:00)', 'csv'], ['bookings.days', 'Days ahead to offer (default 14)', 'number'], ['bookings.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum'], ['bookings.leadHours', 'Minimum notice (hours)', 'number'], ['bookings.perSlot', 'Bookings per time slot (default 1)', 'number'], ['bookings.autoConfirm', 'Confirm automatically (otherwise you confirm on the Bookings tab)', 'bool'], ['bookings.reminderHours', 'Reminder hours before (0 = off, default 24)', 'number'], ['bookings.reminderTemplate', 'Reminder template for customers outside the 24h window (vars: name, when, shop)'], ['bookings.rebookDays', '"Book again" message days after a visit (0 = off)', 'number'], ['bookings.rebookTemplate', '"Book again" template (approved marketing template, var: name)']]],
   ['Google review requests', [['notifications.reviewRequest.enabled', 'Ask for a review after an order is delivered / completed', 'bool'], ['notifications.reviewRequest.url', 'Your Google review link (Google Business Profile → Ask for reviews)'], ['notifications.reviewRequest.afterHours', 'Hours after delivery', 'number'], ['notifications.reviewRequest.text', 'Message ({{name}} = first name, {{shop}} = shop name)', 'textarea'], ['notifications.reviewRequest.template', 'Template for customers outside the 24h window (vars: name, shop) – optional']]],
   ['Monthly report', [['report.monthlyEmail', 'Email me the monthly "what your assistant did" report', 'bool'], ['report.unansweredEmail', 'Email me questions the assistant could not answer (Mondays)', 'bool'], ['report.minutesPerReply', 'Minutes a person would spend per reply (default 1.5)', 'number'], ['report.hourlyRate', 'Staff cost per hour (default £12.71)', 'number'], ['report.openHour', 'Working hours start (0–23, default 9)', 'number'], ['report.closeHour', 'Working hours end (0–23, default 17)', 'number']]],
   ['Messages outside the 24-hour window (approved templates)', [['notifications.templates.orderUpdate', 'Order update template (vars: name, order, status) – e.g. order_update'], ['notifications.templates.paymentReminder', 'Payment reminder template (vars: name, order, total, link)'], ['notifications.templates.staffAlert', 'Staff alert template (var: alert text) – e.g. staff_alert']]],

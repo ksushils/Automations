@@ -156,6 +156,27 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
 );
 CREATE INDEX IF NOT EXISTS idx_kdocs_tenant ON knowledge_docs(tenant_id, status);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS bookings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  wa_id TEXT NOT NULL,
+  name TEXT,
+  service TEXT,
+  day TEXT NOT NULL,          -- YYYY-MM-DD in the shop's time zone
+  time TEXT NOT NULL,         -- HH:MM in the shop's time zone
+  starts_at TEXT NOT NULL,    -- UTC
+  status TEXT NOT NULL DEFAULT 'requested',  -- requested | awaiting_deposit | confirmed | cancelled | completed | no_show
+  deposit REAL NOT NULL DEFAULT 0,
+  deposit_paid INTEGER NOT NULL DEFAULT 0,
+  checkout_url TEXT,
+  stripe_session_id TEXT,
+  notes TEXT,
+  reminded_at TEXT,
+  rebook_sent_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_bookings ON bookings(tenant_id, starts_at);
 CREATE TABLE IF NOT EXISTS unanswered (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id TEXT NOT NULL,
