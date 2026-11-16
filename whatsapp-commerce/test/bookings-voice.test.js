@@ -116,6 +116,27 @@ test('voice note: downloaded, transcribed, echoed, then answered like text', asy
   } finally { globalThis.fetch = prev; Object.assign(config, prevCfg); }
 });
 
+test('voice note with no speech: no invented transcript, polite fallback', async () => {
+  const t = makeTenant({ whatsapp: { phoneNumberId: '1', accessToken: 'x' } });
+  const prevCfg = { ...config };
+  Object.assign(config, { aiBaseUrl: 'https://ai.test/v1', aiApiKey: 'sk-test', aiAudioModel: 'audio-model' });
+  const prev = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    url = String(url);
+    if (url.includes('graph.facebook.com')) return new Response(JSON.stringify({ url: 'https://media.test/n.ogg', mime_type: 'audio/ogg' }));
+    if (url === 'https://media.test/n.ogg') return new Response(Buffer.from('OggS'));
+    if (url.includes('/chat/completions')) return new Response(JSON.stringify({ choices: [{ message: { content: 'NO_SPEECH' } }] }));
+    return okFetch();
+  };
+  try {
+    const sent = [];
+    await engine.handleInbound(tenants.getTenant(t.id), { waId: '447700911070', kind: 'media', type: 'audio', mediaId: 'M3', mime: 'audio/ogg', text: '[audio]' }, async (to, m) => sent.push(m));
+    const all = sent.map((m) => m.text).join(' ');
+    assert.match(all, /couldn't make out any words/);
+    assert.doesNotMatch(all, /NO_SPEECH/);
+  } finally { globalThis.fetch = prev; Object.assign(config, prevCfg); }
+});
+
 test('voice note when voice is switched off: polite fallback', async () => {
   const t = makeTenant({ ai: { voiceNotes: false } });
   const sent = [];

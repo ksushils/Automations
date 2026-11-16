@@ -220,7 +220,16 @@ export async function listDifyModels(client = new DifyConsole()) {
 export { consoleConfigured };
 
 /** Called after knowledge documents change: sync to Dify and (re)attach the dataset to the bot when needed. */
-export async function knowledgeChanged(tenantId, { client } = {}) {
+// One sync per shop at a time: overlapping syncs (an edit + 'Sync now') would upload the same document twice.
+const syncing = new Map();
+export function knowledgeChanged(tenantId, opts = {}) {
+  const run = (syncing.get(tenantId) || Promise.resolve()).catch(() => {}).then(() => knowledgeSyncOnce(tenantId, opts));
+  syncing.set(tenantId, run);
+  run.finally(() => { if (syncing.get(tenantId) === run) syncing.delete(tenantId); }).catch(() => {});
+  return run;
+}
+
+async function knowledgeSyncOnce(tenantId, { client } = {}) {
   if (!consoleConfigured() && !client?.injected) return { skipped: 'Dify not connected' };
   const c = client || new DifyConsole();
   const r = await syncKnowledge(tenantId, { client: c });
