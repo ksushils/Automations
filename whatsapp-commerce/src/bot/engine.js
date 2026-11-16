@@ -19,6 +19,7 @@ import { isUnsure, recordUnanswered } from '../insights.js';
 import { voiceConfigured, transcribe } from '../ai/voice.js';
 import { bookingsEnabled, bookingAction, bookingText } from '../bookings.js';
 import { ownerCommand } from '../briefing.js';
+import { visionConfigured, describeForSearch } from '../ai/vision.js';
 import { difyAllowed } from '../ai/gate.js';
 
 const consentWording = (ctx) => ctx.S.notifications?.consentWording || defaultWording(ctx.S.business.name);
@@ -719,6 +720,8 @@ export async function handleInbound(tenant, event, send) {
       else ctx.reply(mainMenu(ctx, 'Thanks for sharing your location! 📍'));
     } else if (event.kind === 'media' && event.type === 'audio') {
       await voiceNote(ctx, event);
+    } else if (event.kind === 'media' && event.type === 'image' && !hasUnpaidTransfer(tenant.id, conv.waId) && (await photoSearch(ctx, event))) {
+      // a photo of something they want: answered with matching products
     } else if (event.kind === 'media') {
       // Most likely a payment proof (bank transfer) or a photo for the team
       const unpaid = getDb().prepare("SELECT id, store_order_name FROM orders WHERE tenant_id = ? AND wa_id = ? AND payment_status = 'unpaid' AND payment_method = 'bank_transfer' AND status != 'cancelled' ORDER BY id DESC LIMIT 1").get(tenant.id, conv.waId);
@@ -767,6 +770,40 @@ function aiProvider(ctx) {
 }
 
 /** Is an AI engine configured for this shop (Dify app or direct provider)? */
+const hasUnpaidTransfer = (tenantId, waId) => !!getDb().prepare("SELECT 1 FROM orders WHERE tenant_id = ? AND wa_id = ? AND payment_status = 'unpaid' AND payment_method = 'bank_transfer' AND status != 'cancelled' LIMIT 1").get(tenantId, waId);
+
+/**
+ * Photo search: "do you have this?" with a photo → matching products. Returns false when it isn't a product photo
+ * (or the shop has no catalogue / AI), so the normal "a team member will check this" path runs.
+ */
+async function photoSearch(ctx, event) {
+  if (!event.mediaId || bookingsOnly(ctx) || ctx.S.ai?.photoSearch === false || !visionConfigured() || !aiAvailable(ctx)) return false;
+  let seen;
+  try {
+    const media = await fetchMedia(ctx.tenant, event.mediaId);
+    seen = await describeForSearch(ctx.tenant.id, media.body, event.mime || media.mime, { caption: event.caption, shopAbout: ctx.S.ai?.about });
+  } catch (e) {
+    console.warn(`[photo search] tenant=${ctx.tenant.id}`, e.message);
+    return false;
+  }
+  if (!seen.product || !seen.query) return false;
+  if (event.messageId) {
+    try { getDb().prepare("UPDATE messages SET body = json_set(body, '$.text', ?) WHERE tenant_id = ? AND wa_message_id = ? AND direction = 'in'").run(`📷 [photo: ${seen.description || seen.query}]${event.caption ? ' ' + event.caption : ''}`, ctx.tenant.id, event.messageId); } catch {}
+  }
+  let products = await ctx.store.searchProducts(seen.query, { limit: 6 }).catch(() => []);
+  if (!products.length) {
+    const short = seen.query.split(/\s+/).slice(0, 2).join(' ');
+    if (short !== seen.query) products = await ctx.store.searchProducts(short, { limit: 6 }).catch(() => []);
+  }
+  if (!products.length) {
+    ctx.reply({ type: 'buttons', text: `📷 That looks like *${seen.description || seen.query}*. I couldn't find a match in our shop – tell me a bit more (brand, model or size), or ask our team.`, buttons: [{ id: 'human', title: '🙋 Ask the team' }, { id: 'menu', title: '📋 Menu' }] });
+    return true;
+  }
+  ctx.conv.data.lastList = products.slice(0, 10).map((p) => p.id);
+  ctx.reply(productList(ctx, products, `📷 Looks like *${seen.description || seen.query}*. Here's what we have that matches – tap one to see it:`));
+  return true;
+}
+
 /** Voice note: transcribe it, show the customer what we heard, then answer it like a typed message. */
 async function voiceNote(ctx, event) {
   const cantListen = (why) => ctx.reply({ type: 'buttons', text: why || "🎙️ Sorry, I couldn't listen to that voice note. Please type your message, or a team member can help.", buttons: [{ id: 'menu', title: '📋 Menu' }, { id: 'human', title: '🙋 Talk to us' }] });
