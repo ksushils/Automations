@@ -67,9 +67,11 @@ async function buildDemo(tenantId, token, origin) {
   const name = (site.name || new URL(site.origin).hostname.replace(/^www\./, '')).slice(0, 80);
   const shopify = site.platform === 'shopify';
   const SYM = { GBP: '£', USD: '$', EUR: '€', AED: 'AED ', INR: '₹', AUD: 'A$', CAD: 'C$' };
+  const before = getTenant(tenantId).settings;
   updateTenantSettings(tenantId, {
-    business: { name, website: site.origin, ...(site.currency ? { currency: site.currency, currencySymbol: SYM[site.currency] || `${site.currency} ` } : {}) },
-    ai: { about: [site.description, site.city && `Based in ${site.city}${site.country ? ', ' + site.country : ''}.`].filter(Boolean).join(' ') },
+    // the defaults were written with the bare domain as the name – redo the ones that show it
+    business: { name, welcomeMessage: String(before.business?.welcomeMessage || '').split(before.business?.name || '\u0000').join(name), website: site.origin, ...(site.currency ? { currency: site.currency, currencySymbol: SYM[site.currency] || `${site.currency} ` } : {}) },
+    ai: { assistantName: `${name} assistant`, about: [site.description, site.city && `Based in ${site.city}${site.country ? ', ' + site.country : ''}.`].filter(Boolean).join(' ') },
     ...(shopify ? { store: { type: 'shopify_public', shopify: { domain: new URL(site.origin).host, origin: site.origin } } } : {}),
   });
   getDb().prepare('UPDATE tenants SET name = ? WHERE id = ?').run(name, tenantId);

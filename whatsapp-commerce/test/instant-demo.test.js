@@ -58,6 +58,7 @@ test('instant demo: website → demo shop → chat → keep it on sign-up; expir
 
     const chat = await (await fetch(`${base}/chat/${st.tenantId}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'demosession1234567890', text: 'how much is delivery?' }) })).json();
     assert.match(chat.replies.map((m) => m.text).join(' '), /£4\.95/);
+    assert.match(chat.replies[0].text, /I'm Bloom Florist assistant/); // not the bare domain
 
     // keep it: sign-up with the demo token claims the same shop
     const s = await (await fetch(`${base}/api/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ business: 'Bloom Florist Ltd', email: 'owner@example.com', acceptTerms: true, plan: 'growth', demo: token }) })).json();
