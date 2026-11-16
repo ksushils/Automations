@@ -24,6 +24,7 @@ import { analytics } from '../analytics.js';
 import { valueReport, reportText, listUnanswered, getUnanswered, setUnanswered } from '../insights.js';
 import { listBookings, setBookingStatus } from '../bookings.js';
 import { claimDemo, isDemo } from '../instantDemo.js';
+import { wordpressPlugin, detectPlatform } from '../install.js';
 import { listFlows, getFlow, saveFlow, deleteFlow, validateFlow, getContact, updateContact } from '../bot/flows.js';
 import { createCampaign, listCampaigns, cancelCampaign, resolveAudience, campaignStats } from '../campaigns.js';
 import { listTemplates, createTemplate, deleteTemplate, TEMPLATE_LIBRARY, numberHealth, getBusinessProfile, updateBusinessProfile, templateWarnings, cachedTemplates } from '../templates.js';
@@ -459,6 +460,19 @@ export function adminRouter() {
       res.json({ ok: true, doc });
     } catch (e) { kbErr(res, e); }
   });
+  // One-click website installs
+  r.get('/tenants/:tenantId/install/wordpress-plugin.zip', requireTenant, (req, res) => {
+    res.set('Content-Disposition', 'attachment; filename="ai-chat-assistant.zip"').type('application/zip').send(wordpressPlugin(req.tenant));
+  });
+  r.get('/tenants/:tenantId/install/detect', requireTenant, wrap(async (req, res) => {
+    const key = `platform:${req.tenant.id}`;
+    const cached = getDb().prepare('SELECT value FROM kv WHERE key = ?').get(key)?.value;
+    if (cached && req.query.fresh !== '1') return res.json(JSON.parse(cached));
+    const website = req.tenant.settings.business?.website;
+    const out = { website: website || null, platform: await detectPlatform(website) };
+    if (out.platform) getDb().prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, JSON.stringify(out));
+    res.json(out);
+  }));
   // Bookings taken in the chat
   r.get('/tenants/:tenantId/bookings', requireTenant, (req, res) => res.json({ bookings: listBookings(req.tenant.id, { past: req.query.past === '1' }) }));
   r.post('/tenants/:tenantId/bookings/:id/status', requireTenant, wrap(async (req, res) => {

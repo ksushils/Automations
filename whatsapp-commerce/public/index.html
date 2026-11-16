@@ -814,17 +814,22 @@ async function shopGuide(t) {
         const code = `<script src="${location.origin}/chat-widget/${t.id}.js" async><\/script>`;
         const where = {
           shopify: '<b>Shopify:</b> Online Store → Themes → ⋯ → Edit code → open <code>theme.liquid</code> → paste just above <code>&lt;/body&gt;</code> → Save.',
-          wordpress: '<b>WordPress / WooCommerce:</b> Plugins → Add new → install the free <b>WPCode</b> plugin → Code Snippets → Header &amp; Footer → paste in <b>Footer</b> → Save.',
+          wordpress: '<b>WordPress / WooCommerce:</b> easiest: <button class="btn ghost" data-wpzip="1" style="padding:4px 10px">⬇ Download our plugin</button> then Plugins → Add New → Upload Plugin → choose the file → Activate. Done, no code. (Or paste the code with the free WPCode plugin → Header &amp; Footer → Footer.)',
           wix: '<b>Wix:</b> Settings → Custom code → Add code → paste → All pages, Body end → Apply.',
           squarespace: '<b>Squarespace:</b> Settings → Advanced → Code injection → paste in <b>Footer</b> → Save.',
+          webflow: '<b>Webflow:</b> Site settings → Custom code → paste in <b>Footer code</b> → Save → Publish.',
+          godaddy: '<b>GoDaddy Website Builder:</b> Edit website → Add section → HTML → paste → Done → Publish.',
+          gtm: '<b>Google Tag Manager:</b> Tags → New → Custom HTML → paste → Trigger: All Pages → Save → Submit.',
           other: '<b>Any other website:</b> paste it just above <code>&lt;/body&gt;</code> on every page, or in the site footer.',
         };
         const first = /shopify/.test(d.storeType || s.store.type) ? 'shopify' : s.store.type === 'woocommerce' ? 'wordpress' : null;
         const order = [first, ...Object.keys(where).filter((k) => k !== first)].filter(Boolean);
+        S.installWhere = where;
         const mail = `mailto:?subject=${encodeURIComponent('Please add our chat to the website')}&body=${encodeURIComponent(`Hi,\n\nPlease paste this code on every page of our website, just above </body> (or in the footer):\n\n${code}\n\nIt adds a small chat button in the bottom corner. Thank you!`)}`;
         if (d.seenOn) return `<p>✅ We can see your chat on <b>${esc(d.seenOn)}</b>. Customers can now ask questions and order there.</p>
           <p class="mute">Open your website and try the chat button in the corner. Change its colour and wording in <a href="#" data-gtab="grow">Grow</a>.</p>`;
         return `<p>Add a chat button to your website, so customers can ask questions and order today. WhatsApp isn't needed for this. It's one copy and paste, done once.</p>
+        <div id="g-plat"></div>
         ${stepNo(1, `<b>Copy this code</b><div style="display:flex;gap:6px;margin-top:6px"><input readonly value="${esc(code)}"><button class="btn" data-gcopy="${esc(code)}">Copy</button></div>`)}
         ${stepNo(2, `<b>Paste it into your website</b><div class="mute" style="margin-top:4px">${order.map((k) => '• ' + where[k]).join('<br>')}</div>
           <p class="mute">Someone else looks after your website? <a class="btn ghost" href="${esc(mail)}">✉️ Email these steps to them</a></p>`)}
@@ -934,6 +939,20 @@ async function shopGuide(t) {
     if (!r.ok) return res('⚠️ ' + esc(r.error) + ' Check the address and both keys.');
     res('✅ Connected to WooCommerce'); setTimeout(() => reload(false), 1500);
   });
+  if ($('#g-plat') && S.installWhere) api(T('/install/detect')).then((p) => {
+    const W = S.installWhere; const names = { shopify: 'Shopify', wordpress: 'WordPress', wix: 'Wix', squarespace: 'Squarespace', webflow: 'Webflow', godaddy: 'GoDaddy', gtm: 'Google Tag Manager' };
+    if (!p.platform || !W[p.platform] || !$('#g-plat')) return;
+    $('#g-plat').innerHTML = `<div class="card" style="margin:0 0 10px;border-color:var(--brand)"><b>🔎 Your website is built with ${names[p.platform]}.</b> Here's exactly what to do:<div style="margin-top:6px">${W[p.platform]}</div></div>`;
+  }).catch(() => {});
+  document.querySelectorAll('[data-wpzip]').forEach((b) => (b.onclick = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await fetch('/api' + T('/install/wordpress-plugin.zip'), { headers: { Authorization: 'Bearer ' + S.key } });
+      if (!r.ok) throw new Error('Download failed');
+      const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob()); a.download = 'ai-chat-assistant.zip'; a.click();
+      toast('Downloaded – now upload it in WordPress → Plugins → Add New → Upload Plugin');
+    } catch (err) { toast(err.message); }
+  }));
   on('g-recheck', async () => { res('Checking…'); const g2 = await api(T('/onboarding')); const w = g2.steps.find((x) => x.key === 'website'); if (w.data.seenOn || w.done) return reload(true); res('Not yet. Open your website in a new tab after saving the change there, then press Check now again.'); });
   on('g-skgo', async () => {
     res('Connecting to Stripe…');
