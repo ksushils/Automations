@@ -52,7 +52,37 @@ function availablePaymentMethods(tenant, store) {
 
 // ---------- screens ----------
 const bookingsOnly = (ctx) => ctx.S.store?.type === 'none';
+// ---------- the shop's own welcome menu (Settings → Welcome menu) ----------
+export const MENU_ACTIONS = ['answer', 'link', 'book', 'status', 'browse', 'ask', 'human', 'cart'];
+export function menuOptions(S) {
+  const W = S.welcomeMenu;
+  if (!W?.enabled) return [];
+  return (W.options || []).filter((o) => o && String(o.label || '').trim() && MENU_ACTIONS.includes(o.action)
+    && (o.action !== 'answer' || String(o.value || '').trim()) && (o.action !== 'link' || /^https?:\/\/\S+$/i.test(String(o.value || '').trim()))).slice(0, 10);
+}
+function customMenu(ctx, intro) {
+  const opts = menuOptions(ctx.S);
+  if (!opts.length) return null;
+  const ask = String(ctx.S.welcomeMenu.intro || '').trim() || 'How can we help?';
+  const text = intro ? `${intro}\n\n${ask}` : ask;
+  if (opts.length <= 3) return { type: 'buttons', text, buttons: opts.map((o, i) => ({ id: `wm:${i}`, title: String(o.label).trim().slice(0, 20) })) };
+  return { type: 'list', text, button: String(ctx.S.welcomeMenu.button || 'Choose').slice(0, 20), sections: [{ title: 'Options', rows: opts.map((o, i) => ({ id: `wm:${i}`, title: String(o.label).trim().slice(0, 24), ...(o.description ? { description: String(o.description).slice(0, 72) } : {}) })) }] };
+}
+async function runMenuOption(ctx, i) {
+  const o = menuOptions(ctx.S)[i];
+  if (!o) return ctx.reply(mainMenu(ctx));
+  const v = String(o.value || '').trim();
+  switch (o.action) {
+    case 'answer': return ctx.reply({ type: 'text', text: v });
+    case 'link': return ctx.reply({ type: 'cta', text: o.description || o.label, buttonText: String(o.buttonText || 'Open').slice(0, 20), url: v });
+    case 'ask': return v ? handleText(ctx, v) : handleAction(ctx, 'ask');
+    default: return handleAction(ctx, o.action); // book, status, browse, human, cart
+  }
+}
+
 function mainMenu(ctx, intro) {
+  const own = customMenu(ctx, intro);
+  if (own) return own;
   if (bookingsOnly(ctx)) {
     return {
       type: 'buttons',
@@ -456,6 +486,7 @@ async function handleAction(ctx, id) {
   const [cmd, arg = ''] = id.split(/:(.*)/s);
   switch (cmd) {
     case 'menu': return ctx.reply(mainMenu(ctx));
+    case 'wm': return runMenuOption(ctx, Number(arg));
     case 'more': return ctx.reply(moreMenu());
     case 'browse': if (bookingsOnly(ctx)) return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx); return showCategories(ctx);
     case 'book': return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx);
