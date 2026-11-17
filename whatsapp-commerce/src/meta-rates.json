@@ -1,0 +1,11 @@
+{
+  "_readme": "Meta's WhatsApp per-message rates in GBP, by the CUSTOMER's country. This is the one place to update them: the cost calculator, the fee checker, the dashboard estimates and the website assistant all read this file. After changing a rate, update checkedOn too (it is shown on the public pages), then rebuild and redeploy. Source: Meta's rate card at the URL below.",
+  "checkedOn": "1 October 2026",
+  "source": "https://developers.facebook.com/docs/whatsapp/pricing",
+  "freeServicePerNumber": 1000,
+  "rates": {
+    "GB": { "marketing": 0.05, "utility": 0.017, "authentication": 0.017, "service": 0.017 },
+    "IE": { "marketing": 0.055, "utility": 0.025, "authentication": 0.025, "service": 0.025 },
+    "DEFAULT": { "marketing": 0.05, "utility": 0.02, "authentication": 0.02, "service": 0.02 }
+  }
+}

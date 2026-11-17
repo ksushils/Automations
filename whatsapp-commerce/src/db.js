@@ -217,6 +217,17 @@ CREATE TABLE IF NOT EXISTS leads (
   name TEXT, business TEXT, email TEXT, phone TEXT, website TEXT, message TEXT,
   data TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS fee_checker_leads (  -- /whatsapp-fee-checker: who unlocked the yearly figure, with every input and result
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  name TEXT NOT NULL, email TEXT NOT NULL, provider TEXT,
+  numbers INTEGER, marketing_msgs INTEGER, utility_msgs INTEGER, authentication_msgs INTEGER, service_msgs INTEGER,
+  markup_pct REAL, per_message_fee_p REAL, users INTEGER, per_user_fee REAL,
+  meta_cost REAL, provider_cost REAL, monthly_markup REAL, yearly_markup REAL,
+  breakdown TEXT NOT NULL DEFAULT '[]', rates_checked_on TEXT,
+  marketing_opt_in INTEGER NOT NULL DEFAULT 0, opt_in_text TEXT, opt_in_at TEXT,  -- PECR: unticked by default; wording and time kept
+  email_sent INTEGER NOT NULL DEFAULT 0, email_error TEXT
+);
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id TEXT,

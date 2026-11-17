@@ -1,18 +1,17 @@
+import { readFileSync } from 'node:fs';
 import { getDb } from './db.js';
 
 /*
- * Approximate Meta (WhatsApp) per-message prices in GBP, used only for ESTIMATES in the dashboard.
- * Meta bills the shop directly; update these from Meta's rate card (or override with META_RATES_JSON).
- * Since 1 Oct 2026 service replies are charged at the utility rate after 1,000 free per number per month.
+ * Approximate Meta (WhatsApp) per-message prices in GBP, used for ESTIMATES (dashboard, cost calculator, fee checker).
+ * Meta bills the shop directly. The rates live in ONE file, src/meta-rates.json – update them there
+ * (or override on the server with META_RATES_JSON). Service replies: first 1,000 free per number per month.
  */
-const DEFAULT_RATES = {
-  GB: { marketing: 0.05, utility: 0.017, authentication: 0.017, service: 0.017 },
-  IE: { marketing: 0.055, utility: 0.025, authentication: 0.025, service: 0.025 },
-  DEFAULT: { marketing: 0.05, utility: 0.02, authentication: 0.02, service: 0.02 },
-};
-export const FREE_SERVICE_PER_MONTH = 1000;
-// Shown on the public cost calculator. Update it whenever you re-check DEFAULT_RATES against Meta's rate card.
-export const RATES_CHECKED_ON = process.env.META_RATES_CHECKED_ON || '1 October 2026';
+const FILE = JSON.parse(readFileSync(new URL('./meta-rates.json', import.meta.url), 'utf8'));
+const DEFAULT_RATES = FILE.rates;
+export const FREE_SERVICE_PER_MONTH = FILE.freeServicePerNumber;
+export const RATES_SOURCE = FILE.source;
+// Shown on the public pages. Update checkedOn in meta-rates.json whenever you re-check the rates.
+export const RATES_CHECKED_ON = process.env.META_RATES_CHECKED_ON || FILE.checkedOn;
 export const getRates = () => rates();
 
 function rates() {

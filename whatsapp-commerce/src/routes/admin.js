@@ -177,7 +177,10 @@ export function adminRouter() {
     });
     res.json({ ok: true, tenantId: id, status: savePlatformSetup({ siteChatTenant: id }) });
   });
-  r.get('/system/leads', requireSuper, (req, res) => res.json({ leads: getDb().prepare('SELECT * FROM leads ORDER BY id DESC LIMIT 200').all().map((l) => ({ ...l, data: json(l.data, {}) })) }));
+  r.get('/system/leads', requireSuper, (req, res) => res.json({
+    leads: getDb().prepare('SELECT * FROM leads ORDER BY id DESC LIMIT 200').all().map((l) => ({ ...l, data: json(l.data, {}) })),
+    feeChecker: getDb().prepare('SELECT * FROM fee_checker_leads ORDER BY id DESC LIMIT 200').all().map((l) => ({ ...l, breakdown: json(l.breakdown, []) })),
+  }));
   r.post('/system/setup/stripe-auto', requireSuper, wrap(async (req, res) => {
     try { res.json({ ok: true, ...(await autoSetupStripe()) }); } catch (e) { res.status(400).json({ error: e.message }); }
   }));
