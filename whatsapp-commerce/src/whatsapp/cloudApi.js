@@ -101,11 +101,11 @@ export function toPlainText(msg) {
   }
 }
 
-export function logMessage(tenantId, waId, direction, msg, waMessageId = null, { processed = 1 } = {}) {
+export function logMessage(tenantId, waId, direction, msg, waMessageId = null, { processed = 1, source = null } = {}) {
   try {
     getDb()
-      .prepare('INSERT INTO messages (tenant_id, wa_id, direction, type, body, wa_message_id, processed) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(tenantId, waId, direction, msg.type, JSON.stringify(msg), waMessageId, processed);
+      .prepare('INSERT INTO messages (tenant_id, wa_id, direction, type, body, wa_message_id, processed, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(tenantId, waId, direction, msg.type, JSON.stringify(msg), waMessageId, processed, source);
     return true;
   } catch (e) {
     if (String(e.message).includes('UNIQUE')) return false; // duplicate inbound webhook delivery

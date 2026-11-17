@@ -7,7 +7,7 @@ import { verifyMetaSignature, safeEqual } from '../crypto.js';
 import { createSender, parseInbound, logMessage, markRead } from './cloudApi.js';
 import { handleInbound } from '../bot/engine.js';
 import { recordStatus, recordReply } from '../campaigns.js';
-import { setHandover } from '../bot/state.js';
+import { noteAppActivity, pauseAi } from '../coexistence.js';
 
 // Serialise processing per customer so rapid taps don't race each other.
 const queues = new Map();
@@ -89,10 +89,15 @@ function syncContacts(tenant, value) {
     if (s.action === 'remove') continue; // keep our record (orders/consent); the app contact was just deleted
     getDb().prepare(`INSERT INTO customers (tenant_id, wa_id, name) VALUES (?, ?, ?) ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = COALESCE(customers.name, excluded.name)`).run(tenant.id, wa, c.full_name || c.first_name || null);
   }
+  noteAppActivity(tenant);
 }
 
-/** Coexistence message history (up to 180 days) – stored for the inbox and AI context, never answered by the bot. */
-function importHistory(tenant, value) {
+/**
+ * Coexistence message history (up to 180 days) – stored for the inbox and AI context, never answered by the bot.
+ * Marked source='history'; keyed on Meta's message id, so a re-sent chunk adds nothing. Returns how many were added.
+ */
+export function importHistory(tenant, value) {
+  let added = 0;
   for (const h of value.history || []) {
     if (h.errors?.length) { console.warn(`[history] ${tenant.id}`, JSON.stringify(h.errors)); continue; }
     for (const th of h.threads || []) {
@@ -100,12 +105,15 @@ function importHistory(tenant, value) {
       for (const m of th.messages || []) {
         const fromCustomer = String(m.from || '').replace(/\D/g, '') === wa;
         try {
-          getDb().prepare("INSERT INTO messages (tenant_id, wa_id, direction, type, body, wa_message_id, processed, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, datetime(?, 'unixepoch'))")
-            .run(tenant.id, wa, fromCustomer ? 'in' : 'out', m.type || 'text', JSON.stringify({ type: 'text', text: m.text?.body || `[${m.type}]`, via: 'history' }), fromCustomer ? `hist-${m.id}` : null, Number(m.timestamp) || Math.floor(Date.now() / 1000));
-        } catch { /* duplicate history chunk */ }
+          if (!m.id) continue;
+          getDb().prepare("INSERT INTO messages (tenant_id, wa_id, direction, type, body, wa_message_id, processed, source, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, 'history', datetime(?, 'unixepoch'))")
+            .run(tenant.id, wa, fromCustomer ? 'in' : 'out', m.type || 'text', JSON.stringify({ type: 'text', text: m.text?.body || `[${m.type}]`, via: 'history' }), `hist-${m.id}`, Number(m.timestamp) || Math.floor(Date.now() / 1000));
+          added++;
+        } catch (e) { if (!/UNIQUE/.test(e.message)) throw e; /* already imported */ }
       }
     }
   }
+  return added;
 }
 
 export function processWebhookBody(body, { tenantOverride } = {}) {
@@ -134,10 +142,13 @@ export function processWebhookBody(body, { tenantOverride } = {}) {
         jobs.push(enqueue(`${tenant.id}:${ev.waId}`, () => processStored(tenant, ev, m.id, send)));
       }
       // Coexistence: messages the owner sent from the WhatsApp Business app on their phone
+      // Stored as source='phone_app' (free at Meta), and the AI pauses in that chat so the owner and bot don't talk over each other.
       for (const e of value.message_echoes || []) {
-        if (!e.to) continue;
-        logMessage(tenant.id, e.to, 'out', { type: 'text', text: e.text?.body || `[${e.type} sent from the WhatsApp Business app]`, via: 'business_app' });
-        jobs.push(enqueue(`${tenant.id}:${e.to}`, async () => setHandover(tenant.id, e.to, true))); // a human is replying – bot steps back
+        const to = String(e.to || '').replace(/\D/g, '');
+        if (!to) continue;
+        if (!logMessage(tenant.id, to, 'out', { type: 'text', text: e.text?.body || `[${e.type} sent from the WhatsApp Business app]`, via: 'phone_app' }, e.id ? String(e.id) : null, { source: 'phone_app' })) continue; // Meta retry
+        noteAppActivity(tenant);
+        jobs.push(enqueue(`${tenant.id}:${to}`, async () => pauseAi(tenant, to)));
       }
       // value.statuses (sent/delivered/read/failed) – log failures for debugging
       for (const s of value.statuses || []) {

@@ -17,6 +17,7 @@ import { runMonthlyReports, runWeeklyUnanswered, runReviewRequests } from './ins
 import { runBookingJobs } from './bookings.js';
 import { cleanupDemos } from './instantDemo.js';
 import { runMorningBriefings } from './briefing.js';
+import { runAppReminders } from './coexistence.js';
 import { runWeeklyQuality } from './quality.js';
 
 /** Scheduled work: flow delays and campaigns. */
@@ -84,6 +85,7 @@ export function startJobs() {
     runWinBack().catch((e) => console.error('[jobs]', e));
     runWeeklyQuality().then((q) => q && console.log('[quality]', q.score), (e) => console.error('[quality]', e.message));
     runMorningBriefings().then((n) => n && console.log(`[briefing] sent ${n}`), (e) => console.error('[briefing]', e));
+    runAppReminders().then((n) => n && console.log(`[keep your number] reminded ${n} shop(s) to open the Business app`), (e) => console.error('[coexistence]', e));
     try { const n = cleanupDemos(); if (n) console.log(`[instant demo] deleted ${n} expired demo(s)`); } catch (e) { console.error('[instant demo]', e); }
     runMonthlyReports().then((n) => n && console.log(`[value report] emailed ${n} shop(s)`), (e) => console.error('[value report]', e));
     runWeeklyUnanswered().then((n) => n && console.log(`[unanswered] emailed ${n} shop(s)`), (e) => console.error('[unanswered]', e));

@@ -41,7 +41,9 @@ export function estimateCampaign(recipients, category = 'marketing') {
 export function monthEstimate(tenantId) {
   const d = getDb();
   const since = "datetime('now', 'start of month')";
-  const out = d.prepare(`SELECT wa_id, type, body FROM messages WHERE tenant_id = ? AND direction = 'out' AND wa_id NOT LIKE 'web:%' AND created_at >= ${since}`).all(tenantId); // web chat isn't billed by Meta
+  const out = d.prepare(`SELECT wa_id, type, body FROM messages WHERE tenant_id = ? AND direction = 'out' AND wa_id NOT LIKE 'web:%' AND COALESCE(source, '') NOT IN ('phone_app', 'history') AND created_at >= ${since}`).all(tenantId); // web chat isn't billed by Meta
+  // Keep your number: messages the owner sends from the WhatsApp Business app are free; only API messages are charged
+  const phoneApp = d.prepare(`SELECT COUNT(*) AS n FROM messages WHERE tenant_id = ? AND direction = 'out' AND source = 'phone_app' AND created_at >= ${since}`).get(tenantId).n;
   let cats = {};
   try { cats = JSON.parse(d.prepare('SELECT value FROM kv WHERE key = ?').get(`tpl:${tenantId}`)?.value || '{}'); } catch {}
   let unknownCategory = 0;
@@ -70,6 +72,7 @@ export function monthEstimate(tenantId) {
     templatesWithUnknownCategory: unknownCategory, // priced at the marketing rate until the Templates tab is opened once
     totalGbp: Math.round((serviceCost + templateCost) * 100) / 100,
     campaignsTracked: campaignIds.size,
+    phoneAppMessages: phoneApp, // free: sent from the WhatsApp Business app
     note: 'Estimate only – Meta bills you directly using its current rate card.',
   };
 }

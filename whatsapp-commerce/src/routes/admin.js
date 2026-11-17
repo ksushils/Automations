@@ -36,6 +36,7 @@ import { audit, listAudit, exportPerson, erasePerson, isSuppressed, rotateEncryp
 import { currentKeyId } from '../crypto.js';
 import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
+import { resumeAi } from '../coexistence.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
 import { recordConsent, consentHistory, HAS_CONSENT_SQL } from '../consent.js';
 import { createTopupCheckout } from '../platform.js';
@@ -605,7 +606,7 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/conversations', requireTenant, (req, res) => {
     const rows = getDb()
       .prepare(
-        `SELECT c.wa_id, c.state, c.human_handover, c.cart, c.updated_at, c.assigned_to, cu.name,
+        `SELECT c.wa_id, c.state, c.human_handover, c.ai_paused_until, c.cart, c.updated_at, c.assigned_to, cu.name,
            (SELECT body FROM messages m WHERE m.tenant_id = c.tenant_id AND m.wa_id = c.wa_id ORDER BY id DESC LIMIT 1) AS last_body,
            (SELECT created_at FROM messages m WHERE m.tenant_id = c.tenant_id AND m.wa_id = c.wa_id AND direction = 'in' ORDER BY id DESC LIMIT 1) AS last_inbound_at
          FROM conversations c LEFT JOIN customers cu ON cu.tenant_id = c.tenant_id AND cu.wa_id = c.wa_id
@@ -636,6 +637,10 @@ export function adminRouter() {
     res.json({ ok: true, assignedTo: to });
   });
   r.get('/tenants/:tenantId/agents', requireTenant, (req, res) => res.json({ agents: ['Owner', ...listStaff(req.tenant.id).map((m) => m.name)], me: req.staff?.name || 'Owner' }));
+  r.post('/tenants/:tenantId/conversations/:waId/resume', requireTenant, (req, res) => {
+    const c = resumeAi(req.tenant.id, req.params.waId);
+    res.json({ ok: true, aiPausedUntil: c.aiPausedUntil, humanHandover: c.humanHandover });
+  });
   r.post('/tenants/:tenantId/conversations/:waId/handover', requireTenant, (req, res) => {
     const c = setHandover(req.tenant.id, req.params.waId, !!req.body?.on);
     res.json({ ok: true, humanHandover: c.humanHandover });

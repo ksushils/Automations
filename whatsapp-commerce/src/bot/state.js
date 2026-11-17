@@ -16,6 +16,7 @@ export function getConversation(tenantId, waId) {
     cart: json(row.cart, []),
     difyConversationId: row.dify_conversation_id,
     humanHandover: !!row.human_handover,
+    aiPausedUntil: row.ai_paused_until || null, // coexistence: owner replied from the phone
     updatedAt: row.updated_at,
   };
 }

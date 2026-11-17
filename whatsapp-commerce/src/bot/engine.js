@@ -1,4 +1,5 @@
 import { getStore } from '../stores/index.js';
+import { isAiPaused } from '../coexistence.js';
 import { difyChat } from '../dify/client.js';
 import { createSessionToken } from '../session.js';
 import { withinLimit, bumpUsage, aiBudgetUsed } from '../tenants.js';
@@ -698,6 +699,8 @@ export async function handleInbound(tenant, event, send) {
     if (ownerReply) { saveConversation(conv); await send(conv.waId, { type: 'text', text: ownerReply }).catch(() => {}); return [{ type: 'text', text: ownerReply }]; }
   }
 
+  // Coexistence: the owner just replied from the WhatsApp Business app – the AI (direct or Dify) stays quiet until the pause ends
+  if (isAiPaused(conv)) { saveConversation(conv); return replies; }
   if (conv.humanHandover) {
     // A human is handling this chat – the bot stays quiet. "menu" lets the customer return to the bot.
     // But a customer must never talk to silence: until a staff member has actually replied, they get a short

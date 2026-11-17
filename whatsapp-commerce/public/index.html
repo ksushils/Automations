@@ -335,7 +335,7 @@ async function overview() {
     $('#golive').innerHTML = `${c.ready ? '<p><span class="pill">ready ✅</span></p>' : ''}<p class="mute">❔ = we can't check this automatically – please confirm in Meta.</p>` +
       c.steps.map((x) => `<div style="display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line)"><span style="font-size:18px">${icon(x.done)}</span><div style="flex:1"><b>${esc(x.title)}</b>${x.value ? ` <span class="pill">${esc(x.value)}</span>` : ''}<div class="mute">${esc(x.help)}</div></div>${x.link ? `<a class="btn ghost" href="${esc(x.link)}" target="_blank" rel="noopener">Open in Meta ↗</a>` : ''}</div>`).join('');
   }).catch(() => {});
-  api(T('/meta-costs')).then((m) => { $('#metacost').textContent = '£' + m.totalGbp.toFixed(2); $('#metafree').textContent = `${m.freeServiceLeft} of 1,000 free replies left · billed by Meta`; }).catch(() => {});
+  api(T('/meta-costs')).then((m) => { $('#metacost').textContent = '£' + m.totalGbp.toFixed(2); $('#metafree').textContent = `${m.freeServiceLeft} of 1,000 free replies left · billed by Meta${m.phoneAppMessages ? ` · ${m.phoneAppMessages} sent from your phone app (free)` : ''}`; }).catch(() => {});
   if (s.whatsapp.phoneNumberId) api(T('/whatsapp/health')).then((h) => {
     const el = document.createElement('div'); el.className = 'card';
     if (!h.ok) { el.innerHTML = `<h2>WhatsApp number</h2><p class="pill warn">${esc(h.error)}</p>`; }
@@ -436,6 +436,7 @@ async function ai() {
 }
 
 // ---------- simulator ----------
+const pausedNow = (c) => !!(c?.ai_paused_until && Date.parse(c.ai_paused_until) > Date.now());
 function bubble(m, dir) {
   if (dir === 'in') return `<div class="b in">${esc(m)}</div>`;
   let h = '', acts = [];
@@ -445,7 +446,8 @@ function bubble(m, dir) {
   else if (m.type === 'list') { h = esc(m.text); acts = m.sections.flatMap((s) => s.rows.map((r) => `<button data-a="${esc(r.id)}" data-l="${esc(r.title)}" title="${esc(r.description || '')}">${esc(r.title)}</button>`)); }
   else h = esc(m.text || JSON.stringify(m));
   h = h.replace(/\*([^*\n]+)\*/g, '<b>$1</b>').replace(/(^|\s)_([^_\n]+)_/g, '$1<i>$2</i>');
-  return `<div class="b out">${h}${acts.length ? `<div class="acts">${acts.join('')}</div>` : ''}</div>`;
+  const tag = m.via === 'phone_app' ? '<div class="mute" style="font-size:11px">📱 sent from your phone</div>' : m.via === 'history' ? '<div class="mute" style="font-size:11px">🕘 imported from the Business app</div>' : '';
+  return `<div class="b out">${tag}${h}${acts.length ? `<div class="acts">${acts.join('')}</div>` : ''}</div>`;
 }
 async function simulator() {
   const waId = store.get('wc_simid') || '4470000' + Math.floor(Math.random() * 1e5);
@@ -471,14 +473,14 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
   const preview = (c) => { const b = c.last || {}; return esc((b.text || b.caption || b.type || '').slice(0, 60)); };
   $('#app').innerHTML = `<div class="split"><div class="card" style="max-height:600px;overflow:auto"><h2>Chats</h2>
     <select id="ifil" style="margin-bottom:8px">${[['all', 'All chats'], ['human', 'Needs a human'], ['mine', 'Assigned to me'], ['unassigned', 'Unassigned']].map(([k, l]) => `<option value="${k}" ${filter === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-    ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}${c.assigned_to ? ` <span class="pill">👤 ${esc(c.assigned_to)}</span>` : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
+    ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${pausedNow(c) ? '<span class="pill warn">⏸ Paused – owner replying</span>' : ''}${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}${c.assigned_to ? ` <span class="pill">👤 ${esc(c.assigned_to)}</span>` : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
     </div><div class="card" id="thread"><p class="mute">Select a chat</p></div></div>`;
   $('#app').querySelectorAll('[data-w]').forEach((el) => (el.onclick = () => inbox(el.dataset.w, filter)));
   $('#ifil').onchange = () => { store.set('wc_inbox', $('#ifil').value); inbox(sel, $('#ifil').value); };
   if (!sel) return;
   const c = conversations.find((x) => x.wa_id === sel);
   const { messages } = await api(T(`/conversations/${sel}/messages`));
-  $('#thread').innerHTML = `<h2>${esc(c?.name || '')} +${esc(sel)} <button class="btn ghost" id="ho">${c?.human_handover ? '🤖 Give back to bot' : '🙋 Take over'}</button>
+  $('#thread').innerHTML = `<h2>${esc(c?.name || '')} +${esc(sel)} <button class="btn ghost" id="ho">${c?.human_handover ? '🤖 Give back to bot' : '🙋 Take over'}</button>${pausedNow(c) ? ` <span class="pill warn" title="You replied from the WhatsApp Business app, so the AI is quiet in this chat">⏸ Paused – owner replying until ${esc(new Date(c.ai_paused_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span> <button class="btn ghost" id="rsm">▶ Resume AI now</button>` : ''}
     <select id="asg" style="width:auto"><option value="">Unassigned</option>${agents.map((a) => `<option ${c?.assigned_to === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></h2>
     ${c?.cart?.length ? `<p class="mute">Cart: ${c.cart.map((i) => esc(i.title) + ' ×' + i.quantity).join(', ')}</p>` : ''}
     <div class="chat" id="tchat">${messages.map((m) => (m.direction === 'in' ? (m.body.mediaId ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<img data-media="${esc(m.body.mediaId)}" alt="image">` : `<a href="#" data-mediadl="${esc(m.body.mediaId)}">📎 ${esc(m.body.raw || 'file')} – open</a>`}${m.body.text && !/^\[/.test(m.body.text) ? '<br>' + esc(m.body.text) : ''}</div>` : bubble(m.body.text || `[${m.body.raw || m.type}]`, 'in')) : bubble(m.body, 'out'))).join('')}</div>
@@ -489,6 +491,7 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
   $('#tchat').querySelectorAll('[data-mediadl]').forEach((a) => (a.onclick = async (e) => { e.preventDefault(); try { window.open(await blobUrl(a.dataset.mediadl)); } catch (err) { toast(err.message); } }));
   $('#asg').onchange = async () => { await api(T(`/conversations/${sel}/assign`), { method: 'POST', body: { to: $('#asg').value || null } }); inbox(sel, filter); };
   $('#ho').onclick = async () => { await api(T(`/conversations/${sel}/handover`), { method: 'POST', body: { on: !c?.human_handover } }); inbox(sel, filter); };
+  if ($('#rsm')) $('#rsm').onclick = async () => { await api(T(`/conversations/${sel}/resume`), { method: 'POST' }); toast('The AI is answering this chat again'); inbox(sel, filter); };
   $('#rs').onclick = async () => { const r = await api(T(`/conversations/${sel}/reply`), { method: 'POST', body: { text: $('#rep').value } }); if (!r.ok) toast(r.error + ' ' + (r.hint || '')); inbox(sel); };
 }
 
@@ -614,6 +617,7 @@ const FIELDS = [
   ['Notifications', [['notifications.alertEmails', 'Email order alerts to (comma; empty = your sign-up email)', 'csv'], ['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Order webhook URL (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number'], ['notifications.defaultCountryCode', 'Default country code for local numbers (44 = UK)']]],
   ['Bookings in the chat', [['bookings.enabled', 'Take bookings in the chat (customers pick a day and time)', 'bool'], ['bookings.services', 'Services (JSON) – [{"name":"Test day","minutes":60,"price":120,"deposit":30}] (deposit needs Stripe)', 'json'], ['bookings.times', 'Start times (comma, e.g. 09:00,11:00,14:00)', 'csv'], ['bookings.days', 'Days ahead to offer (default 14)', 'number'], ['bookings.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum'], ['bookings.leadHours', 'Minimum notice (hours)', 'number'], ['bookings.perSlot', 'Bookings per time slot (default 1)', 'number'], ['bookings.autoConfirm', 'Confirm automatically (otherwise you confirm on the Bookings tab)', 'bool'], ['bookings.reminderHours', 'Reminder hours before (0 = off, default 24)', 'number'], ['bookings.reminderTemplate', 'Reminder template for customers outside the 24h window (vars: name, when, shop)'], ['bookings.rebookDays', '"Book again" message days after a visit (0 = off)', 'number'], ['bookings.rebookTemplate', '"Book again" template (approved marketing template, var: name)']]],
   ['Google review requests', [['notifications.reviewRequest.enabled', 'Ask for a review after an order is delivered / completed', 'bool'], ['notifications.reviewRequest.url', 'Your Google review link (Google Business Profile → Ask for reviews)'], ['notifications.reviewRequest.afterHours', 'Hours after delivery', 'number'], ['notifications.reviewRequest.text', 'Message ({{name}} = first name, {{shop}} = shop name)', 'textarea'], ['notifications.reviewRequest.template', 'Template for customers outside the 24h window (vars: name, shop) – optional']]],
+  ['Keep your number (WhatsApp Business app)', [['coexistence.takeoverMinutes', 'When you reply from the WhatsApp Business app on your phone, the AI stays quiet in that chat for this many minutes (default 30)', 'number']]],
   ['Morning briefing (WhatsApp)', [['briefing.enabled', 'Send me a morning briefing: yesterday in numbers and what needs me (to the staff WhatsApp numbers above)', 'bool'], ['briefing.hour', 'Hour to send it (0–23, shop time, default 8)', 'number'], ['briefing.email', 'Also email it to me', 'bool']]],
   ['Monthly report', [['report.monthlyEmail', 'Email me the monthly "what your assistant did" report', 'bool'], ['report.unansweredEmail', 'Email me questions the assistant could not answer (Mondays)', 'bool'], ['report.minutesPerReply', 'Minutes a person would spend per reply (default 1.5)', 'number'], ['report.hourlyRate', 'Staff cost per hour (default £12.71)', 'number'], ['report.openHour', 'Working hours start (0–23, default 9)', 'number'], ['report.closeHour', 'Working hours end (0–23, default 17)', 'number']]],
   ['Messages outside the 24-hour window (approved templates)', [['notifications.templates.orderUpdate', 'Order update template (vars: name, order, status) – e.g. order_update'], ['notifications.templates.paymentReminder', 'Payment reminder template (vars: name, order, total, link)'], ['notifications.templates.staffAlert', 'Staff alert template (var: alert text) – e.g. staff_alert']]],
@@ -1137,15 +1141,42 @@ async function embeddedSignupButton(s) {
       setTimeout(async () => {
         if (!session.wabaId) return ($('#esmsg').textContent = '⚠️ Meta did not return the account details – please try again.');
         const r = await api(T('/whatsapp/embedded'), { method: 'POST', body: { code, ...session, coexistence } }).catch((e) => ({ ok: false, error: e.message }));
-        if (!r.ok) return ($('#esmsg').textContent = '⚠️ ' + r.error);
+        if (!r.ok) return coexistence ? fallback(r.error) : ($('#esmsg').textContent = '⚠️ ' + r.error);
         if (r.numberStatus !== 'active') { $('#esmsg').textContent = r.message; return; }
         toast(`Connected ${r.displayPhoneNumber || ''} ✅`);
         overview();
       }, 1000); // the FINISH message can arrive just after the login callback
     }, { config_id: cfg.configId, response_type: 'code', override_default_response_type: true, extras: coexistence ? { setup: {}, featureType: 'whatsapp_business_app_onboarding' } : { setup: {} } });
   };
-  $('#esbtn').onclick = () => launch(false);
-  $('#escoex').onclick = () => launch(true);
+  const fallback = (why) => {
+    $('#esmsg').innerHTML = `⚠️ ${esc(why)}<br>If Meta says your number can't be connected this way (new or low-quality Business app accounts often can't yet), use a new number with the full WhatsApp API instead. <button class="btn ghost" id="esnew">Use a new number with the full API</button>`;
+    $('#esnew').onclick = () => launch(false);
+  };
+  window.addEventListener('message', (ev) => {
+    try { if (!/facebook\.com$/.test(new URL(ev.origin).hostname)) return; const d = JSON.parse(ev.data); if (S.coexLaunch && d.type === 'WA_EMBEDDED_SIGNUP' && d.event === 'ERROR') fallback(d.data?.error_message || 'Meta could not connect your WhatsApp Business app number.'); } catch {}
+  });
+  $('#esbtn').onclick = () => { S.coexLaunch = false; launch(false); };
+  $('#escoex').onclick = () => {
+    const box = document.createElement('div');
+    box.className = 'card'; box.id = 'coexinfo'; box.style.marginTop = '10px';
+    box.innerHTML = `<h3>📲 Keep your number and your WhatsApp Business app</h3>
+      <ul>
+        <li>You keep your number and keep using the WhatsApp Business app on your phone. The AI replies alongside you and every chat shows in both places.</li>
+        <li>When you reply from your phone, the AI goes quiet in that chat for 30 minutes (you can change this in Settings).</li>
+        <li><b>Linked devices will be unlinked</b> when you connect. You can link them again afterwards.</li>
+        <li><b>WhatsApp for Windows isn't supported</b> on a connected number. Use the phone app (or WhatsApp Web).</li>
+        <li><b>No blue tick:</b> a number connected this way can't get Meta's verified badge, and can't be moved to another account later. Bigger brands should use a new number with the full API instead.</li>
+        <li><b>Open the app at least once every 13 days</b>, or Meta disconnects it. We'll remind you on day 10.</li>
+        <li>Messages you send from the app stay free. Messages the AI sends are charged by Meta at the normal rates.</li>
+      </ul>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="coexok" style="width:auto"> I understand</label>
+      <p><button class="btn" id="coexgo" disabled>Continue to Meta</button> <button class="btn ghost" id="coexnew">Use a new number instead</button></p>`;
+    $('#coexinfo')?.remove();
+    el.appendChild(box);
+    $('#coexok').onchange = () => ($('#coexgo').disabled = !$('#coexok').checked);
+    $('#coexgo').onclick = () => { box.remove(); S.coexLaunch = true; launch(true); };
+    $('#coexnew').onclick = () => { box.remove(); S.coexLaunch = false; launch(false); };
+  };
 }
 
 // ---------- billing ----------

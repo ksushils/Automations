@@ -111,8 +111,8 @@ test('coexistence echo: owner replying from the Business app pauses the bot for 
   const { getConversation } = await import('../src/bot/state.js');
   const t = makeTenant({ whatsapp: { phoneNumberId: 'PNX' } });
   await processWebhookBody({ entry: [{ changes: [{ field: 'smb_message_echoes', value: { metadata: { phone_number_id: 'PNX' }, message_echoes: [{ from: '44700', to: '447700900806', id: 'e1', type: 'text', text: { body: 'Hi, it is Sam from the shop' } }] } }] }] }, { tenantOverride: tenants.getTenant(t.id) });
-  assert.equal(getConversation(t.id, '447700900806').humanHandover, true);
-  assert.equal(JSON.parse(getDb().prepare("SELECT body FROM messages WHERE tenant_id = ? AND wa_id = '447700900806'").get(t.id).body).via, 'business_app');
+  assert.ok(Date.parse(getConversation(t.id, '447700900806').aiPausedUntil) > Date.now(), 'AI paused in that chat');
+  assert.equal(JSON.parse(getDb().prepare("SELECT body FROM messages WHERE tenant_id = ? AND wa_id = '447700900806'").get(t.id).body).via, 'phone_app');
 });
 
 test('Meta cost estimates: free 1,000 service replies, then per-message; campaign preview cost', async () => {
