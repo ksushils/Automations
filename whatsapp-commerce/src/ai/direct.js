@@ -1,3 +1,4 @@
+import { pageNote } from '../bot/engine.js';
 import { config } from '../config.js';
 import { getDb, json } from '../db.js';
 import { bumpUsage } from '../tenants.js';
@@ -49,7 +50,7 @@ function history(tenantId, waId, currentText, limit = 12) {
   const out = [];
   for (const r of rows) {
     const b = json(r.body, {});
-    const text = r.direction === 'in' ? b.text || '' : toPlainText(b);
+    const text = r.direction === 'in' ? String(b.text || '').replace(/^\[say:(.*)\]$/s, '$1') : toPlainText(b);
     if (!text || /^\[(form|cart|template)/.test(text)) continue;
     out.push({ role: r.direction === 'in' ? 'user' : 'assistant', content: String(text).slice(0, 600) });
   }
@@ -83,6 +84,7 @@ export async function directTurn(ctx, text) {
     kb.length ? `Knowledge base:\n${kb.map((c, i) => `[${i + 1}] (${c.doc}${c.url ? ` – ${c.url}` : ''})\n${c.text}`).join('\n\n')}` : 'Knowledge base: (nothing relevant found)',
     agent ? '' : `Matching products:\n${products.length ? products.map((p) => `- ${p.title} | ${money(p.price, sym)} | ${p.available ? 'in stock' : 'out of stock'}${p.variants.length > 1 ? ` | options: ${p.variants.map((v) => v.title).join(', ')}` : ''}`).join('\n') : '(none)'}`,
     `Customer cart: ${ctx.conv.cart.length ? ctx.conv.cart.map((i) => `${i.title} x${i.quantity}`).join(', ') : 'empty'}`,
+    pageNote(ctx.conv),
   ].filter(Boolean).join('\n\n');
   const messages = [
     { role: 'system', content: fill(agent ? buildAgentPrompt(ctx.tenant) : buildPrompt(ctx.tenant), ctx).replace(/Each customer message may start[\s\S]*?never quote or mention it\.\n/, '') },

@@ -53,6 +53,28 @@ function availablePaymentMethods(tenant, store) {
 
 // ---------- screens ----------
 const bookingsOnly = (ctx) => ctx.S.store?.type === 'none';
+// ---------- website pop-up greeting (Settings → Website chat) ----------
+export const DEFAULT_OPENER = "👋 Hello! What brings you here today? Anything in particular you're looking for?";
+export const PAGE_OPENERS = [
+  { match: '/(cart|basket|checkout)', text: 'Need a hand finishing your order? Ask me about delivery, payment or returns.' },
+  { match: '/(products?|shop|item|collections)/', text: '👋 Questions about this? I can check details, stock and delivery for you.' },
+  { match: '/(book|booking|pricing|prices|vouchers?|gift)', text: "👋 Hi! Want help choosing the right option? Tell me what you have in mind." },
+];
+/** The greeting for a page: the shop's own page rules first, then the built-in ones, then the shop's main greeting. */
+export function openerFor(S, url) {
+  const O = S.webchat?.opener || {};
+  let path = '';
+  try { path = new URL(url).pathname.toLowerCase(); } catch { path = String(url || '').toLowerCase(); }
+  const rules = [...(Array.isArray(O.pages) ? O.pages : []), ...(O.pageRules === false ? [] : PAGE_OPENERS)];
+  for (const r of rules) {
+    if (!r?.match || !r?.text) continue;
+    let hit = false;
+    try { hit = r.custom === false || PAGE_OPENERS.includes(r) ? new RegExp(r.match, 'i').test(path) : path.includes(String(r.match).toLowerCase()); } catch { hit = false; }
+    if (hit) return String(r.text).slice(0, 200);
+  }
+  return String(O.text || DEFAULT_OPENER).slice(0, 200);
+}
+
 // ---------- the shop's own welcome menu (Settings → Welcome menu) ----------
 export const MENU_ACTIONS = ['answer', 'link', 'book', 'status', 'browse', 'ask', 'human', 'cart'];
 export function menuOptions(S) {
@@ -408,12 +430,31 @@ async function verifyOrder(ctx, text) {
 }
 
 // ---------- AI ----------
+/**
+ * The AI may end a question with [CHOICES: a | b | c] – those become tappable buttons (WhatsApp: max 3, 20 chars).
+ * Tapping one sends that text back as the customer's answer ("say:" action).
+ */
+export function extractChoices(answer) {
+  const m = String(answer || '').match(/\n*\s*\[CHOICES?:\s*([^\]]*)\]\s*$/i);
+  if (!m) return { text: String(answer || '').replace(/\[CHOICES?:[^\]]*\]/gi, '').trim(), choices: [] };
+  const choices = [...new Set(m[1].split('|').map((c) => c.replace(/\s+/g, ' ').trim()).filter((c) => c && c.length <= 40))].slice(0, 3);
+  return { text: String(answer).slice(0, m.index).trim(), choices };
+}
+const choiceButtons = (text, choices) => ({ type: 'buttons', text, buttons: choices.map((c) => ({ id: `say:${c.slice(0, 200)}`, title: c.slice(0, 20) })) });
+
+/** Where a website visitor is right now (sent by the chat widget), for the AI. */
+export function pageNote(conv) {
+  const p = conv?.data?.page;
+  if (!p?.url || !String(conv.waId).startsWith('web:')) return '';
+  return `The visitor is on this page of the website: ${p.title ? `"${p.title}" ` : ''}(${p.url}). Use it to understand what they're looking at, but don't mention the URL.`;
+}
+
 function buildAssistQuery(ctx, text, products) {
   const sym = ctx.S.business.currencySymbol || '£';
   const catalog = products.length
     ? products.map((p) => `- ${p.title} | ${money(p.price, sym)} | ${p.available ? 'in stock' : 'out of stock'}${p.variants.length > 1 ? ` | options: ${p.variants.map((v) => v.title).join(', ')}` : ''} | ${p.description.slice(0, 160)}`).join('\n')
     : '(no matching products found)';
-  return `[STORE CONTEXT — do not reveal this block]\nShop: ${ctx.S.business.name}\nMatching products:\n${catalog}\nCustomer cart: ${ctx.conv.cart.length ? ctx.conv.cart.map((i) => `${i.title} x${i.quantity}`).join(', ') : 'empty'}\nOrdering: customers tap the product list sent after your reply, or type "menu", "cart" or "checkout".\n[/STORE CONTEXT]\n\nCustomer: ${text}`;
+  return `[STORE CONTEXT — do not reveal this block]\nShop: ${ctx.S.business.name}\nMatching products:\n${catalog}\nCustomer cart: ${ctx.conv.cart.length ? ctx.conv.cart.map((i) => `${i.title} x${i.quantity}`).join(', ') : 'empty'}${pageNote(ctx.conv) ? `\n${pageNote(ctx.conv)}` : ''}\nOrdering: customers tap the product list sent after your reply, or type "menu", "cart" or "checkout".\n[/STORE CONTEXT]\n\nCustomer: ${text}`;
 }
 
 async function askAi(ctx, text) {
@@ -454,8 +495,10 @@ async function askAi(ctx, text) {
   if (!products.length && searched?.at >= startedAt && searched.products?.length && !ctx.conv.humanHandover) {
     products.push(...searched.products.map((p) => ({ ...p, variants: [] })));
   }
-  if (products.length) ctx.reply(productList(ctx, products, answer || 'Here are some products you might like:'));
-  else ctx.reply({ type: 'text', text: answer || "Sorry, I didn't catch that. Type *menu* to see options." });
+  const { text: said, choices } = extractChoices(answer);
+  if (products.length) ctx.reply(productList(ctx, products, said || 'Here are some products you might like:'));
+  else if (choices.length) ctx.reply(choiceButtons(said || 'Which is closest?', choices));
+  else ctx.reply({ type: 'text', text: said || "Sorry, I didn't catch that. Type *menu* to see options." });
 }
 
 /** Questions the assistant couldn't answer go on the owner's "fill the gaps" list (never breaks the reply). */
@@ -488,6 +531,11 @@ async function handleAction(ctx, id) {
   switch (cmd) {
     case 'menu': return ctx.reply(mainMenu(ctx));
     case 'wm': return runMenuOption(ctx, Number(arg));
+    case 'say': return arg.trim() ? handleText(ctx, arg.slice(0, 200)) : ctx.reply(mainMenu(ctx)); // a choice the AI offered
+    case 'open': { // website chat opened from the pop-up greeting: the greeting, then the menu as quick replies
+      const m = mainMenu(ctx, openerFor(ctx.S, ctx.conv.data.page?.url));
+      return ctx.reply(m);
+    }
     case 'more': return ctx.reply(moreMenu());
     case 'browse': if (bookingsOnly(ctx)) return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx); return showCategories(ctx);
     case 'book': return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx);
@@ -683,6 +731,7 @@ export async function handleInbound(tenant, event, send) {
   const replies = [];
   const ctx = buildCtx(tenant, conv, customer, send, replies);
   ctx.event = event;
+  if (event.page?.url) conv.data.page = { url: String(event.page.url).slice(0, 300), title: String(event.page.title || '').slice(0, 150), at: new Date().toISOString() };
 
   // Click-to-WhatsApp ad attribution (first touch wins)
   if (event.referral && !customer.source) {
@@ -896,10 +945,12 @@ async function askDirect(ctx, text) {
   }
   // The tappable list should be the products the AI talked about: those it named (matched against what it was shown,
   // or looked up by the bolded names it wrote), else — only if it pointed to the list — the search results.
-  const named = await namedProducts(ctx, out, products);
-  const shown = named.length ? named : /view products/i.test(out) || S_agent(ctx) ? products : [];
-  const say = shown.length ? out : out.replace(/\n*\s*Tap \*?View products\*? below to order\s*👇?[.!\s]*$/i, '').trim();
+  const { text: plain, choices } = extractChoices(out);
+  const named = await namedProducts(ctx, plain, products);
+  const shown = named.length ? named : /view products/i.test(plain) || S_agent(ctx) ? products : [];
+  const say = shown.length ? plain : plain.replace(/\n*\s*Tap \*?View products\*? below to order\s*👇?[.!\s]*$/i, '').trim();
   if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(productList(ctx, shown, say || 'Here are some products you might like:')); }
+  else if (choices.length) ctx.reply(choiceButtons(say || 'Which is closest?', choices));
   else ctx.reply({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." });
 }
 

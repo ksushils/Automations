@@ -1222,6 +1222,15 @@ async function grow() {
       <div><label>Message beside the chat button (empty = none)</label><input id="wcl" value="${esc(s.webchat?.launcherText ?? '')}" placeholder="Hello! I'm the chat assistant. Talk to me anytime." maxlength="120"></div>
       <div><label>Subtitle</label><input id="wcs" value="${esc(s.webchat?.subtitle || '')}" placeholder="Ask us anything – we usually reply instantly"></div>
       <div><label>Colour</label><input id="wcc" type="color" value="${esc(s.webchat?.color || s.storefront?.brandColor || '#128c4a')}"></div></div>
+      <h3 style="margin-top:16px">👋 Pop-up greeting</h3>
+      <p class="mute">A small bubble beside the chat button asks visitors what brought them here, with your welcome-menu options as quick replies. It appears once per visit after a few seconds (or earlier when a desktop visitor heads to leave), and not again in that visit once they chat or close it. The chat only opens when they tap. Nothing is stored after they close the tab.</p>
+      <div class="row"><div><label>Pop-up greeting</label><select id="wpon"><option value="true">On</option><option value="false" ${s.webchat?.opener?.enabled === false ? 'selected' : ''}>Off</option></select></div>
+      <div style="flex:2"><label>Greeting</label><input id="wptext" value="${esc(s.webchat?.opener?.text || '')}" placeholder="👋 Hello! What brings you here today? Anything in particular you're looking for?" maxlength="200"></div>
+      <div><label>Show after (seconds)</label><input id="wpdelay" type="number" min="0" max="120" value="${esc(s.webchat?.opener?.delaySeconds ?? 10)}"></div>
+      <div><label>On phones, after (seconds)</label><input id="wpmdelay" type="number" min="0" max="180" value="${esc(s.webchat?.opener?.mobileDelaySeconds ?? 15)}"></div></div>
+      <label>Greetings for particular pages (one per line: part of the page address = greeting)</label>
+      <textarea id="wppages" rows="3" placeholder="/tours = 🌍 Planning a trip? Tell me where you'd like to go.&#10;/gift = 🎁 Looking for a gift? Who's it for?">${esc((s.webchat?.opener?.pages || []).map((p) => `${p.match} = ${p.text}`).join('\n'))}</textarea>
+      <p class="mute" style="font-size:13px">Built in: product pages, the basket and booking or pricing pages get their own greeting unless you set one here.</p>
       <p><a href="/s/${esc(t.id)}?chat=1" target="_blank" rel="noopener">Preview it on your storefront →</a></p></div>
     <div class="card"><h2>Website chat button</h2><p class="mute">Paste this before &lt;/body&gt; on any website (Shopify: Online Store → Themes → Edit code → theme.liquid; WordPress: a header/footer plugin).</p>
       <code style="display:block;padding:10px">${esc(snippet)}</code>
@@ -1238,7 +1247,7 @@ async function grow() {
   $('#gdl').onclick = () => { const c = $('#gqr canvas'); if (!c) return; const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = 'whatsapp-qr.png'; a.click(); };
   $('#gsave').onclick = async () => {
     try {
-      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { webchat: { enabled: $('#wcen').value === 'true', title: $('#wct').value, launcherText: $('#wcl').value.trim() || null, subtitle: $('#wcs').value, color: $('#wcc').value }, storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
+      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { webchat: { enabled: $('#wcen').value === 'true', title: $('#wct').value, subtitle: $('#wcs').value, color: $('#wcc').value, opener: { enabled: $('#wpon').value === 'true', text: $('#wptext').value.trim() || null, delaySeconds: Number($('#wpdelay').value) || 0, mobileDelaySeconds: Number($('#wpmdelay').value) || 0, pages: $('#wppages').value.split('\n').map((l) => l.split(/\s=\s|=/)).filter((p) => p.length >= 2 && p[0].trim() && p.slice(1).join('=').trim()).map((p) => ({ match: p[0].trim().slice(0, 100), text: p.slice(1).join('=').trim().slice(0, 200) })).slice(0, 20) } }, storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
       toast('Saved');
     } catch (e) { toast(e.message); }
   };
