@@ -36,6 +36,7 @@ import { audit, listAudit, exportPerson, erasePerson, isSuppressed, rotateEncryp
 import { currentKeyId } from '../crypto.js';
 import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
+import { listChatLeads, setLeadStatus } from '../leads.js';
 import { resumeAi } from '../coexistence.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
 import { recordConsent, consentHistory, HAS_CONSENT_SQL } from '../consent.js';
@@ -637,6 +638,8 @@ export function adminRouter() {
     res.json({ ok: true, assignedTo: to });
   });
   r.get('/tenants/:tenantId/agents', requireTenant, (req, res) => res.json({ agents: ['Owner', ...listStaff(req.tenant.id).map((m) => m.name)], me: req.staff?.name || 'Owner' }));
+  r.get('/tenants/:tenantId/leads', requireTenant, (req, res) => res.json({ leads: listChatLeads(req.tenant.id) }));
+  r.patch('/tenants/:tenantId/leads/:id', requireTenant, (req, res) => { setLeadStatus(req.tenant.id, req.params.id, String(req.body?.status || '')); res.json({ ok: true }); });
   r.post('/tenants/:tenantId/conversations/:waId/resume', requireTenant, (req, res) => {
     const c = resumeAi(req.tenant.id, req.params.waId);
     res.json({ ok: true, aiPausedUntil: c.aiPausedUntil, humanHandover: c.humanHandover });

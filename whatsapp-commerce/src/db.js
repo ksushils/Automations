@@ -217,6 +217,19 @@ CREATE TABLE IF NOT EXISTS leads (
   name TEXT, business TEXT, email TEXT, phone TEXT, website TEXT, message TEXT,
   data TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS chat_leads (  -- a visitor asked for details or a call back in the chat
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  wa_id TEXT NOT NULL, channel TEXT, kind TEXT NOT NULL,   -- kind: email | call
+  topic TEXT, name TEXT, email TEXT, phone TEXT, message TEXT,
+  page TEXT, source TEXT,                                   -- page they were on; ad / campaign source if known
+  call_time TEXT, summary TEXT,                             -- best time to call; AI summary of the chat for the team
+  status TEXT NOT NULL DEFAULT 'new',                       -- new | contacted | won | lost
+  emailed INTEGER NOT NULL DEFAULT 0,                       -- brochure email sent
+  marketing_opt_in INTEGER NOT NULL DEFAULT 0, opt_in_at TEXT, opt_in_text TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_chat_leads ON chat_leads(tenant_id, id);
 CREATE TABLE IF NOT EXISTS fee_checker_leads (  -- /whatsapp-fee-checker: who unlocked the yearly figure, with every input and result
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),

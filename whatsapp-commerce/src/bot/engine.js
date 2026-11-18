@@ -1,4 +1,5 @@
 import { getStore } from '../stores/index.js';
+import { LEAD_STATES, leadAction, leadText, leadOffer, leadSettings, topicSummary } from '../leads.js';
 import { isAiPaused } from '../coexistence.js';
 import { difyChat } from '../dify/client.js';
 import { createSessionToken } from '../session.js';
@@ -15,7 +16,7 @@ import { alert } from '../ops.js';
 import { emailShop } from '../email.js';
 import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 import { recordConsent, defaultWording } from '../consent.js';
-import { directConfigured, directTurn, suggestChoices } from '../ai/direct.js';
+import { directConfigured, directTurn, suggestChoices, summarizeTopic } from '../ai/direct.js';
 import { isUnsure, recordUnanswered } from '../insights.js';
 import { voiceConfigured, transcribe } from '../ai/voice.js';
 import { bookingsEnabled, bookingAction, bookingText } from '../bookings.js';
@@ -97,7 +98,14 @@ async function runMenuOption(ctx, i) {
   const v = String(o.value || '').trim();
   switch (o.action) {
     case 'answer': return ctx.reply({ type: 'text', text: v });
-    case 'link': return ctx.reply({ type: 'cta', text: o.description || o.label, buttonText: String(o.buttonText || 'Open').slice(0, 20), url: v });
+    case 'link': {
+      // answer in the chat first (from the shop's own pages), then the page, then "how can we help?"
+      const label = String(o.label).replace(/^[^\p{L}\p{N}]+/u, '').trim();
+      const summary = await topicSummary(ctx, o, { ai: (l, u) => summarizeTopic(ctx, l, u) }).catch(() => null);
+      ctx.reply({ type: 'cta', text: summary || o.description || o.label, buttonText: String(o.buttonText || (summary ? 'Know more' : 'Open')).slice(0, 20), url: v });
+      if (leadSettings(ctx.S).enabled && o.leadOffer !== false) return ctx.reply(leadOffer(ctx, label, `Would you like our team to help with ${label.toLowerCase()}?`));
+      return;
+    }
     case 'ask': return v ? handleText(ctx, v) : handleAction(ctx, 'ask');
     default: return handleAction(ctx, o.action); // book, status, browse, human, cart
   }
@@ -440,7 +448,11 @@ export function extractChoices(answer) {
   const choices = [...new Set(m[1].split('|').map((c) => c.replace(/\s+/g, ' ').trim()).filter((c) => c && c.length <= 40))].slice(0, 3);
   return { text: String(answer).slice(0, m.index).trim(), choices };
 }
-const choiceButtons = (text, choices) => ({ type: 'buttons', text, buttons: choices.map((c) => ({ id: `say:${c.slice(0, 200)}`, title: c.slice(0, 20) })) });
+const choiceButtons = (text, choices, topic = 'general') => ({ type: 'buttons', text, buttons: choices.map((c) => ({
+  id: /call\s*(me)?\s*back|callback|phone me|ring me/i.test(c) ? `lead:call:${topic}` : /e-?mail me|brochure|send (me )?(the )?details/i.test(c) ? `lead:email:${topic}` : `say:${c.slice(0, 200)}`,
+  title: c.slice(0, 20),
+})) });
+const leadTopic = (ctx, text) => String(ctx.conv.data.lastTopic || text || 'general').replace(/[\r\n]+/g, ' ').slice(0, 60);
 
 /** Where a website visitor is right now (sent by the chat widget), for the AI. */
 export function pageNote(conv) {
@@ -497,7 +509,7 @@ async function askAi(ctx, text) {
   }
   const { text: said, choices } = extractChoices(answer);
   if (products.length) ctx.reply(productList(ctx, products, said || 'Here are some products you might like:'));
-  else if (choices.length) ctx.reply(choiceButtons(said || 'Which is closest?', choices));
+  else if (choices.length) ctx.reply(choiceButtons(said || 'Which is closest?', choices, leadTopic(ctx, text)));
   else ctx.reply({ type: 'text', text: said || "Sorry, I didn't catch that. Type *menu* to see options." });
 }
 
@@ -531,6 +543,7 @@ async function handleAction(ctx, id) {
   switch (cmd) {
     case 'menu': return ctx.reply(mainMenu(ctx));
     case 'wm': return runMenuOption(ctx, Number(arg));
+    case 'lead': return leadAction(ctx, arg);
     case 'say': return arg.trim() ? handleText(ctx, arg.slice(0, 200)) : ctx.reply(mainMenu(ctx)); // a choice the AI offered
     case 'open': { // website chat opened from the pop-up greeting: the greeting, then the menu as quick replies
       const m = mainMenu(ctx, openerFor(ctx.S, ctx.conv.data.page?.url));
@@ -629,6 +642,10 @@ async function handleText(ctx, raw) {
   if (!t) return ctx.reply(mainMenu(ctx));
 
   // State-driven input first
+  if (LEAD_STATES.has(ctx.conv.state)) {
+    if (GREETING.test(t) || COMMANDS.has(t)) ctx.conv.state = 'idle'; // they moved on
+    else { const r = await leadText(ctx, text); if (r !== false) return r; } // false: a question instead – answer it normally
+  }
   if (ctx.conv.state === 'booking_name' && !GREETING.test(t) && !COMMANDS.has(t)) return bookingText(ctx, text);
   if (bookingsEnabled(ctx.S) && /^(book|booking|book now|make a booking|i want to book|i'?d like to book|reserve|book a (slot|table|session|appointment))[.!]?$/.test(t)) return bookingAction(ctx, 'bstart');
   if (ctx.conv.state === 'order_verify' && ctx.conv.data.orderVerify && !GREETING.test(t) && !COMMANDS.has(t)) return verifyOrder(ctx, text);
@@ -731,6 +748,7 @@ export async function handleInbound(tenant, event, send) {
   const replies = [];
   const ctx = buildCtx(tenant, conv, customer, send, replies);
   ctx.event = event;
+  if (event.utm && !conv.data.utm) conv.data.utm = event.utm; // first touch
   if (event.page?.url) conv.data.page = { url: String(event.page.url).slice(0, 300), title: String(event.page.title || '').slice(0, 150), at: new Date().toISOString() };
 
   // Click-to-WhatsApp ad attribution (first touch wins)
@@ -952,7 +970,7 @@ async function askDirect(ctx, text) {
   // the model forgot the tap options on a question: ask for them (not when products are shown or a person has taken over)
   const choices = offered.length || shown.length || ctx.conv.humanHandover || ctx.S.ai?.suggestChoices === false ? offered : await suggestChoices(ctx, say);
   if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(productList(ctx, shown, say || 'Here are some products you might like:')); }
-  else if (choices.length) ctx.reply(choiceButtons(say || 'Which is closest?', choices));
+  else if (choices.length) ctx.reply(choiceButtons(say || 'Which is closest?', choices, leadTopic(ctx, text)));
   else ctx.reply({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." });
 }
 

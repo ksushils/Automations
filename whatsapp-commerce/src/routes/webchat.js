@@ -25,6 +25,14 @@ function cors(req, res, next) {
 
 const visitorId = (sessionId) => `web:${sessionId}`;
 
+/** Campaign tags from the page the visitor landed on (utm_*, gclid, fbclid) – kept for lead attribution. */
+export function cleanUtm(u) {
+  if (!u || typeof u !== 'object') return null;
+  const out = {};
+  for (const k of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid']) if (u[k]) out[k] = String(u[k]).replace(/[^\w .:/@+-]/g, '').slice(0, 80);
+  return Object.keys(out).length ? out : null;
+}
+
 /** The page the visitor is on (from the widget): same-site URL without query string, and the page title. */
 export function cleanPage(p) {
   if (!p || typeof p !== 'object') return null;
@@ -67,6 +75,7 @@ export function webchatRouter() {
     if (!t?.active || t.settings.webchat?.enabled === false) return res.status(404).json({ error: 'chat unavailable' });
     const { sessionId, text, actionId } = req.body || {};
     const page = cleanPage(req.body?.page);
+    const utm = cleanUtm(req.body?.utm);
     if (!SESSION.test(String(sessionId || ''))) return res.status(400).json({ error: 'invalid session' });
     if (!text && !actionId) return res.status(400).json({ error: 'empty message' });
     if (isDemo(t)) {
@@ -77,8 +86,8 @@ export function webchatRouter() {
     if (!withinLimit(t, 'inbound')) return res.json({ replies: [{ type: 'text', text: `Thanks for your message! The ${t.settings.business.name} team will get back to you soon.` }] });
     const waId = visitorId(sessionId);
     const ev = actionId
-      ? { waId, kind: 'action', id: String(actionId).slice(0, 200), text: '', page }
-      : { waId, kind: 'text', text: String(text).slice(0, 2000), profileName: null, page };
+      ? { waId, kind: 'action', id: String(actionId).slice(0, 200), text: '', page, utm }
+      : { waId, kind: 'text', text: String(text).slice(0, 2000), profileName: null, page, utm };
     logMessage(t.id, waId, 'in', { type: ev.kind, text: ev.kind === 'text' ? ev.text : `[${ev.id}]`, channel: 'web' });
     bumpUsage(t.id, 'inbound');
     const sink = [];
@@ -153,6 +162,7 @@ var P=w.querySelector('.wc-p'),M=w.querySelector('.wc-m'),F=w.querySelector('for
 function mark(k,v,ss){try{(ss?sessionStorage:localStorage).setItem(k,v)}catch(e){}}
 function got(k,ss){try{return (ss?sessionStorage:localStorage).getItem(k)}catch(e){return null}}
 function pg(){return{url:location.origin+location.pathname,title:String(d.title||'').slice(0,150)}}
+var UTM=null;try{var q=new URLSearchParams(location.search),u={};['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid'].forEach(function(k){if(q.get(k))u[k]=q.get(k).slice(0,80)});if(Object.keys(u).length)sessionStorage.setItem(K+'-utm',JSON.stringify(u));UTM=JSON.parse(sessionStorage.getItem(K+'-utm')||'null')}catch(e){}
 function esc(s){var e=d.createElement('div');e.textContent=s==null?'':String(s);return e.innerHTML}
 function fmt(s){return esc(s).replace(/\*([^*\n]+)\*/g,'<b>$1</b>').replace(/(^|\s)_([^_\n]+)_/g,'$1<i>$2</i>').replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')}
 function add(html,cls){var b=d.createElement('div');b.className='wc-q '+cls;b.innerHTML=html;M.appendChild(b);M.scrollTop=M.scrollHeight;return b}
@@ -171,7 +181,7 @@ function send(body,label){
   if(label)add(esc(label),'u');
   var typing=add('…','a wc-t');busy++;
   if(body.text||(body.actionId&&body.actionId!=='open'))mark(K+'-chatted','1',1);
-  fetch(C.api+'/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({sessionId:sid,page:pg()},body))})
+  fetch(C.api+'/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({sessionId:sid,page:pg(),utm:UTM||undefined},body))})
   .then(function(r){return r.json()}).then(function(r){busy--;typing.remove();(r.replies||[]).forEach(render);if(r.lastId)last=Math.max(last,r.lastId)})
   .catch(function(){busy--;typing.remove();add('Sorry – connection problem, please try again.','a')});
 }
