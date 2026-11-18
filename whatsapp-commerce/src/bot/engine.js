@@ -2,6 +2,7 @@ import { getStore } from '../stores/index.js';
 import { LEAD_STATES, leadAction, leadText, leadOffer, leadSettings, topicSummary } from '../leads.js';
 import { reorderOffer, reorder, claimHandoff, forgetMemory, rememberFacts } from '../continuity.js';
 import { siteCartFor, siteCartMessage } from '../siteCart.js';
+import { stockAlertAction, stockEmailText, orderAction, orderAddressText, orderChangeButtons, frustrationOffer } from '../extras.js';
 import { isAiPaused } from '../coexistence.js';
 import { difyChat } from '../dify/client.js';
 import { createSessionToken } from '../session.js';
@@ -211,7 +212,7 @@ async function showProduct(ctx, productId) {
   if (p.image) ctx.reply({ type: 'image', url: p.image, caption });
   const variants = p.variants.filter((v) => v.available);
   if (!p.available || !variants.length) {
-    return ctx.reply({ type: 'buttons', text: p.image ? 'This item is out of stock.' : caption, buttons: [{ id: 'browse', title: '🛍️ Browse' }, { id: 'human', title: '🙋 Ask us' }] });
+    return ctx.reply({ type: 'buttons', text: p.image ? 'This item is out of stock.' : caption, buttons: [{ id: `notifyme:${p.id}`, title: "🔔 Tell me when it's back" }, { id: 'browse', title: '🛍️ Browse' }, { id: 'human', title: '🙋 Ask us' }] });
   }
   if (variants.length > 1) {
     return ctx.reply({
@@ -433,6 +434,9 @@ async function orderStatus(ctx, ref) {
     type: 'text',
     text: match.map((o) => `📦 *${o.store_order_name}* — ${STATUS_TEXT[o.status] || o.status}\n${money(o.subtotal, sym)} · ${o.payment_status}${o.checkout_url && o.payment_status !== 'paid' ? `\nPay: ${o.checkout_url}` : ''}`).join('\n\n'),
   });
+  // still changeable (not being prepared yet): cancel or a new address, right here
+  const open = match.find((o) => orderChangeButtons(o).length);
+  if (open) ctx.reply({ type: 'buttons', text: `Need to change order *${open.store_order_name || '#' + open.id}*? You can until we start preparing it.`, buttons: orderChangeButtons(open) });
 }
 
 async function verifyOrder(ctx, text) {
@@ -471,7 +475,10 @@ const leadTopic = (ctx, text) => String(ctx.conv.data.lastTopic || text || 'gene
 export function pageNote(conv) {
   const p = conv?.data?.page;
   if (!p?.url || !String(conv.waId).startsWith('web:')) return '';
-  return `The visitor is on this page of the website: ${p.title ? `"${p.title}" ` : ''}(${p.url}). Use it to understand what they're looking at, but don't mention the URL.`;
+  const pr = p.product;
+  const prod = pr?.name ? ` The product on the page: ${pr.name}${pr.price ? `, ${pr.currency || ''} ${pr.price}`.replace(/ +/g, ' ') : ''}${pr.availability ? ` (${pr.availability.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()})` : ''}. When they say "this" or "it", they mean this product.` : '';
+  const cart = p.cart?.items?.length ? ` Their basket on the website: ${p.cart.items.join(', ')} (total ${p.cart.total.toFixed(2)}).` : '';
+  return `The visitor is on this page of the website: ${p.title ? `"${p.title}" ` : ''}(${p.url}). Use it to understand what they're looking at, but don't mention the URL.${prod}${cart}`;
 }
 
 function buildAssistQuery(ctx, text, products) {
@@ -557,6 +564,8 @@ async function handleAction(ctx, id) {
     case 'menu': return ctx.reply(mainMenu(ctx));
     case 'wm': return runMenuOption(ctx, Number(arg));
     case 'lead': return leadAction(ctx, arg);
+    case 'notifyme': return stockAlertAction(ctx, arg);
+    case 'ocxl': case 'ocxlyes': case 'oaddr': return orderAction(ctx, cmd, arg);
     case 'reorder': return reorder(ctx, arg, { checkout: startCheckout });
     case 'say': return arg.trim() ? handleText(ctx, arg.slice(0, 200)) : ctx.reply(mainMenu(ctx)); // a choice the AI offered
     case 'open': { // website chat opened from the pop-up greeting: the greeting, then the menu as quick replies
@@ -667,6 +676,10 @@ async function handleText(ctx, raw) {
     if (GREETING.test(t) || COMMANDS.has(t)) ctx.conv.state = 'idle'; // they moved on
     else { const r = await leadText(ctx, text); if (r !== false) return r; } // false: a question instead – answer it normally
   }
+  if (['stock_email', 'order_addr'].includes(ctx.conv.state)) {
+    if (GREETING.test(t) || COMMANDS.has(t)) ctx.conv.state = 'idle';
+    else { const r = ctx.conv.state === 'stock_email' ? await stockEmailText(ctx, text) : await orderAddressText(ctx, text); if (r !== false) return r; }
+  }
   if (ctx.conv.state === 'booking_name' && !GREETING.test(t) && !COMMANDS.has(t)) return bookingText(ctx, text);
   if (bookingsEnabled(ctx.S) && /^(book|booking|book now|make a booking|i want to book|i'?d like to book|reserve|book a (slot|table|session|appointment))[.!]?$/.test(t)) return bookingAction(ctx, 'bstart');
   if (/^(my|see my|change my|check my|cancel my|reschedule( my)?) (booking|bookings|appointment|reservation)s?\b|^my bookings?$/.test(t)) return bookingAction(ctx, 'bmine');
@@ -742,6 +755,9 @@ async function handleText(ctx, raw) {
   if (os) return orderStatus(ctx, os[1]);
   if (/^(order status|track( my)? order|where is my order|my orders?)$/.test(t)) return orderStatus(ctx);
 
+  // Fed up? Offer a person before another bot answer
+  if (ctx.S.ai?.frustrationHandover !== false && !ctx.conv.humanHandover && frustrationOffer(ctx, text)) return;
+
   // Free text → AI (if configured) or knowledge base + catalogue search
   const D = ctx.S.dify || {};
   if (aiAvailable(ctx) && !withinLimit(ctx.tenant, 'ai')) ownerNotice(ctx.tenant, 'ai', ctx.rawSend);
@@ -779,7 +795,7 @@ export async function handleInbound(tenant, event, send) {
   const ctx = buildCtx(tenant, conv, customer, send, replies);
   ctx.event = event;
   if (event.utm && !conv.data.utm) conv.data.utm = event.utm; // first touch
-  if (event.page?.url) conv.data.page = { url: String(event.page.url).slice(0, 300), title: String(event.page.title || '').slice(0, 150), at: new Date().toISOString() };
+  if (event.page?.url) conv.data.page = { url: String(event.page.url).slice(0, 300), title: String(event.page.title || '').slice(0, 150), ...(event.page.product ? { product: event.page.product } : {}), ...(event.page.cart ? { cart: event.page.cart } : {}), at: new Date().toISOString() };
 
   // Click-to-WhatsApp ad attribution (first touch wins)
   if (event.referral && !customer.source) {

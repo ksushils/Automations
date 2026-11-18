@@ -384,6 +384,19 @@ export async function runBookingJobs(now = Date.now()) {
         if (r === 'sent' || r === 'template') sent++;
       }
     }
+    // optional second reminder close to the time (research: several reminders cut no-shows more than one)
+    const hours2 = Number(B.secondReminderHours) || 0;
+    if (hours2 > 0) {
+      const due2 = d.prepare(`SELECT * FROM bookings WHERE tenant_id = ? AND status = 'confirmed' AND reminded2_at IS NULL AND wa_id NOT LIKE 'web:%'
+        AND starts_at > datetime('now') AND starts_at <= datetime('now', ?)`).all(t.id, `+${hours2 * 60} minutes`);
+      for (const b of due2) {
+        d.prepare("UPDATE bookings SET reminded2_at = datetime('now'), reminded_at = COALESCE(reminded_at, datetime('now')) WHERE id = ?").run(b.id);
+        const first = (b.name || 'there').split(' ')[0];
+        const r = await notify(t, b.wa_id, { type: 'buttons', text: `⏰ See you soon, ${first}: *${whenText(b)}*${b.service ? ` – ${b.service}` : ''} at ${t.settings.business?.name || t.name}.${t.settings.business?.address ? `\n📍 ${t.settings.business.address}` : ''}`, buttons: [{ id: 'menu', title: "👍 On my way" }, { id: `bcxl:${b.id}`, title: "❌ Can't make it" }] },
+          B.reminderTemplate ? { name: B.reminderTemplate, language: B.reminderLanguage, params: [first, whenText(b), t.settings.business?.name || t.name] } : null, send).catch((e) => { console.warn('[booking reminder 2]', e.message); return 'failed'; });
+        if (r === 'sent' || r === 'template') sent++;
+      }
+    }
     const rebook = Number(B.rebookDays) || 0;
     if (rebook > 0 && B.rebookTemplate) {
       const rows = d.prepare(`SELECT * FROM bookings b WHERE tenant_id = ? AND status = 'completed' AND rebook_sent_at IS NULL AND wa_id NOT LIKE 'web:%'
