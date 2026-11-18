@@ -5,6 +5,7 @@ import { emailShop } from './email.js';
 import { createCheckoutSession } from './payments/stripe.js';
 import { config } from './config.js';
 import { createHmac } from 'node:crypto';
+import { refreshBusy, isBusy, addBookingEvent } from './gcal.js';
 
 /*
  * Bookings in the chat: pick a service → day → time → confirm (optional Stripe deposit). The team confirms /
@@ -45,13 +46,17 @@ function taken(tenantId, day, time) {
 }
 
 /** Free times for one day (respecting notice period and capacity). */
+/** How long one slot blocks the calendar: settings.bookings.slotMinutes, else the longest service, else 60. */
+const slotMinutes = (B) => Number(B.slotMinutes) || Math.max(0, ...(B.services || []).map((s) => Number(s?.minutes) || 0)) || 60;
 export function freeTimes(tenant, day, now = new Date()) {
   const B = tenant.settings.bookings || {};
   const lead = (Number(B.leadHours) || 0) * 3600000;
   const cap = Math.max(1, Number(B.perSlot) || 1);
+  const len = slotMinutes(B) * 60000;
   return (B.times || []).map(startTime).filter((t) => /^\d{1,2}:\d{2}$/.test(t))
     .filter((t) => zonedToUtc(day, t, tz(tenant.settings)).getTime() >= now.getTime() + lead)
-    .filter((t) => taken(tenant.id, day, t) < cap);
+    .filter((t) => taken(tenant.id, day, t) < cap)
+    .filter((t) => { const s = zonedToUtc(day, t, tz(tenant.settings)).getTime(); return !isBusy(tenant.id, s, s + len); }); // Google Calendar busy times
 }
 
 /** Days (max 10, for a WhatsApp list) that still have a free time. */
@@ -130,9 +135,10 @@ function slotsFor(ctx, when) {
 }
 
 /** A typed day/time ("Friday afternoon") while booking, or "book … next Tuesday". Returns false if no date in it. */
-export function bookingFromText(ctx, text) {
+export async function bookingFromText(ctx, text) {
   const when = parseWhen(text, { timeZone: tz(ctx.S) });
   if (!when) return false;
+  await refreshBusy(ctx.tenant);
   const draft = (ctx.conv.data.booking ||= {});
   if (draft.service === undefined) { const list = services(ctx.S); const hit = list.findIndex((s) => new RegExp(`\\b${s.name.split(/\s+/)[0].replace(/[^\w]/g, '')}`, 'i').test(text)); draft.service = (list[hit] || (list.length === 1 ? list[0] : null))?.name || null; draft.deposit = Number((list[hit] || (list.length === 1 ? list[0] : {}))?.deposit) || 0; }
   const { exact, slots, note } = slotsFor(ctx, when);
@@ -145,6 +151,19 @@ export function bookingFromText(ctx, text) {
 function dayPicker(ctx, text) {
   const all = freeDays(ctx.tenant, new Date(), { max: 42 });
   return { type: 'list', text, button: 'Choose a day', sections: [{ title: 'Available days', rows: all.slice(0, 10).map((d) => ({ id: `bday:${d.ymd}`, title: d.label, description: `${d.free} time${d.free > 1 ? 's' : ''} free` })) }], calendar: { days: all.map((d) => ({ ymd: d.ymd, free: d.free })), idPrefix: 'bday:' } };
+}
+
+/** Put a confirmed booking in the owner's Google Calendar (once). */
+export async function syncBookingToCalendar(tenant, id) {
+  const b = getBooking(tenant.id, id);
+  if (!b || b.status !== 'confirmed' || b.gcal_event_id) return null;
+  const svc = services(tenant.settings).find((s) => s.name === b.service);
+  const start = zonedToUtc(b.day, b.time, tz(tenant.settings));
+  const end = new Date(start.getTime() + (Number(svc?.minutes) || slotMinutes(tenant.settings.bookings || {})) * 60000);
+  const phone = String(b.wa_id).startsWith('web:') ? 'website chat' : `+${b.wa_id}`;
+  const evId = await addBookingEvent(tenant.id, b, { startIso: start.toISOString(), endIso: end.toISOString(), summary: `${b.service || 'Booking'} – ${b.name || 'customer'} (via chat)`, description: `Booked in the chat.\nName: ${b.name || '–'}\nContact: ${phone}\nBooking #${b.id}`, location: tenant.settings.business?.address || undefined });
+  if (evId) getDb().prepare('UPDATE bookings SET gcal_event_id = ? WHERE id = ?').run(evId, b.id);
+  return evId;
 }
 
 // ---------- add to calendar ----------
@@ -186,6 +205,8 @@ export function myBookings(ctx) {
 /** Handle a booking button. Returns true when handled. */
 export async function bookingAction(ctx, cmd, arg) {
   const S = ctx.S;
+  // the owner's Google Calendar (if connected): fresh busy times, and checked again right before confirming
+  await refreshBusy(ctx.tenant, { maxAgeMs: cmd === 'bconfirm' ? 0 : 120000 });
   const draft = (ctx.conv.data.booking ||= {});
   if (cmd === 'bstart') {
     ctx.conv.data.booking = {};
@@ -298,6 +319,7 @@ async function confirmDraft(ctx) {
     addToCalendar(ctx, id);
   }
   alertTeam(ctx.tenant, booking, deposit ? 'awaiting its deposit' : status === 'confirmed' ? 'confirmed automatically' : 'waiting for you to confirm');
+  if (status === 'confirmed') syncBookingToCalendar(ctx.tenant, id).catch(() => {});
   return true;
 }
 
@@ -342,6 +364,7 @@ export async function setBookingStatus(tenant, id, status) {
   if (!b) return null;
   getDb().prepare("UPDATE bookings SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, b.id);
   const after = getBooking(tenant.id, b.id);
+  if (status === 'confirmed') syncBookingToCalendar(tenant, b.id).catch(() => {});
   if (STATUS_MSG[status] && b.status !== status && !String(b.wa_id).startsWith('web:')) {
     const tpl = tenant.settings.notifications?.templates?.orderUpdate;
     await notify(tenant, b.wa_id, { type: 'text', text: STATUS_MSG[status](b) }, tpl ? { name: tpl, params: [(b.name || 'there').split(' ')[0], `booking ${whenText(b)}`, status] } : null).catch((e) => console.warn('[booking notify]', e.message));

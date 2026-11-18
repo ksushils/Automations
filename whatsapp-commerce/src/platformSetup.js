@@ -34,6 +34,8 @@ export const SETUP_FIELDS = {
   demoUrl: { apply: (v) => { config.demoUrl = v; } },
   siteChatTenant: { apply: (v) => { config.siteChatTenant = v; } },
   resendApiKey: { secret: true, apply: (v) => { config.resendApiKey = v; } },
+  googleClientId: { apply: (v) => { config.googleClientId = v; } },
+  googleClientSecret: { secret: true, apply: (v) => { config.googleClientSecret = v; } },
   emailFrom: { apply: (v) => { config.emailFrom = v; } },
 };
 
@@ -48,6 +50,7 @@ const envValue = () => ({
   legalAddress: process.env.LEGAL_ADDRESS || '', legalContactEmail: process.env.LEGAL_CONTACT_EMAIL || '',
   alertWebhookUrl: config.alertWebhookUrl,
   resendApiKey: config.resendApiKey, emailFrom: config.emailFrom,
+  googleClientId: config.googleClientId, googleClientSecret: config.googleClientSecret,
   contactPhone: config.contactPhone, demoUrl: config.demoUrl, siteChatTenant: config.siteChatTenant,
 });
 let fromEnv = null;

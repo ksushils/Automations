@@ -223,6 +223,7 @@ async function setup() {
     ${stepNo(2, `Go to ${ext('https://resend.com/domains', 'Domains')} → <b>Add domain</b> → type <code>${esc(u.domain.split('.').slice(-2).join('.'))}</code>. Resend shows you 3 or 4 DNS records: add them where you manage that domain's DNS, the same place you added the <code>wa</code> record. Wait until it says <b>Verified</b> (usually a few minutes).`)}
     ${stepNo(3, `Go to ${ext('https://resend.com/api-keys', 'API keys')} → <b>Create API key</b> (Sending access) and paste it here:${field('resendApiKey', 'Resend API key (starts with re_)', v.resendApiKey, { secret: true })}`)}
     ${stepNo(4, `Choose the sender. It must use the domain you verified:${field('emailFrom', 'Send emails from', v.emailFrom, { placeholder: `${v.productName || 'Orders'} <orders@${u.domain.split('.').slice(-2).join('.')}>` })}`)}
+    <details style="margin-top:12px"><summary><b>Optional: Google Calendar for bookings</b></summary><p class="mute">Lets shops connect their Google Calendar so busy times are kept free and bookings appear in it. In ${ext('https://console.cloud.google.com/apis/credentials', 'Google Cloud → Credentials')}: enable the Google Calendar API, create an <b>OAuth client ID</b> (Web application) and add this redirect URI: <code>${esc(u.publicUrl)}/oauth/google/callback</code>. Until Google verifies the app, up to 100 shops can connect and they see an "unverified app" warning.</p>${field('googleClientId', 'Client ID', v.googleClientId)}${field('googleClientSecret', 'Client secret', v.googleClientSecret, { secret: true })}</details>
     <p><button class="btn" id="ssave">Save and send me a test</button></p><div id="sres"></div>${nav()}</div>`;
   if (i >= SETUP_STEPS.length) body = `<div class="card"><h2>🎉 ${st.done === st.total ? "You're all set" : 'Nearly there'}</h2>
     ${SETUP_STEPS.map(([k, , label], n) => `<div style="padding:6px 0">${st.steps[k] ? '✅' : '⬜'} ${label} ${st.steps[k] ? '' : `<a href="#" data-step="${n}">finish this</a>`}</div>`).join('')}
@@ -515,6 +516,13 @@ async function leads() {
 
 // ---------- orders ----------
 const STATUSES = ['new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivered', 'completed', 'cancelled'];
+async function gcalCard() {
+  const el = $('#gcalcard'); if (!el) return;
+  const g = await api(T('/google')).catch(() => null); if (!g) return;
+  el.innerHTML = `<div class="card" style="margin:10px 0;padding:12px"><b>🗓️ Google Calendar</b> ${g.connected ? `<span class="pill ok">connected</span> <span class="mute">Busy times are kept free in the chat; confirmed bookings are added to your calendar.</span> <button class="btn ghost" id="gdis">Disconnect</button>` : g.configured ? '<span class="mute">Stop double bookings: busy times in your calendar are kept free, and bookings appear in it.</span> <button class="btn" id="gcon">Connect Google Calendar</button>' : '<span class="mute">Not available yet – the platform owner adds Google sign-in in Setup.</span>'}${g.lastError ? `<div class="mute" style="color:#b5470b">Last problem: ${esc(g.lastError)}</div>` : ''}</div>`;
+  if ($('#gcon')) $('#gcon').onclick = async () => { try { location.href = (await api(T('/google/connect'), { method: 'POST' })).url; } catch (e) { toast(e.message); } };
+  if ($('#gdis')) $('#gdis').onclick = async () => { await api(T('/google/disconnect'), { method: 'POST' }); toast('Disconnected'); gcalCard(); };
+}
 async function bookings() {
   const past = store.get('wc_bpast') === '1';
   const { bookings: list } = await api(T(`/bookings${past ? '?past=1' : ''}`));
@@ -526,9 +534,11 @@ async function bookings() {
     .map(([s, l]) => `<button class="btn ${s === 'confirmed' || s === 'completed' ? '' : 'ghost'}" data-bs="${b.id}" data-st="${s}">${l}</button>`).join(' ');
   $('#app').innerHTML = `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><h2 style="margin:0">📅 Bookings</h2>
       <div><button class="btn ${past ? 'ghost' : ''}" data-bp="0">Upcoming</button> <button class="btn ${past ? '' : 'ghost'}" data-bp="1">Past</button></div></div>
+    <div id="gcalcard"></div>
     ${on ? '' : '<p class="mute">Bookings in the chat are off. Switch them on in Settings → Bookings in the chat: add your start times (and services), and customers can book by typing <b>book</b>.</p>'}
     <div class="tablewrap"><table><tr><th>When</th><th>Customer</th><th>Service</th><th>Status</th><th></th></tr>
     ${list.map((b) => `<tr><td><b>${esc(day(b))}</b> ${esc(b.time)}</td><td>${esc(b.name || '')}<div class="mute">${String(b.wa_id).startsWith('web:') ? 'website chat' : '+' + esc(b.wa_id)}</div></td><td>${esc(b.service || '–')}${b.deposit ? `<div class="mute">deposit ${sym}${Number(b.deposit).toFixed(2)} ${b.deposit_paid ? '✅ paid' : 'unpaid'}</div>` : ''}</td><td>${pill[b.status] || esc(b.status)}${b.reminded_at ? '<div class="mute">reminded</div>' : ''}</td><td style="white-space:nowrap">${actions(b)}</td></tr>`).join('') || `<tr><td colspan="5" class="mute">No ${past ? 'past' : 'upcoming'} bookings</td></tr>`}</table></div></div>`;
+  gcalCard();
   $('#app').querySelectorAll('[data-bp]').forEach((b) => (b.onclick = () => { store.set('wc_bpast', b.dataset.bp === '1' ? '1' : null); bookings(); }));
   $('#app').querySelectorAll('[data-bs]').forEach((b) => (b.onclick = async () => {
     try { await api(T(`/bookings/${b.dataset.bs}/status`), { method: 'POST', body: { status: b.dataset.st } }); toast(b.dataset.st === 'confirmed' ? 'Confirmed – the customer has been told' : b.dataset.st === 'cancelled' ? 'Cancelled – the customer has been told' : 'Updated'); bookings(); } catch (e) { toast(e.message); }

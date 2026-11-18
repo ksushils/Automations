@@ -112,6 +112,11 @@ export async function leadAction(ctx, arg) {
   const [cmd, topic = ''] = String(arg || '').split(/:(.*)/s);
   if (cmd === 'email' || cmd === 'call') return startLead(ctx, cmd, topic);
   if (cmd === 'optin' || cmd === 'nooptin') return marketingChoice(ctx, cmd === 'optin');
+  if (cmd === 'fillform') {
+    const row = getDb().prepare('SELECT * FROM chat_leads WHERE id = ? AND tenant_id = ? AND wa_id = ?').get(Number(topic), ctx.tenant.id, ctx.conv.waId);
+    if (!row) return ctx.reply({ type: 'text', text: 'No problem – our team has your details.' });
+    return ctx.reply({ type: 'fill_form', text: 'Filling in the form on this page…', fields: { name: row.name || '', email: row.email || '', phone: row.phone || '', message: [row.topic && row.topic !== 'general' ? row.topic : '', row.message || ''].filter(Boolean).join(': ') } });
+  }
   if (cmd === 'when' && ctx.conv.data.lead) { const l = ctx.conv.data.lead; l.callTime = CALL_TIMES.includes(topic) ? topic : String(topic).slice(0, 40); l.done = [...new Set([...(l.done || []), 'when'])]; return continueLead(ctx); }
   const lead = ctx.conv.data.lead;
   if (!lead) return ctx.reply({ type: 'text', text: 'No problem! Ask me anything, or type *menu* to see the options.' });
@@ -196,8 +201,12 @@ async function finishLead(ctx) {
   }
   const bits = [lead.email && `we'll email you at ${lead.email}`, lead.phone && lead.kind === 'call' && `we'll call you on ${lead.phone}${lead.callTime ? ` (${lead.callTime.toLowerCase()})` : ''}`].filter(Boolean);
   const thanks = `✅ Thanks${lead.name ? `, ${lead.name}` : ''}! ${bits.length ? bits.join(' and ').replace(/^./, (c) => c.toUpperCase()) + '. ' : ''}${L.callbackPromise}${L.brochureUrl && lead.email ? `\n\n📄 Here's the brochure now: ${L.brochureUrl}` : ''}`;
-  if (!lead.email) return ctx.reply({ type: 'text', text: thanks });
+  // the page has its own enquiry form (e.g. the business's booking or quote form): offer to fill it in – they press send
+  if (isWeb(ctx) && ctx.conv.data.page?.form && ctx.S.leads?.fillSiteForm !== false) ctx.conv.data.fillFormLead = id;
+  const offerForm = () => ctx.conv.data.fillFormLead && ctx.reply({ type: 'buttons', text: 'This page has its own enquiry form too. Want me to fill it in with these details? You check it and press send.', buttons: [{ id: `lead:fillform:${id}`, title: '📝 Fill it in' }] });
+  if (!lead.email) { ctx.reply({ type: 'text', text: thanks }); return offerForm(); }
   // separate, optional marketing consent (never pre-ticked, never bundled with the request)
+  offerForm();
   return ctx.reply({ type: 'buttons', text: `${thanks}\n\n${optInQuestion(ctx.S)}`, buttons: [{ id: 'lead:optin', title: '✅ Yes please' }, { id: 'lead:nooptin', title: 'No thanks' }] });
 }
 

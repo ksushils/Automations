@@ -165,6 +165,16 @@ export function renderReceipt(tenant, o, { justPaid } = {}) {
 export function publicRouter() {
   const r = express.Router();
 
+  // Google Calendar connected by the shop owner (OAuth redirect)
+  r.get('/oauth/google/callback', async (req, res) => {
+    const { checkState, connectCalendar } = await import('../gcal.js');
+    const page = (msg) => res.type('html').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Google Calendar</title><body style="font:17px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:15vh auto;padding:0 16px;text-align:center">${msg}<p><a href="/admin/">Back to your dashboard</a></p></body>`);
+    const tenantId = checkState(req.query.state);
+    if (!tenantId || !getTenant(tenantId)) return page('<h1>Link expired</h1><p>Please press “Connect Google Calendar” again.</p>');
+    if (req.query.error || !req.query.code) return page('<h1>Not connected</h1><p>Google Calendar was not connected.</p>');
+    try { await connectCalendar(tenantId, String(req.query.code)); return page('<h1>✅ Google Calendar connected</h1><p>Busy times in your calendar are now kept free in the chat, and confirmed bookings are added to it.</p>'); } catch (e) { return page(`<h1>Not connected</h1><p>${String(e.message).replace(/[<>&]/g, '')}</p>`); }
+  });
+
   // "Add to calendar" for Apple / Outlook: a signed link per booking
   r.get('/b/:tenantId/:id/:tok.ics', async (req, res) => {
     const { verifyIcsToken, icsFile, getBooking } = await import('../bookings.js');

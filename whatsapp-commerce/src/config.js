@@ -66,6 +66,8 @@ Object.assign(config, {
   demoUrl: env.DEMO_URL || '', // optional booking link (Calendly etc.) for "Book a demo"
   siteChatTenant: env.SITE_CHAT_TENANT || '', // shop ID whose assistant answers on your own homepage
   resendApiKey: env.RESEND_API_KEY || '', // order alert emails via resend.com
+  googleClientId: env.GOOGLE_CLIENT_ID || '', // Google Calendar for bookings (OAuth client, Web application)
+  googleClientSecret: env.GOOGLE_CLIENT_SECRET || '',
   emailFrom: env.EMAIL_FROM || '', // e.g. "RC Shopper <orders@yourdomain.com>" – the domain must be verified in Resend
 });
 

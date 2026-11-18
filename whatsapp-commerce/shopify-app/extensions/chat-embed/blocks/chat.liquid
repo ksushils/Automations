@@ -1,0 +1,29 @@
+{%- comment -%}
+  AI chat assistant – app embed. Shop owners switch it on in Online Store → Themes → Customize → App embeds.
+  Loads the same widget as the copy-paste snippet, so every feature (pop-up, add to basket, bookings…) works the same.
+{%- endcomment -%}
+{%- assign server = block.settings.server | default: 'https://wa.karatit.com' | split: '?' | first | remove_last: '/' -%}
+{%- if block.settings.shop_id != blank -%}
+  <script src="{{ server }}/chat-widget/{{ block.settings.shop_id | url_encode }}.js" async></script>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "AI chat assistant",
+  "target": "body",
+  "settings": [
+    {
+      "type": "text",
+      "id": "shop_id",
+      "label": "Your shop ID",
+      "info": "In your dashboard: Grow → Website AI chat. It's the part after /chat-widget/ in the code shown there."
+    },
+    {
+      "type": "url",
+      "id": "server",
+      "label": "Chat server",
+      "default": "https://wa.karatit.com"
+    }
+  ]
+}
+{% endschema %}

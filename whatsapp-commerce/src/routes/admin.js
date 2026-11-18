@@ -37,6 +37,7 @@ import { currentKeyId } from '../crypto.js';
 import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
 import { listChatLeads, setLeadStatus } from '../leads.js';
+import { googleConfigured, calendarConnected, authUrl, disconnectCalendar, redirectUri } from '../gcal.js';
 import { resumeAi } from '../coexistence.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
 import { recordConsent, consentHistory, HAS_CONSENT_SQL } from '../consent.js';
@@ -638,6 +639,10 @@ export function adminRouter() {
     res.json({ ok: true, assignedTo: to });
   });
   r.get('/tenants/:tenantId/agents', requireTenant, (req, res) => res.json({ agents: ['Owner', ...listStaff(req.tenant.id).map((m) => m.name)], me: req.staff?.name || 'Owner' }));
+  // Google Calendar for bookings
+  r.get('/tenants/:tenantId/google', requireTenant, (req, res) => { const G = req.tenant.settings.bookings?.google || {}; res.json({ configured: googleConfigured(), connected: calendarConnected(req.tenant), connectedAt: G.connectedAt || null, lastError: G.lastError || null, redirectUri: redirectUri() }); });
+  r.post('/tenants/:tenantId/google/connect', requireTenant, requireOwner, (req, res) => { if (!googleConfigured()) return res.status(400).json({ error: 'Google Calendar is not set up on this server yet (Setup → step 5)' }); res.json({ url: authUrl(req.tenant.id) }); });
+  r.post('/tenants/:tenantId/google/disconnect', requireTenant, requireOwner, (req, res) => { disconnectCalendar(req.tenant.id); res.json({ ok: true }); });
   r.get('/tenants/:tenantId/leads', requireTenant, (req, res) => res.json({ leads: listChatLeads(req.tenant.id) }));
   r.patch('/tenants/:tenantId/leads/:id', requireTenant, (req, res) => { setLeadStatus(req.tenant.id, req.params.id, String(req.body?.status || '')); res.json({ ok: true }); });
   r.post('/tenants/:tenantId/conversations/:waId/resume', requireTenant, (req, res) => {

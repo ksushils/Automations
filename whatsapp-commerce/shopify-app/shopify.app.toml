@@ -1,0 +1,18 @@
+# Shopify app that only adds the chat widget as a theme app embed (no admin access, no data from the store).
+# Fill client_id after creating the app in your Shopify Partner dashboard, then run `shopify app deploy`.
+name = "AI chat assistant"
+client_id = ""
+application_url = "https://wa.karatit.com/admin/"
+embedded = false
+
+[access_scopes]
+scopes = ""
+
+[auth]
+redirect_urls = ["https://wa.karatit.com/admin/"]
+
+[webhooks]
+api_version = "2026-10"
+
+[build]
+include_config_on_deploy = true

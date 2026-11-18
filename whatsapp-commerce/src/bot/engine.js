@@ -459,6 +459,14 @@ async function verifyOrder(ctx, text) {
  * The AI may end a question with [CHOICES: a | b | c] – those become tappable buttons (WhatsApp: max 3, 20 chars).
  * Tapping one sends that text back as the customer's answer ("say:" action).
  */
+export function extractShow(answer, sections = []) {
+  const m = String(answer || '').match(/\[SHOW:\s*([^\]]{2,80})\]/i);
+  const text = String(answer || '').replace(/\s*\[SHOW:[^\]]*\]/gi, '').trim();
+  if (!m) return { text, show: null };
+  const want = m[1].trim().toLowerCase();
+  const hit = sections.find((s) => s.toLowerCase() === want) || sections.find((s) => s.toLowerCase().includes(want) || want.includes(s.toLowerCase()));
+  return { text, show: hit || null };
+}
 export function extractChoices(answer) {
   const m = String(answer || '').match(/\n*\s*\[CHOICES?:\s*([^\]]*)\]\s*$/i);
   if (!m) return { text: String(answer || '').replace(/\[CHOICES?:[^\]]*\]/gi, '').trim(), choices: [] };
@@ -478,7 +486,8 @@ export function pageNote(conv) {
   const pr = p.product;
   const prod = pr?.name ? ` The product on the page: ${pr.name}${pr.price ? `, ${pr.currency || ''} ${pr.price}`.replace(/ +/g, ' ') : ''}${pr.availability ? ` (${pr.availability.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()})` : ''}. When they say "this" or "it", they mean this product.` : '';
   const cart = p.cart?.items?.length ? ` Their basket on the website: ${p.cart.items.join(', ')} (total ${p.cart.total.toFixed(2)}).` : '';
-  return `The visitor is on this page of the website: ${p.title ? `"${p.title}" ` : ''}(${p.url}). Use it to understand what they're looking at, but don't mention the URL.${prod}${cart}`;
+  const secs = p.sections?.length ? ` Sections on this page: ${p.sections.join(' | ')}. If the answer is in one of these sections, end your reply with [SHOW: the exact section name] and they get a button to jump to it.` : '';
+  return `The visitor is on this page of the website: ${p.title ? `"${p.title}" ` : ''}(${p.url}). Use it to understand what they're looking at, but don't mention the URL.${prod}${cart}${secs}`;
 }
 
 function buildAssistQuery(ctx, text, products) {
@@ -527,7 +536,7 @@ async function askAi(ctx, text) {
   if (!products.length && searched?.at >= startedAt && searched.products?.length && !ctx.conv.humanHandover) {
     products.push(...searched.products.map((p) => ({ ...p, variants: [] })));
   }
-  const { text: said, choices } = extractChoices(answer);
+  const { text: said, choices } = extractChoices(extractShow(answer).text);
   if (products.length) ctx.reply(productList(ctx, products, said || 'Here are some products you might like:'));
   else if (choices.length) ctx.reply(choiceButtons(said || 'Which is closest?', choices, leadTopic(ctx, text)));
   else ctx.reply({ type: 'text', text: said || "Sorry, I didn't catch that. Type *menu* to see options." });
@@ -685,7 +694,7 @@ async function handleText(ctx, raw) {
   if (/^(my|see my|change my|check my|cancel my|reschedule( my)?) (booking|bookings|appointment|reservation)s?\b|^my bookings?$/.test(t)) return bookingAction(ctx, 'bmine');
   // a day/time typed while choosing ("Friday afternoon"), or "book … next Tuesday at 2"
   if (bookingsEnabled(ctx.S) && ((ctx.conv.data.booking && !ctx.conv.data.booking.time && 'service' in ctx.conv.data.booking) || /\b(book|booking|appointment|reserve|slot)\b/.test(t))) {
-    const r = bookingFromText(ctx, text);
+    const r = await bookingFromText(ctx, text);
     if (r !== false) return r;
   }
   if (ctx.conv.state === 'order_verify' && ctx.conv.data.orderVerify && !GREETING.test(t) && !COMMANDS.has(t)) return verifyOrder(ctx, text);
@@ -795,7 +804,7 @@ export async function handleInbound(tenant, event, send) {
   const ctx = buildCtx(tenant, conv, customer, send, replies);
   ctx.event = event;
   if (event.utm && !conv.data.utm) conv.data.utm = event.utm; // first touch
-  if (event.page?.url) conv.data.page = { url: String(event.page.url).slice(0, 300), title: String(event.page.title || '').slice(0, 150), ...(event.page.product ? { product: event.page.product } : {}), ...(event.page.cart ? { cart: event.page.cart } : {}), at: new Date().toISOString() };
+  if (event.page?.url) conv.data.page = { url: String(event.page.url).slice(0, 300), title: String(event.page.title || '').slice(0, 150), ...(event.page.product ? { product: event.page.product } : {}), ...(event.page.cart ? { cart: event.page.cart } : {}), ...(event.page.sections ? { sections: event.page.sections } : {}), ...(event.page.form ? { form: true } : {}), at: new Date().toISOString() };
 
   // Click-to-WhatsApp ad attribution (first touch wins)
   if (event.referral && !customer.source) {
@@ -1009,7 +1018,9 @@ async function askDirect(ctx, text) {
   }
   // The tappable list should be the products the AI talked about: those it named (matched against what it was shown,
   // or looked up by the bolded names it wrote), else — only if it pointed to the list — the search results.
-  const { text: plain, choices: offered } = extractChoices(out);
+  const { text: noShow, show } = extractShow(out, ctx.conv.data?.page?.sections || []);
+  const H = (m) => (show && String(ctx.conv.waId).startsWith('web:') ? { ...m, highlight: show } : m);
+  const { text: plain, choices: offered } = extractChoices(noShow);
   if (ctx.S.ai?.memory !== false && !/^qa:/.test(ctx.conv.waId)) {
     ctx.conv.data.memTurns = (ctx.conv.data.memTurns || 0) + 1;
     if (ctx.conv.data.memTurns % 4 === 2) extractMemory(ctx.tenant, ctx.conv.waId).then((f) => f?.length && rememberFacts(ctx.tenant.id, ctx.conv.waId, f)).catch(() => {});
@@ -1019,9 +1030,9 @@ async function askDirect(ctx, text) {
   const say = shown.length ? plain : plain.replace(/\n*\s*Tap \*?View products\*? below to order\s*👇?[.!\s]*$/i, '').trim();
   // the model forgot the tap options on a question: ask for them (not when products are shown or a person has taken over)
   const choices = offered.length || shown.length || ctx.conv.humanHandover || ctx.S.ai?.suggestChoices === false ? offered : await suggestChoices(ctx, say);
-  if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(productList(ctx, shown, say || 'Here are some products you might like:')); }
-  else if (choices.length) ctx.reply(choiceButtons(say || 'Which is closest?', choices, leadTopic(ctx, text)));
-  else ctx.reply({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." });
+  if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(H(productList(ctx, shown, say || 'Here are some products you might like:'))); }
+  else if (choices.length) ctx.reply(H(choiceButtons(say || 'Which is closest?', choices, leadTopic(ctx, text))));
+  else ctx.reply(H({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." }));
 }
 
 /** Tell the shop owner (once a day per kind) that a plan limit was reached. */

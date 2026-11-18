@@ -138,7 +138,9 @@ test('the page: product and basket details are read (structured data only), give
     assert.match(js, /🛒 Add this to basket/);
     assert.match(js, /away from free delivery/);
     assert.match(js, /application\/ld\+json/);
-    assert.ok(!/input\.value|querySelectorAll\('input/.test(js.replace(/I\.value/g, '')), 'never reads the page\'s form fields');
+    // what the widget sends about the page (pg and its helpers) never includes anything typed into the page's forms
+    const sent = ['function prod(', 'function secs2(', 'function theForm(', 'function pg('].map((n) => js.slice(js.indexOf(n), js.indexOf('\n', js.indexOf(n)))).join('\n');
+    assert.ok(!/\.value\b|FormData/.test(sent), 'never sends the page\'s form field values');
   } finally { server.close(); }
 });
 
