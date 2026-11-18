@@ -7,6 +7,7 @@ import { handleInbound, menuOptions, openerFor, PAGE_OPENERS, DEFAULT_OPENER } f
 import { enqueue } from '../whatsapp/webhook.js';
 import { rateLimit } from './web.js';
 import { isDemo, DEMO_MESSAGE_CAP } from '../instantDemo.js';
+import { createHandoff } from '../continuity.js';
 
 /*
  * Website AI chat: the same bot (AI, knowledge base, catalogue, cart, flows, human hand-over) on the shop's own site.
@@ -98,6 +99,18 @@ export function webchatRouter() {
     res.json({ replies: sink, lastId });
   });
 
+  // "Continue on WhatsApp": a one-use code that carries this chat (basket, page, what was said) across
+  r.post('/chat/:tenantId/handoff', limiter, (req, res) => {
+    const t = getTenant(req.params.tenantId);
+    const num = String(t?.settings?.business?.whatsappNumber || '').replace(/\D/g, '');
+    const sessionId = String(req.body?.sessionId || '');
+    if (!t?.active || !num) return res.status(404).json({ error: 'WhatsApp is not connected for this shop' });
+    if (!SESSION.test(sessionId)) return res.status(400).json({ error: 'invalid session' });
+    const code = createHandoff(t.id, visitorId(sessionId));
+    const text = `Hi! I'd like to continue my chat from your website (ref ${code})`;
+    res.json({ code, url: `https://wa.me/${num}?text=${encodeURIComponent(text)}` });
+  });
+
   // New messages for the visitor (staff replies from the inbox, reminders)
   r.get('/chat/:tenantId/poll', limiter, (req, res) => {
     const t = getTenant(req.params.tenantId);
@@ -153,10 +166,11 @@ var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;f
 '.wc-q.u{align-self:flex-end;background:'+C.color+';color:#fff}.wc-q.a{align-self:flex-start;background:#fff;box-shadow:0 1px 1px rgba(0,0,0,.06)}.wc-q img{max-width:100%;border-radius:8px;display:block;margin-bottom:4px}'+
 '.wc-c{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.wc-c button,.wc-c a{border:1px solid #d6ddd9;background:#fff;color:'+C.color+';border-radius:9px;padding:5px 9px;cursor:pointer;font:inherit;font-size:13px;text-decoration:none}'+
 '.wc-f{display:flex;gap:6px;padding:8px;border-top:1px solid #e3e8e5;background:#fff}.wc-f input{flex:1;border:1px solid #d6ddd9;border-radius:10px;padding:9px;font:inherit}.wc-f button{border:0;background:'+C.color+';color:#fff;border-radius:10px;padding:0 14px;cursor:pointer;font:inherit}'+
+'.wc-cal{margin-top:8px}.wc-cal b{font-size:13px}.wc-g{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:4px;text-align:center;font-size:12px}.wc-g i{font-style:normal;color:#889}.wc-g button{border:1px solid '+C.color+';background:#fff;color:'+C.color+';border-radius:8px;padding:0;min-height:32px;cursor:pointer;font:inherit;font-weight:600}.wc-g button:hover{background:'+C.color+';color:#fff}.wc-g .x{color:#c8ced0;line-height:32px}'+
 '.wc-w{font-size:12px;text-align:center;padding:4px;color:#667}.wc-w a{color:inherit}.wc-t{align-self:flex-start;color:#889;font-size:12px}';
 var st=d.createElement('style');st.textContent=css;d.head.appendChild(st);
 var w=d.createElement('div');w.className='wc';
-w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button><b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f"><input placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.whatsapp?'<div class="wc-w">Prefer WhatsApp? <a target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Chat there</a></div>':'')+'</div>'+(C.launcher||C.opener?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
+w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button><b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f"><input placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.whatsapp?'<div class="wc-w">📱 <a class="wc-wa" target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Continue on WhatsApp</a> – your chat comes with you</div>':'')+'</div>'+(C.launcher||C.opener?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
 w.querySelector('.wc-h b').textContent=C.title;w.querySelector('.wc-h span').textContent=C.subtitle;
 var P=w.querySelector('.wc-p'),M=w.querySelector('.wc-m'),F=w.querySelector('form'),I=F.querySelector('input');
 function mark(k,v,ss){try{(ss?sessionStorage:localStorage).setItem(k,v)}catch(e){}}
@@ -166,10 +180,20 @@ var UTM=null;try{var q=new URLSearchParams(location.search),u={};['utm_source','
 function esc(s){var e=d.createElement('div');e.textContent=s==null?'':String(s);return e.innerHTML}
 function fmt(s){return esc(s).replace(/\*([^*\n]+)\*/g,'<b>$1</b>').replace(/(^|\s)_([^_\n]+)_/g,'$1<i>$2</i>').replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')}
 function add(html,cls){var b=d.createElement('div');b.className='wc-q '+cls;b.innerHTML=html;M.appendChild(b);M.scrollTop=M.scrollHeight;return b}
+function cal(c){var free={};c.days.forEach(function(x){free[x.ymd]=x.free});var keys=Object.keys(free).sort(),h='',p2=function(n){return (n<10?'0':'')+n};
+  var f=new Date(keys[0]+'T12:00:00Z'),l=new Date(keys[keys.length-1]+'T12:00:00Z'),cur=new Date(Date.UTC(f.getUTCFullYear(),f.getUTCMonth(),1,12));
+  while(cur<=l){var y=cur.getUTCFullYear(),mo=cur.getUTCMonth(),pad=(cur.getUTCDay()+6)%7,n=new Date(Date.UTC(y,mo+1,0,12)).getUTCDate();
+    h+='<div class="wc-cal"><b>'+esc(cur.toLocaleDateString('en-GB',{month:'long',year:'numeric',timeZone:'UTC'}))+'</b><div class="wc-g" role="grid">'+['Mo','Tu','We','Th','Fr','Sa','Su'].map(function(x){return '<i>'+x+'</i>'}).join('');
+    for(var i=0;i<pad;i++)h+='<span></span>';
+    for(var dd=1;dd<=n;dd++){var k=y+'-'+p2(mo+1)+'-'+p2(dd),lab=new Date(k+'T12:00:00Z').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'});
+      h+=free[k]?'<button data-a="'+esc(c.idPrefix+k)+'" data-l="'+esc(lab)+'" aria-label="'+esc(lab+', '+free[k]+' free')+'">'+dd+'</button>':'<span class="x" aria-hidden="true">'+dd+'</span>'}
+    h+='</div></div>';cur=new Date(Date.UTC(y,mo+1,1,12))}
+  return h}
 function render(m){
   if(!m)return;var h='',acts=[];
   if(m.type==='image')h=(m.url?'<img alt="" src="'+esc(m.url)+'">':'')+fmt(m.caption||'');
   else if(m.type==='buttons'){h=(m.header?'<b>'+esc(m.header)+'</b>\n':'')+fmt(m.text);acts=m.buttons.map(function(b){return '<button data-a="'+esc(b.id)+'" data-l="'+esc(b.title)+'">'+esc(b.title)+'</button>'})}
+  else if(m.type==='list'&&m.calendar&&m.calendar.days&&m.calendar.days.length){h=fmt(m.text)+cal(m.calendar)}
   else if(m.type==='list'){h=fmt(m.text);acts=[].concat.apply([],m.sections.map(function(s){return s.rows.map(function(r){return '<button data-a="'+esc(r.id)+'" data-l="'+esc(r.title)+'" title="'+esc(r.description||'')+'">'+esc(r.title)+'</button>'})}))}
   else if(m.type==='cta'){h=fmt(m.text);acts=['<a href="'+esc(m.url)+'" target="_blank" rel="noopener">'+esc(m.buttonText||'Open')+' ↗</a>']}
   else if(m.type==='template'||m.type==='flow')h=fmt(m.text||'');
@@ -186,6 +210,7 @@ function send(body,label){
   .catch(function(){busy--;typing.remove();add('Sorry – connection problem, please try again.','a')});
 }
 function poll(){if(busy)return;fetch(C.api+'/poll?sessionId='+sid+'&after='+last).then(function(r){return r.json()}).then(function(r){if(last&&r.messages)r.messages.forEach(render);last=Math.max(last,r.lastId||0)}).catch(function(){})}
+var WA=w.querySelector('.wc-wa');if(WA)WA.onclick=function(e){e.preventDefault();var win=window.open('','_blank');fetch(C.api+'/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})}).then(function(r){return r.json()}).then(function(r){var u=r.url||WA.href;if(win)win.location=u;else location.href=u}).catch(function(){if(win)win.location=WA.href})};
 M.addEventListener('click',function(e){var b=e.target.closest('button[data-a]');if(b)send({actionId:b.dataset.a},b.dataset.l)});
 F.onsubmit=function(e){e.preventDefault();var v=I.value.trim();if(!v)return;I.value='';send({text:v},v)};
 var O=C.opener;

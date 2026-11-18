@@ -28,6 +28,11 @@ test('booking in the chat: service → day → time → confirm; team confirms; 
     r = await say(t, wa, 'book');
     assert.deepEqual(ids(r), ['bsvc:0', 'bsvc:1']);
     r = await say(t, wa, { action: 'bsvc:1' });
+    // the soonest free times first, any other day behind "Other day"
+    assert.match(ids(r)[0], /^bslot:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+    assert.equal(ids(r).at(-1), 'bdays');
+    r = await say(t, wa, { action: 'bdays' });
+    assert.ok(r[0].calendar?.days?.length, 'the website shows these as a calendar');
     const day = ids(r)[0];
     assert.match(day, /^bday:\d{4}-\d{2}-\d{2}$/);
     r = await say(t, wa, { action: day });

@@ -65,7 +65,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // build the local knowledge index for documents added before it existed
   import('./ai/rag.js').then(async ({ reindexTenant }) => { for (const r of getDb().prepare('SELECT id FROM tenants').all()) await reindexTenant(r.id).catch(() => {}); });
   // daily backup (and one at start-up)
-  const doBackup = () => { try { const b = backup(); if (b) console.log('[backup]', b.file); } catch (e) { alert(`Backup failed: ${e.message}`); } };
+  // …and an encrypted copy off the server when BACKUP_S3_* is set (src/offsite.js)
+  const doBackup = () => {
+    let b = null;
+    try { b = backup(); if (b) console.log('[backup]', b.file); } catch (e) { alert(`Backup failed: ${e.message}`); }
+    if (b) import('./offsite.js').then(({ uploadBackup }) => uploadBackup(b.file)).then((u) => {
+      if (!u) return;
+      console.log('[backup] off-server copy', u.key, u.bytes);
+      getDb().prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('backup:offsite', JSON.stringify({ key: u.key, bytes: u.bytes, at: new Date().toISOString() }));
+    }).catch((e) => alert(`Off-server backup failed: ${e.message}`, { key: 'offsite-backup' }));
+  };
   setTimeout(doBackup, 30000).unref();
   setInterval(doBackup, 24 * 3600000).unref();
   const server = createApp().listen(config.port, () => console.log(`WhatsApp Commerce running on :${config.port} → ${config.publicUrl}/admin`));

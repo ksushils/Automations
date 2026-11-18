@@ -165,6 +165,14 @@ export function renderReceipt(tenant, o, { justPaid } = {}) {
 export function publicRouter() {
   const r = express.Router();
 
+  // "Add to calendar" for Apple / Outlook: a signed link per booking
+  r.get('/b/:tenantId/:id/:tok.ics', async (req, res) => {
+    const { verifyIcsToken, icsFile, getBooking } = await import('../bookings.js');
+    const t = getTenant(req.params.tenantId);
+    const b = t && verifyIcsToken(t.id, Number(req.params.id), req.params.tok) ? getBooking(t.id, Number(req.params.id)) : null;
+    if (!b) return res.sendStatus(404);
+    res.type('text/calendar; charset=utf-8').set('Content-Disposition', `attachment; filename="booking-${b.id}.ics"`).set('Cache-Control', 'no-store').send(icsFile(t, b));
+  });
   r.get('/paid', (req, res) => res.type('html').send('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment received</title><body style="font:17px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:15vh auto;padding:0 16px;text-align:center"><h1>✅ Thank you!</h1><p>Your payment went through. You will get a confirmation in your chat in a moment – you can close this page.</p></body>'));
   r.get('/r/:token', (req, res) => {
     const o = findOrderByReceipt(req.params.token);

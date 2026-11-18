@@ -1,5 +1,6 @@
 import { getStore } from '../stores/index.js';
 import { LEAD_STATES, leadAction, leadText, leadOffer, leadSettings, topicSummary } from '../leads.js';
+import { reorderOffer, reorder, claimHandoff, forgetMemory, rememberFacts } from '../continuity.js';
 import { isAiPaused } from '../coexistence.js';
 import { difyChat } from '../dify/client.js';
 import { createSessionToken } from '../session.js';
@@ -16,10 +17,10 @@ import { alert } from '../ops.js';
 import { emailShop } from '../email.js';
 import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 import { recordConsent, defaultWording } from '../consent.js';
-import { directConfigured, directTurn, suggestChoices, summarizeTopic } from '../ai/direct.js';
+import { directConfigured, directTurn, suggestChoices, summarizeTopic, extractMemory } from '../ai/direct.js';
 import { isUnsure, recordUnanswered } from '../insights.js';
 import { voiceConfigured, transcribe } from '../ai/voice.js';
-import { bookingsEnabled, bookingAction, bookingText } from '../bookings.js';
+import { bookingsEnabled, bookingAction, bookingText, bookingFromText } from '../bookings.js';
 import { ownerCommand } from '../briefing.js';
 import { visionConfigured, describeForSearch } from '../ai/vision.js';
 import { difyAllowed } from '../ai/gate.js';
@@ -544,6 +545,7 @@ async function handleAction(ctx, id) {
     case 'menu': return ctx.reply(mainMenu(ctx));
     case 'wm': return runMenuOption(ctx, Number(arg));
     case 'lead': return leadAction(ctx, arg);
+    case 'reorder': return reorder(ctx, arg, { checkout: startCheckout });
     case 'say': return arg.trim() ? handleText(ctx, arg.slice(0, 200)) : ctx.reply(mainMenu(ctx)); // a choice the AI offered
     case 'open': { // website chat opened from the pop-up greeting: the greeting, then the menu as quick replies
       const m = mainMenu(ctx, openerFor(ctx.S, ctx.conv.data.page?.url));
@@ -552,8 +554,8 @@ async function handleAction(ctx, id) {
     case 'more': return ctx.reply(moreMenu());
     case 'browse': if (bookingsOnly(ctx)) return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx); return showCategories(ctx);
     case 'book': return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx);
-    case 'bstart': case 'bsvc': case 'bday': case 'btime': case 'bconfirm': case 'bcxl':
-      if (!bookingsEnabled(ctx.S) && cmd !== 'bcxl') return bookInfo(ctx);
+    case 'bstart': case 'bsvc': case 'bday': case 'btime': case 'bconfirm': case 'bcxl': case 'bdays': case 'bslot': case 'bmine': case 'bcal': case 'bresch':
+      if (!bookingsEnabled(ctx.S) && !['bcxl', 'bmine', 'bcal'].includes(cmd)) return bookInfo(ctx);
       return bookingAction(ctx, cmd, arg);
     case 'ask': return ctx.reply({ type: 'text', text: 'Sure, type your question and I\'ll answer from our information. 🙂' });
     case 'cat': return showCategory(ctx, arg);
@@ -640,6 +642,13 @@ async function handleText(ctx, raw) {
   const text = String(raw || '').trim();
   const t = norm(text);
   if (!t) return ctx.reply(mainMenu(ctx));
+  // "Hi! I'd like to continue my chat (ref ABC123)" – the website chat moving to WhatsApp
+  const continued = claimHandoff(ctx, text);
+  if (continued) { ctx.conv.data.greeted = true; ctx.conv.state = 'idle'; return ctx.reply(mainMenu(ctx, continued)); }
+  if (/^(forget me|forget (what you know|everything)( about me)?|delete my memory)[.!]?$/.test(t)) {
+    forgetMemory(ctx.tenant.id, ctx.conv.waId);
+    return ctx.reply({ type: 'text', text: "Done – I've forgotten what I'd remembered about you (likes, sizes and so on). To have all your data deleted, type *human* and our team will do it." });
+  }
 
   // State-driven input first
   if (LEAD_STATES.has(ctx.conv.state)) {
@@ -648,6 +657,12 @@ async function handleText(ctx, raw) {
   }
   if (ctx.conv.state === 'booking_name' && !GREETING.test(t) && !COMMANDS.has(t)) return bookingText(ctx, text);
   if (bookingsEnabled(ctx.S) && /^(book|booking|book now|make a booking|i want to book|i'?d like to book|reserve|book a (slot|table|session|appointment))[.!]?$/.test(t)) return bookingAction(ctx, 'bstart');
+  if (/^(my|see my|change my|check my|cancel my|reschedule( my)?) (booking|bookings|appointment|reservation)s?\b|^my bookings?$/.test(t)) return bookingAction(ctx, 'bmine');
+  // a day/time typed while choosing ("Friday afternoon"), or "book … next Tuesday at 2"
+  if (bookingsEnabled(ctx.S) && ((ctx.conv.data.booking && !ctx.conv.data.booking.time && 'service' in ctx.conv.data.booking) || /\b(book|booking|appointment|reserve|slot)\b/.test(t))) {
+    const r = bookingFromText(ctx, text);
+    if (r !== false) return r;
+  }
   if (ctx.conv.state === 'order_verify' && ctx.conv.data.orderVerify && !GREETING.test(t) && !COMMANDS.has(t)) return verifyOrder(ctx, text);
   if (ctx.conv.state === 'awaiting_address' && !GREETING.test(t) && !COMMANDS.has(t) && !/^(order status|track|remove \d+)/.test(t)) return setAddress(ctx, text);
   if (ctx.conv.state === 'awaiting_qty' && /^\d{1,2}$/.test(t)) return addPending(ctx, Number(t));
@@ -689,7 +704,10 @@ async function handleText(ctx, raw) {
     ctx.conv.data.greeted = true;
     ctx.conv.state = 'idle';
     const welcome = (ctx.S.business.welcomeMessage || 'Welcome!').replace('{{name}}', ctx.customer.name ? ` ${ctx.customer.name.split(' ')[0]}` : '');
-    return ctx.reply(mainMenu(ctx, first ? welcome : undefined));
+    ctx.reply(mainMenu(ctx, first ? welcome : undefined));
+    const again = reorderOffer(ctx); // returning customer: one tap to repeat the last order
+    if (again) ctx.reply(again);
+    return;
   }
   if (['cart', 'basket', 'my cart', 'view cart', 'bag'].includes(t)) return handleAction(ctx, 'cart');
   if (['checkout', 'check out', 'pay', 'order now', 'place order'].includes(t)) return handleAction(ctx, 'checkout');
@@ -964,6 +982,10 @@ async function askDirect(ctx, text) {
   // The tappable list should be the products the AI talked about: those it named (matched against what it was shown,
   // or looked up by the bolded names it wrote), else — only if it pointed to the list — the search results.
   const { text: plain, choices: offered } = extractChoices(out);
+  if (ctx.S.ai?.memory !== false && !/^qa:/.test(ctx.conv.waId)) {
+    ctx.conv.data.memTurns = (ctx.conv.data.memTurns || 0) + 1;
+    if (ctx.conv.data.memTurns % 4 === 2) extractMemory(ctx.tenant, ctx.conv.waId).then((f) => f?.length && rememberFacts(ctx.tenant.id, ctx.conv.waId, f)).catch(() => {});
+  }
   const named = await namedProducts(ctx, plain, products);
   const shown = named.length ? named : /view products/i.test(plain) || S_agent(ctx) ? products : [];
   const say = shown.length ? plain : plain.replace(/\n*\s*Tap \*?View products\*? below to order\s*👇?[.!\s]*$/i, '').trim();

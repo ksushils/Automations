@@ -64,5 +64,6 @@ export function systemStatus() {
     overdueJobs: one("SELECT COUNT(*) FROM scheduled WHERE done = 0 AND run_at < datetime('now', '-10 minutes')"),
     deadLetters: one("SELECT COUNT(*) FROM messages WHERE direction = 'in' AND processed = -1"),
     backups: listBackups().slice(0, 5),
+    offsiteBackup: (() => { try { return JSON.parse(getDb().prepare("SELECT value FROM kv WHERE key = 'backup:offsite'").get()?.value || 'null'); } catch { return null; } })(), // null = not set up yet
   };
 }
