@@ -92,7 +92,7 @@ test('the AI knows the page, asks one question with tappable choices, and a tapp
       let r = await post(base, t.id, { sessionId: sid, text: "I'm looking for a gift for my brother", page: { url: 'https://shop.test/collections/gifts', title: 'Gift ideas' } });
       const sys = llm.calls.at(-1).messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
       assert.match(sys, /The visitor is on this page of the website: "Gift ideas" \(https:\/\/shop\.test\/collections\/gifts\)/);
-      assert.match(sys, /ONE short question at a time/);
+      assert.match(sys, /ONE short question per reply/);
       const q = r.replies.find((x) => x.type === 'buttons');
       assert.match(q.text, /What's your budget\?/);
       assert.ok(!/CHOICES/.test(JSON.stringify(r.replies)), 'the marker never reaches the customer');
