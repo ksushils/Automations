@@ -224,7 +224,7 @@ async function showProduct(ctx, productId) {
   }
   ctx.reply({
     type: 'buttons',
-    text: p.image ? 'Would you like to add this to your cart?' : caption,
+    text: p.image ? `Would you like to add this to your ${siteCartFor(ctx) ? 'basket' : 'cart'}?` : caption,
     buttons: siteCartFor(ctx)
       ? [{ id: `v:${p.id}|${variants[0].id}`, title: '➕ Add to basket' }, ...(p.url ? [] : [{ id: 'browse', title: '🛍️ Browse' }])]
       : [{ id: `v:${p.id}|${variants[0].id}`, title: '➕ Add to cart' }, { id: 'browse', title: '🛍️ Browse' }, { id: 'cart', title: '🛒 View cart' }],
