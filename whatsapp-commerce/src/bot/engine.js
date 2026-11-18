@@ -1,6 +1,7 @@
 import { getStore } from '../stores/index.js';
 import { LEAD_STATES, leadAction, leadText, leadOffer, leadSettings, topicSummary } from '../leads.js';
 import { reorderOffer, reorder, claimHandoff, forgetMemory, rememberFacts } from '../continuity.js';
+import { siteCartFor, siteCartMessage } from '../siteCart.js';
 import { isAiPaused } from '../coexistence.js';
 import { difyChat } from '../dify/client.js';
 import { createSessionToken } from '../session.js';
@@ -223,7 +224,9 @@ async function showProduct(ctx, productId) {
   ctx.reply({
     type: 'buttons',
     text: p.image ? 'Would you like to add this to your cart?' : caption,
-    buttons: [{ id: `v:${p.id}|${variants[0].id}`, title: '➕ Add to cart' }, { id: 'browse', title: '🛍️ Browse' }, { id: 'cart', title: '🛒 View cart' }],
+    buttons: siteCartFor(ctx)
+      ? [{ id: `v:${p.id}|${variants[0].id}`, title: '➕ Add to basket' }, ...(p.url ? [] : [{ id: 'browse', title: '🛍️ Browse' }])]
+      : [{ id: `v:${p.id}|${variants[0].id}`, title: '➕ Add to cart' }, { id: 'browse', title: '🛍️ Browse' }, { id: 'cart', title: '🛒 View cart' }],
   });
 }
 
@@ -249,6 +252,15 @@ function addPending(ctx, qty) {
     if (qty + inCart > Number(pending.stock)) return ctx.reply({ type: 'text', text: `Sorry, we only have ${Math.max(0, Number(pending.stock) - inCart)} more of ${pending.title} in stock. Please pick a smaller quantity.` });
   }
   const { stock: _stock, ...item } = pending;
+  // on the shop's own Shopify / WooCommerce site: straight into the site's real basket
+  const site = siteCartFor(ctx);
+  const msg = site && siteCartMessage(ctx, site, item, qty);
+  if (msg) {
+    delete ctx.conv.data.pending;
+    ctx.conv.state = 'idle';
+    ctx.conv.data.siteCartAdds = (ctx.conv.data.siteCartAdds || 0) + 1;
+    return ctx.reply(msg);
+  }
   addToCart(ctx.conv.cart, { ...item, quantity: qty });
   delete ctx.conv.data.pending;
   ctx.conv.data.reminded = false;

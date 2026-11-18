@@ -99,6 +99,21 @@ export function webchatRouter() {
     res.json({ replies: sink, lastId });
   });
 
+  // The widget added (or failed to add) an item to the shop's own basket: note it in the chat for the inbox and reports
+  r.post('/chat/:tenantId/event', limiter, (req, res) => {
+    const t = getTenant(req.params.tenantId);
+    const sessionId = String(req.body?.sessionId || '');
+    if (!t?.active) return res.sendStatus(404);
+    if (!SESSION.test(sessionId)) return res.status(400).json({ error: 'invalid session' });
+    const ev = req.body || {};
+    if (ev.type !== 'site_cart') return res.status(400).json({ error: 'unknown event' });
+    const ok = ev.ok === true;
+    const title = String(ev.title || 'item').slice(0, 120), qty = Math.max(1, Math.min(99, Number(ev.quantity) || 1));
+    logMessage(t.id, visitorId(sessionId), 'in', { type: 'event', text: `[site basket: ${ok ? 'added' : 'could not add'} ${qty} × ${title}${ok && ev.itemCount ? ` – ${Number(ev.itemCount)} item(s) in basket` : ''}]`, channel: 'web', siteCart: { ok, title, qty, error: ok ? undefined : String(ev.error || '').slice(0, 200) } });
+    if (ok) bumpUsage(t.id, 'site_cart_adds');
+    res.json({ ok: true });
+  });
+
   // "Continue on WhatsApp": a one-use code that carries this chat (basket, page, what was said) across
   r.post('/chat/:tenantId/handoff', limiter, (req, res) => {
     const t = getTenant(req.params.tenantId);
@@ -189,6 +204,36 @@ function cal(c){var free={};c.days.forEach(function(x){free[x.ymd]=x.free});var 
       h+=free[k]?'<button data-a="'+esc(c.idPrefix+k)+'" data-l="'+esc(lab)+'" aria-label="'+esc(lab+', '+free[k]+' free')+'">'+dd+'</button>':'<span class="x" aria-hidden="true">'+dd+'</span>'}
     h+='</div></div>';cur=new Date(Date.UTC(y,mo+1,1,12))}
   return h}
+function siteAdd(m){
+  var b=add(esc(m.text),'a'),it=m.items[0];
+  var done=function(ok,count,err){
+    b.innerHTML=ok?'✅ Added '+esc(m.quantity+' × '+m.title)+' to your basket'+(count?' ('+count+' item'+(count>1?'s':'')+' in it)':'')+'.'+(err?'<br><small>'+esc(err)+'</small>':'')+'<div class="wc-c"><a href="'+esc(m.cartUrl)+'">🛒 View basket</a><a href="'+esc(m.checkoutUrl)+'">💳 Checkout</a></div>'
+      :'Sorry, I couldn\'t add it to the basket automatically. <div class="wc-c"><a href="'+esc(m.cartUrl)+'">🛒 Open the basket</a></div>';
+    fetch(C.api+'/event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,type:'site_cart',ok:ok,title:m.title,quantity:m.quantity,itemCount:count||0,error:err||''})}).catch(function(){});
+  };
+  var secs=function(S){if(!S)return;try{Object.keys(S).forEach(function(k){var el=d.getElementById(k)||d.getElementById('shopify-section-'+k);if(!el||!S[k])return;var tmp=d.createElement('div');tmp.innerHTML=S[k];var inner=tmp.querySelector('#'+k)||tmp.firstElementChild;if(inner&&k==='cart-icon-bubble')el.innerHTML=inner.innerHTML})}catch(e){}};
+  // Shopify's standard cart actions (2026 themes) refresh the drawer and count themselves
+  try{if(m.platform==='shopify'&&window.Shopify&&Shopify.actions&&typeof Shopify.actions.updateCart==='function'){m.std=1}}catch(e){}
+  var refresh=function(){try{if(m.std&&Shopify.actions.getCart)Shopify.actions.getCart()}catch(e){}['cart:refresh','cart:updated','cart:change'].forEach(function(n){try{d.dispatchEvent(new CustomEvent(n,{bubbles:true}))}catch(e){}});
+    try{if(window.jQuery){window.jQuery(d.body).trigger('wc_fragment_refresh')}}catch(e){}};
+  if(m.platform==='shopify'){
+    fetch('/cart/add.js',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({items:[{id:Number(it.id),quantity:it.quantity,properties:{_via_chat:'yes'}}],sections:'cart-icon-bubble,cart-drawer'})})
+    .then(function(r){return r.json().then(function(j){if(!r.ok){m.note=j.description||j.message||'';if(r.status!==422)throw new Error(m.note||('HTTP '+r.status))}else secs(j.sections);return j})})
+    .then(function(){return fetch('/cart/update.js',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({attributes:{'Chat assistant':'yes'}})}).catch(function(){})})
+    .then(function(){return fetch('/cart.js',{credentials:'same-origin'}).then(function(r){return r.json()})})
+    .then(function(c){var n=c&&c.item_count,line=(c&&c.items||[]).filter(function(x){return String(x.variant_id)===String(it.id)})[0];
+      // Shopify says 422 when there isn't enough stock but may still add what it has: trust the basket
+      if(!line){throw new Error(m.note||'not in basket')}
+      if(line.quantity<m.quantity){m.quantity=line.quantity}
+      d.querySelectorAll('[data-cart-count],.cart-count-bubble span[aria-hidden],.cart-count,.cart_count').forEach(function(el){if(n!=null)el.textContent=n});refresh();done(true,n,m.note)})
+    .catch(function(e){done(false,0,String(e&&e.message||e))});
+  }else{
+    var fd=new FormData();fd.append('product_id',it.id);fd.append('quantity',it.quantity);
+    fetch('/?wc-ajax=add_to_cart',{method:'POST',credentials:'same-origin',body:fd}).then(function(r){return r.json()})
+    .then(function(j){if(!j||j.error)throw new Error('not added');try{if(window.jQuery)window.jQuery(d.body).trigger('added_to_cart',[j.fragments,j.cart_hash])}catch(e){}refresh();done(true,0)})
+    .catch(function(e){done(false,0,String(e&&e.message||e))});
+  }
+}
 function render(m){
   if(!m)return;var h='',acts=[];
   if(m.type==='image')h=(m.url?'<img alt="" src="'+esc(m.url)+'">':'')+fmt(m.caption||'');
@@ -196,6 +241,7 @@ function render(m){
   else if(m.type==='list'&&m.calendar&&m.calendar.days&&m.calendar.days.length){h=fmt(m.text)+cal(m.calendar)}
   else if(m.type==='list'){h=fmt(m.text);acts=[].concat.apply([],m.sections.map(function(s){return s.rows.map(function(r){return '<button data-a="'+esc(r.id)+'" data-l="'+esc(r.title)+'" title="'+esc(r.description||'')+'">'+esc(r.title)+'</button>'})}))}
   else if(m.type==='cta'){h=fmt(m.text);acts=['<a href="'+esc(m.url)+'" target="_blank" rel="noopener">'+esc(m.buttonText||'Open')+' ↗</a>']}
+  else if(m.type==='site_cart'){siteAdd(m);return}
   else if(m.type==='template'||m.type==='flow')h=fmt(m.text||'');
   else h=fmt(m.text||'');
   if(!h&&!acts.length)return;
