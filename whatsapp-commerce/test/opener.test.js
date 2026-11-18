@@ -79,7 +79,7 @@ test('opening the chat from the pop-up: the page greeting with the menu as quick
 
 test('the AI knows the page, asks one question with tappable choices, and a tapped choice is answered as the customer\'s words', async () => {
   const llm = await fakeLlm((body) => {
-    const last = body.messages.at(-1).content;
+    const last = body.messages.filter((m) => m.role === 'user').at(-1).content;
     if (/under £50/i.test(last)) return 'Great – the *Classic Tee* is £15 and a lovely gift. Tap *View products* below to order 👇';
     return "Happy to help! What's your budget?\n[CHOICES: Under £50 | £50–£150 | Over £150]";
   });
@@ -99,7 +99,7 @@ test('the AI knows the page, asks one question with tappable choices, and a tapp
       assert.deepEqual(q.buttons.map((b) => b.title), ['Under £50', '£50–£150', 'Over £150']);
       r = await post(base, t.id, { sessionId: sid, actionId: q.buttons[0].id });
       const call = llm.calls.at(-1);
-      assert.equal(call.messages.at(-1).content, 'Under £50');
+      assert.equal(call.messages.filter((m) => m.role === 'user').at(-1).content, 'Under £50');
       assert.ok(call.messages.some((m) => m.role === 'assistant' && /budget/.test(m.content)), 'the AI remembers its question');
       assert.ok(!call.messages.some((m) => /\[say:/.test(m.content)));
       assert.match(JSON.stringify(r.replies), /Classic Tee/);

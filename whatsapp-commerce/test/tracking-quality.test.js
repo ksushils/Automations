@@ -34,7 +34,7 @@ test('answer check: replays real questions, grades answers, leaves no trace in c
   const llm = http.createServer((req, res) => {
     let raw = ''; req.on('data', (c) => (raw += c)); req.on('end', () => {
       const body = JSON.parse(raw);
-      const last = String(body.messages.at(-1).content);
+      const last = String(body.messages.filter((m) => m.role === 'user').at(-1).content);
       let content;
       if (/You check a shop assistant/.test(last)) content = /£3\.50/.test(last.split('Assistant:')[1] || '') ? '{"score": 5, "reason": "correct delivery price"}' : '{"score": 1, "reason": "made up"}';
       else content = /deliver/i.test(last) ? 'Delivery is £3.50 and takes 2 days.' : 'We are open 24/7 on the moon.';
