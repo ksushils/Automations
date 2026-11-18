@@ -207,7 +207,9 @@ export async function onboardFromWebsite(tenantId, url) {
       skipped.push({ path, reason: e.message });
     }
   }
-  return { site, store, imported, skipped: skipped.length };
+  // AI auto-setup: welcome menu, greetings and lead question from what we just read (never overwrites owner edits)
+  const auto = imported.length ? await import('./autoSetup.js').then(({ autoSetup }) => autoSetup(tenantId)).catch((e) => ({ applied: [], reason: e.message })) : null;
+  return { site, store, imported, skipped: skipped.length, autoSetup: auto };
 }
 
 // ---------- built-in keyword retrieval (fallback when AI is off/unavailable) ----------

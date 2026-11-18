@@ -92,7 +92,8 @@ async function buildDemo(tenantId, token, origin) {
   }
   if (!ok && !shopify) throw new Error("We couldn't read any pages from that website (it may block automated visits). Book a demo and we'll set it up by hand.");
 
-  setState(token, { step: 'Writing questions your customers ask' });
+  setState(token, { step: 'Writing your welcome menu and questions' });
+  const auto = import('./autoSetup.js').then(({ autoSetup }) => autoSetup(tenantId)).catch(() => null);
   let suggestions = [];
   try {
     const docs = listDocs(tenantId).slice(0, 10).map((d) => `- ${d.name}`).join('\n');
@@ -104,6 +105,7 @@ async function buildDemo(tenantId, token, origin) {
     suggestions = JSON.parse(raw.slice(raw.indexOf('['), raw.lastIndexOf(']') + 1)).filter((s) => typeof s === 'string').map((s) => s.slice(0, 80)).slice(0, 4);
   } catch {}
   if (suggestions.length < 2) suggestions = shopify ? ['How much is delivery?', 'Can I return an item?', 'What do you recommend under £50?', 'How long does delivery take?'] : ['What are your opening hours?', 'How much does it cost?', 'Where are you based?', 'How do I book?'];
+  await auto;
   setState(token, { status: 'ready', step: 'Ready', suggestions, tenantId });
 }
 

@@ -643,6 +643,12 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/google', requireTenant, (req, res) => { const G = req.tenant.settings.bookings?.google || {}; res.json({ configured: googleConfigured(), connected: calendarConnected(req.tenant), connectedAt: G.connectedAt || null, lastError: G.lastError || null, redirectUri: redirectUri() }); });
   r.post('/tenants/:tenantId/google/connect', requireTenant, requireOwner, (req, res) => { if (!googleConfigured()) return res.status(400).json({ error: 'Google Calendar is not set up on this server yet (Setup → step 5)' }); res.json({ url: authUrl(req.tenant.id) }); });
   r.post('/tenants/:tenantId/google/disconnect', requireTenant, requireOwner, (req, res) => { disconnectCalendar(req.tenant.id); res.json({ ok: true }); });
+  // AI auto-setup on demand ("Write it for me"): force rewrites parts the owner changed
+  r.post('/tenants/:tenantId/auto-setup', requireTenant, requireOwner, wrap(async (req, res) => {
+    const { autoSetup } = await import('../autoSetup.js');
+    const out = await autoSetup(req.tenant.id, { force: req.body?.force === true });
+    res.json({ ...out, tenant: (await import('../tenants.js')).getTenant(req.tenant.id) });
+  }));
   r.get('/tenants/:tenantId/leads', requireTenant, (req, res) => res.json({ leads: listChatLeads(req.tenant.id) }));
   r.patch('/tenants/:tenantId/leads/:id', requireTenant, (req, res) => { setLeadStatus(req.tenant.id, req.params.id, String(req.body?.status || '')); res.json({ ok: true }); });
   r.post('/tenants/:tenantId/conversations/:waId/resume', requireTenant, (req, res) => {

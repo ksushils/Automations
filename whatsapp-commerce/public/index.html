@@ -1311,7 +1311,7 @@ function welcomeMenuEditor() {
           ${(o.label || '').length > 20 && opts.length <= 3 ? '<div class="mute" style="font-size:12px">With 3 or fewer options WhatsApp shows only the first 20 characters.</div>' : ''}</div>`; }).join('')}
         <p>${opts.length < 10 ? '<button class="btn ghost" id="wmadd">+ Add option</button>' : '<span class="mute">10 options is the most WhatsApp allows.</span>'}
           ${opts.length ? '' : ' <button class="btn ghost" id="wmsug">Start from suggestions</button>'}</p>
-        <p><button class="btn" id="wmsave">Save menu</button> <span id="wmres" class="mute"></span></p></div>
+        <p><button class="btn" id="wmsave">Save menu</button> <button class="btn ghost" id="wmai" title="The AI writes the menu, the pop-up greeting and the lead question from your website">✨ Write it for me with AI</button> <span id="wmres" class="mute"></span></p>${s.autoSetup?.at ? `<p class="mute" style="font-size:13px">Set up by AI on ${esc(new Date(s.autoSetup.at).toLocaleDateString('en-GB'))}${s.autoSetup.applied?.length ? ': ' + esc(s.autoSetup.applied.join(', ')) : ''}. Change anything – the AI won't overwrite your edits unless you press the button again.</p>` : ''}</div>
       <div style="flex:1;min-width:240px"><label>Preview</label><div style="background:#efeae2;border-radius:12px;padding:12px;max-width:300px">
         <div style="background:#fff;border-radius:8px;padding:8px 10px;color:#111;white-space:pre-wrap">${esc(W.intro || 'How can we help?')}</div>
         ${preview.map((o) => `<div style="background:#fff;border-radius:8px;padding:8px;margin-top:4px;text-align:center;color:#0b6b38">${esc(String(o.label).slice(0, preview.length <= 3 ? 20 : 24))}</div>`).join('') || '<div class="mute" style="margin-top:6px">Add options to see them here.</div>'}</div></div></div></div>`;
@@ -1326,6 +1326,15 @@ function welcomeMenuEditor() {
     box.querySelectorAll('[data-wl],#wmintro').forEach((el) => (el.onchange = () => { sync(); draw(); }));
     if ($('#wmadd')) $('#wmadd').onclick = () => { sync(); W.options.push({ label: '', action: 'answer', value: '' }); draw(); };
     if ($('#wmsug')) $('#wmsug').onclick = () => { sync(); W.options = wmSuggestions(s); if (!W.intro) W.intro = 'Hi! What can we help you with today?'; draw(); };
+    $('#wmai').onclick = async () => {
+      if ((W.options || []).length && !confirm('Replace your welcome menu, pop-up greeting and lead question with new AI suggestions from your website?')) return;
+      $('#wmres').textContent = '✨ Reading your website and writing it… (about 10 seconds)';
+      try {
+        const r = await api(T('/auto-setup'), { method: 'POST', body: { force: true } });
+        if (!r.applied?.length) { $('#wmres').textContent = `Couldn't do it: ${r.reason || 'no answer from the AI'}. Add your website on the Knowledge tab first.`; return; }
+        S.tenant = r.tenant; toast(`Done: ${r.applied.join(', ')}`); settings();
+      } catch (e) { $('#wmres').textContent = e.message; }
+    };
     $('#wmsave').onclick = async () => {
       sync();
       const bad = W.options.find((o) => !o.label.trim() || (o.action === 'answer' && !String(o.value || '').trim()) || (o.action === 'link' && !/^https?:\/\/\S+$/.test(String(o.value || '').trim())));
