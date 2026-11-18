@@ -113,7 +113,7 @@ export async function directTurn(ctx, text) {
     ...history(ctx.tenant.id, ctx.conv.waId, text),
     { role: 'user', content: String(text).slice(0, 2000) },
     // small models follow the most recent instruction best: restate the reply format last
-    { role: 'system', content: 'Format check for this reply: at most ONE question. If you ask the customer to choose between a few options, the reply MUST end with a final line in the form [CHOICES: first option | second option | third option], using the 2–3 options you just offered, in your own words for this shop (under 20 characters each). No choices line if you are not asking them to choose.' },
+    { role: 'system', content: 'Format check for this reply: at most ONE question. Any options you offer must be things this shop actually sells or does, going by the shop data above – never a category it does not carry. If you ask the customer to choose between a few options, the reply MUST end with a final line in the form [CHOICES: first option | second option | third option], using the 2–3 options you just offered, in your own words for this shop (under 20 characters each). No choices line if you are not asking them to choose.' },
   ];
   const model = S.ai?.directModel || undefined;
   const temperature = Number(S.ai?.temperature ?? 0.4);
