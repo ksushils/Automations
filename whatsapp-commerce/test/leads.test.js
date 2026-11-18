@@ -70,7 +70,7 @@ test('menu topic: answers in the chat from the website, links to the page, then 
   assert.equal(cta.buttonText, 'Know more');
   assert.equal(new URL(cta.url).pathname.startsWith('/go/') || cta.url.startsWith('https://travel.test/visa'), true);
   const offer = r.replies.find((m) => m.type === 'buttons');
-  assert.match(offer.text, /help with visa help/i);
+  assert.match(offer.text, /Would you like our team to help you with this?/);
   assert.deepEqual(offer.buttons.map((b) => b.id), ['lead:email:Visa help', 'lead:call:Visa help', 'ask']);
 }));
 

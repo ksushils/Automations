@@ -105,7 +105,7 @@ async function runMenuOption(ctx, i) {
       const label = String(o.label).replace(/^[^\p{L}\p{N}]+/u, '').trim();
       const summary = await topicSummary(ctx, o, { ai: (l, u) => summarizeTopic(ctx, l, u) }).catch(() => null);
       ctx.reply({ type: 'cta', text: summary || o.description || o.label, buttonText: String(o.buttonText || (summary ? 'Know more' : 'Open')).slice(0, 20), url: v });
-      if (leadSettings(ctx.S).enabled && o.leadOffer !== false) return ctx.reply(leadOffer(ctx, label, `Would you like our team to help with ${label.toLowerCase()}?`));
+      if (leadSettings(ctx.S).enabled && o.leadOffer !== false) return ctx.reply(leadOffer(ctx, label, `Would you like our team to help you with this?`));
       return;
     }
     case 'ask': return v ? handleText(ctx, v) : handleAction(ctx, 'ask');
