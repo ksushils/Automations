@@ -69,6 +69,26 @@ const fill = (prompt, ctx) => prompt
  * One AI turn. Returns { answer, products } – products to show as a tappable list (assist mode, or what the
  * agent searched for). In agent mode tool calls (cart, checkout…) are executed for THIS customer only.
  */
+/**
+ * The reply ends with a question but the model gave no tap options: one tiny call suggests 2–3 short answers
+ * (or none for an open question). Never adds facts – only answers the customer might pick.
+ */
+export async function suggestChoices(ctx, reply) {
+  const q = String(reply || '').trim().slice(-400);
+  if (!/\?[\s\p{Extended_Pictographic}\uFE0F]*$/u.test(q)) return [];
+  try {
+    const res = await chatCompletion({
+      temperature: 0, maxTokens: 60, model: ctx.S.ai?.directModel || undefined,
+      messages: [{ role: 'user', content: `A shop assistant for ${ctx.S.business.name} just asked a customer:\n<<${q}>>\n\nIf the customer would usually answer by picking one of a few options (a type, a range, yes/no, an age group), give 2 or 3 short answers they could tap, each under 20 characters, as a JSON array of strings. Use the options the assistant mentioned if it mentioned any. If it is an open question (a name, an order number, a free description), reply []. JSON only.` }],
+    });
+    bumpUsage(ctx.tenant.id, 'ai_tokens', Number(res.usage?.total_tokens) || 0);
+    bumpUsage(ctx.tenant.id, 'ai_cost_micro', costMicro(res.usage));
+    const raw = String(res.choices?.[0]?.message?.content || '');
+    const arr = JSON.parse(raw.slice(raw.indexOf('['), raw.lastIndexOf(']') + 1));
+    return Array.isArray(arr) ? [...new Set(arr.map((x) => String(x).replace(/\s+/g, ' ').trim()).filter((x) => x && x.length <= 24))].slice(0, 3) : [];
+  } catch { return []; }
+}
+
 export async function directTurn(ctx, text) {
   const S = ctx.S;
   const agent = (S.ai?.mode || S.dify?.mode) === 'agent';

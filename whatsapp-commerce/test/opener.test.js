@@ -117,3 +117,25 @@ test('choices marker: parsed, capped at 3, stripped when malformed; the instruct
   assert.match(p, /\[CHOICES: answer one \| answer two \| answer three\]/);
   assert.match(p, /If they already said what they want, answer straight away/);
 });
+
+test('the model forgot the tap options on a question: a short follow-up call suggests them; open questions get none', async () => {
+  const llm = await fakeLlm((body) => {
+    const last = body.messages.filter((m) => m.role === 'user').at(-1).content;
+    if (/just asked a customer/.test(last)) return /How old/.test(last) ? '["Under 8", "8 to 12", "Teenager"]' : '[]';
+    if (/order number/i.test(last)) return 'Sure – what is your order number?';
+    return 'Lovely! How old is your son?';
+  });
+  const prev = { ...config };
+  Object.assign(config, { aiBaseUrl: llm.url, aiApiKey: 'sk-test', aiModel: 'test-model', embeddingsModel: '' });
+  try {
+    await withServer(async (base) => {
+      const t = makeTenant();
+      let r = await post(base, t.id, { sessionId: SID(), text: 'present for my son' });
+      const q = r.replies.find((x) => x.type === 'buttons');
+      assert.match(q.text, /How old is your son\?/);
+      assert.deepEqual(q.buttons.map((b) => b.title), ['Under 8', '8 to 12', 'Teenager']);
+      r = await post(base, t.id, { sessionId: SID(), text: 'I want to check my order number thing' });
+      assert.ok(!r.replies.some((x) => x.type === 'buttons' && /order number/.test(x.text)), 'open question: no buttons');
+    });
+  } finally { Object.assign(config, prev); llm.srv.close(); }
+});

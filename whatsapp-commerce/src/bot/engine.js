@@ -15,7 +15,7 @@ import { alert } from '../ops.js';
 import { emailShop } from '../email.js';
 import { searchKnowledge, topicOf, topicDoc } from '../knowledge.js';
 import { recordConsent, defaultWording } from '../consent.js';
-import { directConfigured, directTurn } from '../ai/direct.js';
+import { directConfigured, directTurn, suggestChoices } from '../ai/direct.js';
 import { isUnsure, recordUnanswered } from '../insights.js';
 import { voiceConfigured, transcribe } from '../ai/voice.js';
 import { bookingsEnabled, bookingAction, bookingText } from '../bookings.js';
@@ -945,10 +945,12 @@ async function askDirect(ctx, text) {
   }
   // The tappable list should be the products the AI talked about: those it named (matched against what it was shown,
   // or looked up by the bolded names it wrote), else — only if it pointed to the list — the search results.
-  const { text: plain, choices } = extractChoices(out);
+  const { text: plain, choices: offered } = extractChoices(out);
   const named = await namedProducts(ctx, plain, products);
   const shown = named.length ? named : /view products/i.test(plain) || S_agent(ctx) ? products : [];
   const say = shown.length ? plain : plain.replace(/\n*\s*Tap \*?View products\*? below to order\s*👇?[.!\s]*$/i, '').trim();
+  // the model forgot the tap options on a question: ask for them (not when products are shown or a person has taken over)
+  const choices = offered.length || shown.length || ctx.conv.humanHandover || ctx.S.ai?.suggestChoices === false ? offered : await suggestChoices(ctx, say);
   if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(productList(ctx, shown, say || 'Here are some products you might like:')); }
   else if (choices.length) ctx.reply(choiceButtons(say || 'Which is closest?', choices));
   else ctx.reply({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." });
