@@ -14,7 +14,7 @@ main{max-width:980px;margin:0 auto;padding:24px 16px}h1{font-size:28px;margin:0 
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
 .plan{cursor:pointer}.plan.on{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand)}.price{font-size:26px;font-weight:700}
 ul{padding-left:18px;margin:8px 0}label{display:block;font-size:13px;color:var(--mute);margin-top:12px}
-input{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:inherit}
+input,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:inherit}
 .chk{display:flex;gap:8px;align-items:center;color:var(--ink)}.chk input{width:auto}
 .btn{background:var(--brand);color:#fff;border:0;border-radius:10px;padding:12px 18px;font:inherit;font-weight:600;cursor:pointer;width:100%;margin-top:16px}
 .err{color:#c0392b}code{background:var(--bg);padding:4px 8px;border-radius:6px;word-break:break-all}
@@ -29,6 +29,7 @@ input{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;bac
     <form id="f">
       <label>Business name<input name="business" required autocomplete="organization"></label>
       <label>Email<input name="email" type="email" required autocomplete="email"></label>
+      <label>Type of business<select name="trade"><option value="">Choose (optional)</option></select></label>
       <label>Your website (optional – we'll import your products, policies and FAQs automatically)<input name="website" placeholder="yourshop.co.uk" autocomplete="url"></label>
       <label class="chk"><input type="checkbox" name="acceptTerms" required> I agree to the <a href="/legal/terms" target="_blank">Terms</a>, <a href="/legal/privacy" target="_blank">Privacy Policy</a> and <a href="/legal/dpa" target="_blank">Data Processing Agreement</a></label>
       <button class="btn" type="submit">Start free trial</button>
@@ -51,6 +52,8 @@ if (QS.get('website')) document.querySelector('[name=website]').value = QS.get('
 if (demoToken) document.querySelector('h1').textContent = 'Keep your assistant 🎉';
 fetch('/api/plans').then((r) => r.json()).then((d) => {
   document.getElementById('trial').textContent = `${d.trialDays}-day free trial${d.billing ? '' : ''}.`;
+  const sel = document.querySelector('[name=trade]');
+  if (sel && d.trades) { sel.innerHTML += d.trades.map((t) => `<option value="${t.key}">${t.emoji} ${t.label}</option>`).join(''); if (QS.get('trade')) sel.value = QS.get('trade'); }
   if (!d.signupEnabled) document.getElementById('f').innerHTML = '<p>Sign-up is currently closed – please contact us.</p>';
   const el = document.getElementById('plans');
   const draw = () => (el.innerHTML = Object.entries(d.plans).map(([k, p]) => `<div class="card plan ${k === plan ? 'on' : ''}" data-p="${k}"><b>${p.label}</b><div class="price">£${p.priceGbp}<span class="mute" style="font-size:14px;font-weight:400">/month</span></div><ul>${(FEATURES[k] || []).map((x) => `<li>${x}</li>`).join('')}</ul></div>`).join(''));

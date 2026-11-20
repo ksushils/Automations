@@ -80,7 +80,7 @@ export function openerFor(S, url) {
 }
 
 // ---------- the shop's own welcome menu (Settings → Welcome menu) ----------
-export const MENU_ACTIONS = ['answer', 'link', 'book', 'status', 'browse', 'ask', 'human', 'cart'];
+export const MENU_ACTIONS = ['answer', 'link', 'book', 'status', 'browse', 'ask', 'human', 'cart', 'callback'];
 export function menuOptions(S) {
   const W = S.welcomeMenu;
   if (!W?.enabled) return [];
@@ -110,6 +110,7 @@ async function runMenuOption(ctx, i) {
       return;
     }
     case 'ask': return v ? handleText(ctx, v) : handleAction(ctx, 'ask');
+    case 'callback': return leadAction(ctx, `call:${String(o.label).replace(/^[^\p{L}\p{N}]+/u, '').trim().slice(0, 60)}`); // "Get a quote" → the call-back request
     default: return handleAction(ctx, o.action); // book, status, browse, human, cart
   }
 }

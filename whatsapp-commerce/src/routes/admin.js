@@ -38,6 +38,7 @@ import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
 import { listChatLeads, setLeadStatus } from '../leads.js';
 import { sendHook, SHEETS_SCRIPT } from '../hooks.js';
+import { TRADES, tradeList, applyTrade } from '../trades.js';
 import { googleConfigured, calendarConnected, authUrl, disconnectCalendar, redirectUri } from '../gcal.js';
 import { resumeAi } from '../coexistence.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
@@ -114,7 +115,7 @@ export function adminRouter() {
     next();
   });
 
-  r.get('/plans', (req, res) => res.json({ plans: PLANS, storeTypes: STORE_TYPES, signupEnabled: config.signupEnabled, billing: billingConfigured(), trialDays: config.trialDays, productName: config.productName, supportEmail: config.supportEmail }));
+  r.get('/plans', (req, res) => res.json({ plans: PLANS, storeTypes: STORE_TYPES, signupEnabled: config.signupEnabled, billing: billingConfigured(), trialDays: config.trialDays, productName: config.productName, supportEmail: config.supportEmail, trades: tradeList() }));
   r.get('/meta/config', (req, res) => res.json({ enabled: embeddedSignupConfigured(), appId: config.metaAppId || null, configId: config.metaConfigId || null, graphVersion: config.graphVersion }));
 
   // ----- public self-serve sign-up -----
@@ -132,6 +133,7 @@ export function adminRouter() {
     const markFree = (id) => getDb().prepare("UPDATE tenants SET trial_ends_at = NULL, subscription_status = 'free' WHERE id = ?").run(id);
     if (claimed) {
       updateTenantMeta(claimed.tenant.id, { plan });
+      if (TRADES[req.body?.trade]) applyTrade(claimed.tenant.id, req.body.trade); // keeps the menu the demo already wrote
       if (free) markFree(claimed.tenant.id);
       const website = claimed.tenant.settings.business?.website;
       if (website) onboardFromWebsite(claimed.tenant.id, website).catch((e) => console.warn('[signup onboarding]', e.message)); // the rest of the site
@@ -140,6 +142,7 @@ export function adminRouter() {
       return res.status(201).json({ tenantId: claimed.tenant.id, adminKey: claimed.adminKey, checkoutUrl, trialDays: free ? 0 : config.trialDays, plan, fromDemo: true });
     }
     const { tenant, adminKey } = createTenant({ name, plan });
+    if (TRADES[req.body?.trade]) applyTrade(tenant.id, req.body.trade);
     getDb().prepare("UPDATE tenants SET owner_email = ?, trial_ends_at = datetime('now', ?), subscription_status = 'trialing' WHERE id = ?").run(email, `+${config.trialDays} days`, tenant.id);
     if (free) markFree(tenant.id);
     // Website given → detect the shop, connect its catalogue, import policy/FAQ pages; then build the AI chatbot
@@ -660,6 +663,12 @@ export function adminRouter() {
     const cols = [['created_at', 'Date'], ['kind', 'Wants'], ['topic', 'Topic'], ['name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['call_time', 'Best time'], ['message', 'Message'], ['summary', 'Chat summary'], ['page', 'Page'], ['channel', 'Channel'], ['marketing_opt_in', 'Offers by email'], ['status', 'Status']];
     const rows = listChatLeads(req.tenant.id, { limit: 10000 }).map((l) => cols.map(([k]) => cell(k === 'marketing_opt_in' ? (l[k] ? 'Yes' : 'No') : k === 'kind' ? (l[k] === 'call' ? 'Call back' : 'Details') : l[k])).join(','));
     res.type('text/csv').set('Content-Disposition', `attachment; filename="leads-${new Date().toISOString().slice(0, 10)}.csv"`).send('\ufeff' + [cols.map((c) => c[1]).join(','), ...rows].join('\r\n'));
+  });
+  r.get('/trades', (req, res) => res.json({ trades: tradeList() }));
+  r.post('/tenants/:tenantId/trade', requireTenant, requireOwner, (req, res) => {
+    const out = applyTrade(req.tenant.id, String(req.body?.trade || ''), { force: req.body?.force === true });
+    if (!out) return res.status(400).json({ error: 'Unknown business type' });
+    res.json({ ...out, tenant: view(getTenant(req.tenant.id)) });
   });
   r.get('/tenants/:tenantId/hooks/sheets-script', requireTenant, (req, res) => res.json({ script: SHEETS_SCRIPT }));
   r.post('/tenants/:tenantId/hooks/test', requireTenant, requireOwner, async (req, res) => {

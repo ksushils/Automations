@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { getDb } from './db.js';
 import { getTenant, updateTenantSettings } from './tenants.js';
 import { chatCompletion, directConfigured } from './ai/direct.js';
+import { TRADES, TRADE_KEYS, guessTrade } from './trades.js';
 
 /*
  * AI auto-setup: once the assistant has read a new shop's website, the AI writes the parts we used to set up by hand –
@@ -37,7 +38,7 @@ export async function draftSetup(tenant) {
   const bookings = !!S.bookings?.enabled;
   const r = await chatCompletion({
     temperature: 0.2, maxTokens: 900,
-    messages: [{ role: 'user', content: `You set up the website chat for a UK small business. Business: "${S.business?.name}". About: ${clip(S.ai?.about, 400) || '(not given)'}.${shop ? ' It sells products online.' : ' It takes enquiries and bookings (no online shop in the chat).'}${bookings ? ' Customers can book in the chat.' : ''}
+    messages: [{ role: 'user', content: `You set up the website chat for a UK small business. Business: "${S.business?.name}". About: ${clip(S.ai?.about, 400) || '(not given)'}.${TRADES[S.trade] ? ` Trade: ${TRADES[S.trade].label}; its customers usually ask: ${TRADES[S.trade].questions.slice(0, 6).join(' / ')}` : ''}${shop ? ' It sells products online.' : ' It takes enquiries and bookings (no online shop in the chat).'}${bookings ? ' Customers can book in the chat.' : ''}
 
 Pages we read from its website (number. title – path):
 ${pages.map((p, i) => `${i + 1}. ${p.name} – ${p.path}`).join('\n')}
@@ -45,6 +46,7 @@ ${pages.map((p, i) => `${i + 1}. ${p.name} – ${p.path}`).join('\n')}
 Reply with JSON only:
 {
  "businessType": one of "shop", "travel", "restaurant", "experiences", "services", "other",
+ "trade": the closest of ${TRADE_KEYS.map((k) => `"${k}" (${TRADES[k].label})`).join(', ')}, or null,
  "intro": the question above the menu, max 60 chars (e.g. "What can we help you with today?"),
  "greeting": the pop-up greeting, max 110 chars, friendly, ends with a question, with one emoji at the start,
  "options": 4 to 8 menu options, the most useful first, each {"label": max 22 chars starting with one fitting emoji, "action": "link" | "ask" | "book" | "browse" | "status", "page": page number for "link", "question": a customer question for "ask"},
@@ -89,6 +91,7 @@ export function buildSettings({ plan, pages, shop, bookings }) {
     greeting: clip(plan.greeting, 140) || null,
     pageGreetings,
     requirementQuestion: clip(plan.requirementQuestion, 200) || null,
+    trade: TRADES[plan.trade] ? plan.trade : null,
   };
 }
 
@@ -111,5 +114,8 @@ export async function autoSetup(tenantId, { force = false } = {}) {
   if (out.requirementQuestion && mine('requirementQuestion', S.leads?.requirementPrompt || null)) { patch.leads = { requirementPrompt: out.requirementQuestion }; sigs.requirementQuestion = sig(out.requirementQuestion); applied.push('lead question'); }
   patch.autoSetup = { at: new Date().toISOString(), businessType: out.businessType, applied, sigs };
   updateTenantSettings(tenantId, patch); // lists (menu options, page greetings) are replaced wholesale by the merge
-  return { applied, businessType: out.businessType, menu: out.welcomeMenu.options.map((o) => o.label) };
+  // no trade chosen yet: add the trade's AI rules and questions (the menu and greetings the AI just wrote are kept)
+  const trade = !S.trade && (out.trade || guessTrade(`${S.business?.name} ${S.ai?.about || ''}`));
+  if (trade) { updateTenantSettings(tenantId, { trade, ai: { tradeRules: TRADES[trade].instructions }, quality: { tradeQuestions: TRADES[trade].questions } }); }
+  return { applied, businessType: out.businessType, trade: trade || S.trade || null, menu: out.welcomeMenu.options.map((o) => o.label) };
 }

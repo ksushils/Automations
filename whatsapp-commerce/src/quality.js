@@ -25,7 +25,7 @@ export function questionsFor(tenant, limit = 20) {
       AND created_at > datetime('now', '-60 days') GROUP BY lower(json_extract(body, '$.text')) ORDER BY n DESC, last DESC LIMIT 400`).all(tenant.id);
   const real = rows.map((r) => String(r.q || '').trim()).filter((q) => q.length >= 10 && q.length <= 200 && !COMMAND.test(q) && !/^\[|\[order:|\[ref:/.test(q) && (/\?/.test(q) || /^(do|does|can|could|is|are|what|when|where|how|which|who|will|have|any)\b/i.test(q)));
   const out = [...new Set(real)].slice(0, limit);
-  for (const g of GENERIC) if (out.length < Math.min(8, limit)) out.push(g);
+  for (const g of [...(tenant.settings.quality?.tradeQuestions || []), ...GENERIC]) if (out.length < Math.min(8, limit) && !out.includes(g)) out.push(g);
   return out;
 }
 

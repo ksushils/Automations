@@ -117,9 +117,12 @@ export async function retrieve(tenantId, query, { k = 4 } = {}) {
   const ranked = new Map(); // chunk_id -> score (reciprocal rank fusion)
   const add = (id, rank) => ranked.set(id, (ranked.get(id) || 0) + 1 / (60 + rank));
   const fq = ftsQuery(query);
+  // "How much is X?": the passage with X's *price* (a fee table row) beats pages that only talk about X a lot.
+  const priceQ = /\b(how much|prices?|pricing|costs?|fees?|charges?|tariffs?|quote)\b|£/i.test(String(query));
   if (fq) {
-    const rows = d.prepare('SELECT chunk_id, bm25(knowledge_fts) AS s FROM knowledge_fts WHERE knowledge_fts MATCH ? AND tenant_id = ? ORDER BY s LIMIT 12').all(fq, tenantId);
-    rows.forEach((r, i) => add(Number(r.chunk_id), i));
+    const rows = d.prepare('SELECT chunk_id, text, bm25(knowledge_fts) AS s FROM knowledge_fts WHERE knowledge_fts MATCH ? AND tenant_id = ? ORDER BY s LIMIT ?').all(fq, tenantId, priceQ ? 40 : 12);
+    rows.slice(0, 12).forEach((r, i) => add(Number(r.chunk_id), i));
+    if (priceQ) rows.filter((r) => /£\s?\d|\d\s?(gbp|pounds?)\b/i.test(r.text)).slice(0, 3).forEach((r, i) => { add(Number(r.chunk_id), i); add(Number(r.chunk_id), i); });
   }
   if (embeddingsEnabled()) {
     try {

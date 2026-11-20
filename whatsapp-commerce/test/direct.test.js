@@ -207,3 +207,16 @@ test('knowledge retrieval: "hygienist" finds the fee guide that says "Hygiene" (
   const hits = await retrieve(t.id, 'how much is a hygienist appointment?', { k: 2 });
   assert.equal(hits[0]?.doc, 'Dental Treatment Fee Guide');
 });
+
+test('knowledge retrieval: a price question gets the fee table row, not the pages that talk about the treatment most', async () => {
+  const { indexDoc, retrieve } = await import('../src/ai/rag.js');
+  const { getDb } = await import('../src/db.js');
+  const t = makeTenant();
+  const d = getDb();
+  const add = (name, text) => { const id = d.prepare("INSERT INTO knowledge_docs (tenant_id, name, source, status, text) VALUES (?, ?, 'text', 'ready', ?)").run(t.id, name, text).lastInsertRowid; return indexDoc(d.prepare('SELECT * FROM knowledge_docs WHERE id = ?').get(id)); };
+  const intro = 'Our Fee Guide outlines the costs and an explanation of your record should you require it. Please ask our staff for more information about any treatment plan, payment options and finance. '.repeat(6);
+  await add('Dental Treatment Fee Guide', `${intro}\nHYGIENE\nDental Treatment | Private Fee\nDirect Access Dental Hygiene 30 minutes visit | £70\nExtended Hygiene 40 minutes visit | £90\nIMPLANTS\nSingle implant | £2,400`);
+  for (let i = 1; i <= 4; i++) await add(`Dental Hygiene ${i}`, `Dental hygiene appointment with our hygienist. The hygienist removes plaque. Book a hygiene appointment with a hygienist for healthy gums. Hygienist appointments help hygiene. `.repeat(3));
+  const hits = await retrieve(t.id, 'how much is a hygienist appointment?', { k: 4 });
+  assert.ok(hits.some((h) => /£70/.test(h.text)), 'the fee row is in what the AI sees');
+});

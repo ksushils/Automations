@@ -67,7 +67,7 @@ ${S.store?.type === 'none' ? '' : "- You can't add items to the basket yourself:
 
 Shop facts:
 ${facts.map((f) => '- ' + f).join('\n') || '- (none)'}
-${tenant.settings.dify?.datasetId ? '\nThe shop\'s knowledge base (policies, FAQs, guides) is searched automatically for every question – answer delivery, returns, warranty, sizing and opening-hours questions from it. If it doesn\'t cover something, say you\'ll check with the team.\n' : ''}${ai.faq ? `\nFAQ & policies (answer from these when relevant):\n${String(ai.faq).slice(0, 12000)}\n` : ''}${ai.instructions ? `\nExtra instructions from the shop owner:\n${String(ai.instructions).slice(0, 3000)}\n` : ''}`;
+${tenant.settings.dify?.datasetId ? '\nThe shop\'s knowledge base (policies, FAQs, guides) is searched automatically for every question – answer delivery, returns, warranty, sizing and opening-hours questions from it. If it doesn\'t cover something, say you\'ll check with the team.\n' : ''}${ai.faq ? `\nFAQ & policies (answer from these when relevant):\n${String(ai.faq).slice(0, 12000)}\n` : ''}${ai.tradeRules ? `\nRules for this kind of business:\n${String(ai.tradeRules).slice(0, 1500)}\n` : ''}${ai.instructions ? `\nExtra instructions from the shop owner:\n${String(ai.instructions).slice(0, 3000)}\n` : ''}`;
 }
 
 const input = (variable, label) => ({ 'text-input': { label, variable, required: false, max_length: 256, default: '' } });

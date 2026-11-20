@@ -1309,7 +1309,7 @@ async function grow() {
 }
 
 // ---------- welcome menu editor (Settings) ----------
-const WM_ACTIONS = [['answer', 'Reply with an answer', 'Type the answer'], ['link', 'Open a web page', 'https://…'], ['ask', 'Ask the AI a question', 'e.g. What are your delivery options? (empty = let them type)'], ['book', 'Start a booking', ''], ['status', 'Track my order', ''], ['browse', 'Browse products', ''], ['cart', 'Show the basket', ''], ['human', 'Talk to a person', '']];
+const WM_ACTIONS = [['answer', 'Reply with an answer', 'Type the answer'], ['link', 'Open a web page', 'https://…'], ['ask', 'Ask the AI a question', 'e.g. What are your delivery options? (empty = let them type)'], ['book', 'Start a booking', ''], ['status', 'Track my order', ''], ['browse', 'Browse products', ''], ['cart', 'Show the basket', ''], ['callback', 'Ask for a call back / quote', ''], ['human', 'Talk to a person', '']];
 function wmSuggestions(s) {
   if (s.store?.type === 'none') return [{ label: '📅 Book', action: 'book' }, { label: '💷 Prices', action: 'ask', value: 'What are your prices?' }, { label: '📍 Where are you?', action: 'ask', value: 'Where are you based and how do I get there?' }, { label: '🕒 Opening hours', action: 'ask', value: 'What are your opening hours?' }, { label: '🙋 Talk to a person', action: 'human' }];
   return [{ label: '🛍️ Browse products', action: 'browse' }, { label: '📦 Track my order', action: 'status' }, { label: '🚚 Delivery', action: 'ask', value: 'What are your delivery options and costs?' }, { label: '↩️ Returns', action: 'ask', value: 'What is your returns policy?' }, { label: '🙋 Talk to a person', action: 'human' }];
@@ -1323,7 +1323,11 @@ function welcomeMenuEditor() {
   const draw = () => {
     const opts = W.options;
     const preview = opts.filter((o) => o.label);
-    box.innerHTML = `<div class="card"><h2>📋 Welcome menu</h2>
+    box.innerHTML = `<div class="card"><h2>🏷️ Business type</h2>
+      <p class="mute">A ready-made start for your trade: the menu and greeting your customers expect, the right question for call-backs, safety rules for the AI (a dentist's assistant never diagnoses; a takeaway's never promises allergen-free) and the questions we check its answers on. Your prices, hours and policies still come from your own website.</p>
+      <div id="trgrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px"><span class="mute">Loading…</span></div>
+      <p id="trres" class="mute"></p></div>
+      <div class="card"><h2>📋 Welcome menu</h2>
       <p class="mute">The options customers see when they say hi or type <b>menu</b> – on WhatsApp and on your website chat. 1–3 options show as buttons, 4–10 as a list.</p>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="wmon" style="width:auto" ${W.enabled ? 'checked' : ''}> Use my own menu (off = the standard menu)</label>
       <div class="row" style="align-items:start"><div style="flex:2;min-width:300px">
@@ -1351,6 +1355,14 @@ function welcomeMenuEditor() {
     box.querySelectorAll('[data-wu]').forEach((el) => (el.onclick = () => { sync(); const i = Number(el.dataset.wu); [W.options[i - 1], W.options[i]] = [W.options[i], W.options[i - 1]]; draw(); }));
     box.querySelectorAll('[data-wl],#wmintro').forEach((el) => (el.onchange = () => { sync(); draw(); }));
     if ($('#wmadd')) $('#wmadd').onclick = () => { sync(); W.options.push({ label: '', action: 'answer', value: '' }); draw(); };
+    api('/trades').then(({ trades }) => {
+      const g = $('#trgrid'); if (!g) return;
+      g.innerHTML = trades.map((t) => `<button class="btn ${s.trade === t.key ? '' : 'ghost'}" data-trade="${t.key}" style="text-align:left;white-space:normal;height:auto;padding:10px"><b>${t.emoji} ${esc(t.label)}</b>${s.trade === t.key ? ' ✓' : ''}<div style="font-size:12px;opacity:.8;font-weight:400">${esc(t.blurb)}</div></button>`).join('');
+      g.querySelectorAll('[data-trade]').forEach((b) => (b.onclick = async () => {
+        const force = (W.options || []).length ? confirm('Also replace your welcome menu, pop-up greeting and lead question with this template? (Cancel keeps them and only adds the AI rules and questions.)') : false;
+        try { const r = await api(T('/trade'), { method: 'POST', body: { trade: b.dataset.trade, force } }); S.tenant = r.tenant; toast(`${r.label}: ${r.applied.join(', ')}`); settings(); } catch (e) { $('#trres').textContent = e.message; }
+      }));
+    }).catch(() => {});
     if ($('#wmsug')) $('#wmsug').onclick = () => { sync(); W.options = wmSuggestions(s); if (!W.intro) W.intro = 'Hi! What can we help you with today?'; draw(); };
     $('#wmai').onclick = async () => {
       if ((W.options || []).length && !confirm('Replace your welcome menu, pop-up greeting and lead question with new AI suggestions from your website?')) return;
