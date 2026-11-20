@@ -613,6 +613,13 @@ export function adminRouter() {
   }));
 
   // Conversations / inbox
+  // light check every few seconds from the dashboard: the newest customer message and how many chats wait for a person
+  r.get('/tenants/:tenantId/inbox/pulse', requireTenant, (req, res) => {
+    const d = getDb();
+    const lastIn = d.prepare("SELECT MAX(id) AS id FROM messages WHERE tenant_id = ? AND direction = 'in' AND wa_id NOT LIKE 'qa:%' AND COALESCE(json_extract(body, '$.simulated'), 0) = 0").get(req.tenant.id).id || 0;
+    const waiting = d.prepare('SELECT COUNT(*) AS n FROM conversations WHERE tenant_id = ? AND human_handover = 1').get(req.tenant.id).n;
+    res.json({ lastIn, waiting });
+  });
   r.get('/tenants/:tenantId/conversations', requireTenant, (req, res) => {
     const rows = getDb()
       .prepare(

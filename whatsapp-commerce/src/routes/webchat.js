@@ -248,6 +248,7 @@ export function webchatRouter() {
       opener: openerConfig(t),
       whatsapp: t.settings.business.whatsappNumber ? String(t.settings.business.whatsappNumber).replace(/\D/g, '') : null,
       upload: W.uploads !== false && !isDemo(t),
+      sound: W.sound !== false, // a soft ping when a reply arrives (the visitor can mute it)
       badge: PLANS[t.plan]?.badge ? { text: `Powered by ${config.productName}`, url: `${config.publicUrl}/?ref=chat-${encodeURIComponent(t.id)}` } : null,
     };
     res.send(WIDGET.replace('__CFG__', JSON.stringify(cfg).replace(/</g, '\\u003c')));
@@ -278,11 +279,13 @@ var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;f
 '.wc-f{display:flex;gap:6px;padding:8px;border-top:1px solid #e3e8e5;background:#fff}.wc-f input{flex:1;border:1px solid #d6ddd9;border-radius:10px;padding:9px;font:inherit}.wc-f button{border:0;background:'+C.color+';color:#fff;border-radius:10px;padding:0 14px;cursor:pointer;font:inherit}'+
 '.wc-cal{margin-top:8px}.wc-cal b{font-size:13px}.wc-g{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:4px;text-align:center;font-size:12px}.wc-g i{font-style:normal;color:#889}.wc-g button{border:1px solid '+C.color+';background:#fff;color:'+C.color+';border-radius:8px;padding:0;min-height:32px;cursor:pointer;font:inherit;font-weight:600}.wc-g button:hover{background:'+C.color+';color:#fff}.wc-g .x{color:#c8ced0;line-height:32px}'+
 '.wc-w{font-size:12px;text-align:center;padding:4px;color:#667}.wc-w a{color:inherit}.wc-t{align-self:flex-start;color:#889;font-size:12px}'+
+'.wc-snd{float:right;background:none;border:0;color:#fff;font-size:15px;cursor:pointer;opacity:.85;padding:4px 6px}'+
+'.wc-lf{display:flex;gap:5px;margin-top:8px}.wc-lf input{flex:1;min-width:0;border:1px solid #d6ddd9;border-radius:10px;padding:8px 9px;font:inherit;font-size:13px}.wc-lf button{border:0;background:'+C.color+';color:#fff;border-radius:10px;padding:0 11px;cursor:pointer;font:inherit;font-size:13px}'+
 '.wc-f .wc-up{background:#fff;color:'+C.color+';border:1px solid #d6ddd9;padding:0 10px;font-size:18px}'+
 '.wc.wc-in{position:relative;bottom:auto;left:auto;right:auto;z-index:auto;height:100%;min-height:360px}.wc-in .wc-p{position:relative;bottom:auto;left:auto;right:auto;width:100%;height:100%;display:flex;box-shadow:0 2px 12px rgba(0,0,0,.12)}.wc-in .wc-b,.wc-in .wc-x{display:none}';
 var st=d.createElement('style');st.textContent=css;d.head.appendChild(st);
 var w=d.createElement('div');w.className='wc';
-w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button><b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f">'+(C.upload?'<button type="button" class="wc-up" aria-label="Send a photo or PDF" title="Send a photo or PDF">📎</button><input type="file" class="wc-fi" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" hidden>':'')+'<input class="wc-in-t" placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.badge?'<div class="wc-w" style="font-size:11px;opacity:.75"><a class="wc-pb" target="_blank" rel="noopener"></a></div>':'')+(C.whatsapp?'<div class="wc-w">📱 <a class="wc-wa" target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Continue on WhatsApp</a> – your chat comes with you</div>':'')+'</div>'+(!EMB&&(C.launcher||C.opener)?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
+w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button>'+(C.sound?'<button class="wc-snd" aria-label="Sound on" title="Sound on/off">🔔</button>':'')+'<b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f">'+(C.upload?'<button type="button" class="wc-up" aria-label="Send a photo or PDF" title="Send a photo or PDF">📎</button><input type="file" class="wc-fi" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" hidden>':'')+'<input class="wc-in-t" placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.badge?'<div class="wc-w" style="font-size:11px;opacity:.75"><a class="wc-pb" target="_blank" rel="noopener"></a></div>':'')+(C.whatsapp?'<div class="wc-w">📱 <a class="wc-wa" target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Continue on WhatsApp</a> – your chat comes with you</div>':'')+'</div>'+(!EMB&&(C.launcher||C.opener)?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
 w.querySelector('.wc-h b').textContent=C.title;w.querySelector('.wc-h span').textContent=C.subtitle;
 var P=w.querySelector('.wc-p'),M=w.querySelector('.wc-m'),F=w.querySelector('form'),I=F.querySelector('.wc-in-t');
 function mark(k,v,ss){try{(ss?sessionStorage:localStorage).setItem(k,v)}catch(e){}}
@@ -315,6 +318,8 @@ function fillForm(m){var f=theForm(),F=m.fields||{},done=[];if(!f){add('I couldn
 var UTM=null;try{var q=new URLSearchParams(location.search),u={};['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid','fbclid'].forEach(function(k){if(q.get(k))u[k]=q.get(k).slice(0,80)});if(Object.keys(u).length)sessionStorage.setItem(K+'-utm',JSON.stringify(u));UTM=JSON.parse(sessionStorage.getItem(K+'-utm')||'null')}catch(e){}
 function esc(s){var e=d.createElement('div');e.textContent=s==null?'':String(s);return e.innerHTML}
 function fmt(s){return esc(s).replace(/\*([^*\n]+)\*/g,'<b>$1</b>').replace(/(^|\s)_([^_\n]+)_/g,'$1<i>$2</i>').replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')}
+var AC=null,MUTE=got(K+'-mute')==='1';
+function ping(){if(!C.sound||MUTE)return;try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();var t=AC.currentTime,o=AC.createOscillator(),g=AC.createGain();o.type='sine';o.frequency.setValueAtTime(880,t);o.frequency.setValueAtTime(1320,t+0.09);g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.12,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+0.3);o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+0.32)}catch(e){}}
 function add(html,cls){var b=d.createElement('div');b.className='wc-q '+cls;b.innerHTML=html;M.appendChild(b);M.scrollTop=M.scrollHeight;return b}
 function cal(c){var free={};c.days.forEach(function(x){free[x.ymd]=x.free});var keys=Object.keys(free).sort(),h='',p2=function(n){return (n<10?'0':'')+n};
   var f=new Date(keys[0]+'T12:00:00Z'),l=new Date(keys[keys.length-1]+'T12:00:00Z'),cur=new Date(Date.UTC(f.getUTCFullYear(),f.getUTCMonth(),1,12));
@@ -375,14 +380,16 @@ function send(body,label){
   var typing=add('…','a wc-t');busy++;
   if(body.text||(body.actionId&&body.actionId!=='open'))mark(K+'-chatted','1',1);
   fetch(C.api+'/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({sessionId:sid,page:pg(),utm:UTM||undefined},body))})
-  .then(function(r){return r.json()}).then(function(r){busy--;typing.remove();(r.replies||[]).forEach(render);if(r.lastId)last=Math.max(last,r.lastId)})
+  .then(function(r){return r.json()}).then(function(r){busy--;typing.remove();(r.replies||[]).forEach(render);if((r.replies||[]).length)ping();if(r.lastId)last=Math.max(last,r.lastId)})
   .catch(function(){busy--;typing.remove();add('Sorry – connection problem, please try again.','a')});
 }
-function poll(){if(busy)return;fetch(C.api+'/poll?sessionId='+sid+'&after='+last).then(function(r){return r.json()}).then(function(r){if(last&&r.messages)r.messages.forEach(render);last=Math.max(last,r.lastId||0)}).catch(function(){})}
+function poll(){if(busy)return;fetch(C.api+'/poll?sessionId='+sid+'&after='+last).then(function(r){return r.json()}).then(function(r){if(last&&r.messages&&r.messages.length){r.messages.forEach(render);ping()}last=Math.max(last,r.lastId||0)}).catch(function(){})}
 var PB=w.querySelector('.wc-pb');if(PB){PB.textContent=C.badge.text;PB.href=C.badge.url}
 var WA=w.querySelector('.wc-wa');if(WA)WA.onclick=function(e){e.preventDefault();var win=window.open('','_blank');fetch(C.api+'/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})}).then(function(r){return r.json()}).then(function(r){var u=r.url||WA.href;if(win)win.location=u;else location.href=u}).catch(function(){if(win)win.location=WA.href})};
 M.addEventListener('click',function(e){var hl=e.target.closest('button[data-hl]');if(hl){showSection(hl.dataset.hl);return}var b=e.target.closest('button[data-a]');if(b)send({actionId:b.dataset.a},b.dataset.l)});
 F.onsubmit=function(e){e.preventDefault();var v=I.value.trim();if(!v)return;I.value='';send({text:v},v)};
+var SND=w.querySelector('.wc-snd');function sndIcon(){if(SND){SND.textContent=MUTE?'🔕':'🔔';SND.setAttribute('aria-label',MUTE?'Sound off':'Sound on')}}sndIcon();
+if(SND)SND.onclick=function(){MUTE=!MUTE;mark(K+'-mute',MUTE?'1':'0');sndIcon();if(!MUTE)ping()};
 window.waChat={ask:function(q){if(!open)toggle();send({text:q},q)}};
 var UP=w.querySelector('.wc-up'),FI=w.querySelector('.wc-fi');
 if(UP&&FI){UP.onclick=function(){FI.click()};FI.onchange=function(){var f=FI.files&&FI.files[0];FI.value='';if(!f)return;
@@ -410,7 +417,8 @@ if(L&&O){
     var gap=O.freeDelivery?O.freeDelivery-CART.total:0;
     if(c.item_count&&gap>0){O.cartNudge='🚚 You\'re '+O.sym+gap.toFixed(2)+' away from free delivery. Want a suggestion to add?';O.chips=[{id:'say:Suggest something to add to my basket to reach free delivery',label:'💡 Suggest something'}].concat(O.chips).slice(0,3)}}).catch(function(){});
   var show=function(){if(shown||open||!L)return;shown=true;mark(K+'-shown','1',1);
-    L.querySelector('span').innerHTML='<b>'+esc(C.title)+'</b>'+esc(textFor())+(O.chips.length?'<div class="wc-lc">'+O.chips.slice(0,mobile?2:3).map(function(c){return '<button data-a="'+esc(c.id)+'" data-l="'+esc(c.label)+'">'+esc(c.label)+'</button>'}).join('')+'</div>':'')+'<button class="wc-lt" type="button">Or type your question</button>';
+    L.querySelector('span').innerHTML='<b>'+esc(C.title)+'</b>'+esc(textFor())+(O.chips.length?'<div class="wc-lc">'+O.chips.slice(0,mobile?2:3).map(function(c){return '<button data-a="'+esc(c.id)+'" data-l="'+esc(c.label)+'">'+esc(c.label)+'</button>'}).join('')+'</div>':'')+'<form class="wc-lf"><input placeholder="Type your question…" aria-label="Type your question" maxlength="500"><button type="submit">Send</button></form>';
+    var LF=L.querySelector('.wc-lf');LF.onsubmit=function(e){e.preventDefault();e.stopPropagation();var v=LF.querySelector('input').value.trim();if(!v)return;toggle({text:v},v)};LF.onclick=function(e){e.stopPropagation()};
     L.style.display='';};
   if(got(K+'-chatted',1)||got(K+'-closed',1)||got(K+'-shown',1)){L.remove();L=null}
   else{setTimeout(show,(mobile?O.mobileDelay:O.delay)*1000);

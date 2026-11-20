@@ -112,3 +112,19 @@ test('full-page chat link and the chat inside a page', () => withServer(async (b
   assert.doesNotThrow(() => new Function(js), 'the widget is valid JavaScript');
   assert.equal((await fetch(`${base}/c/nope`)).status, 404);
 }));
+
+test('sound: the chat pings on replies (visitor can mute), the pop-up has a text box, the dashboard gets a pulse', () => withServer(async (base) => {
+  const t = makeTenant();
+  const js = await (await fetch(`${base}/chat-widget/${t.id}.js`)).text();
+  assert.match(js, /"sound":true/);
+  assert.match(js, /wc-snd/);
+  assert.match(js, /class="wc-lf"/, 'text box in the pop-up greeting');
+  assert.doesNotThrow(() => new Function(js));
+  tenants.updateTenantSettings(t.id, { webchat: { sound: false } });
+  assert.match(await (await fetch(`${base}/chat-widget/${t.id}.js`)).text(), /"sound":false/);
+  let p = await (await admin(base, `/tenants/${t.id}/inbox/pulse`)).json();
+  assert.deepEqual(p, { lastIn: 0, waiting: 0 });
+  await fetch(`${base}/chat/${t.id}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'pulseSessionABCDEFGH1', text: 'hello' }) });
+  p = await (await admin(base, `/tenants/${t.id}/inbox/pulse`)).json();
+  assert.ok(p.lastIn > 0);
+}));

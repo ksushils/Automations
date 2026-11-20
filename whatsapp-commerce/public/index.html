@@ -127,7 +127,31 @@ $('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant',
 const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['leads', 'Leads'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
 const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'leads', 'orders', 'bookings', 'contacts']);
 const MAIN_TABS = new Set(['overview', 'analytics', 'inbox', 'leads', 'orders', 'simulator', 'ai', 'settings']);
+// New customer messages: a soft sound, the count in the browser tab, and the Inbox refreshes itself.
+const alerts = { last: null, timer: null, ac: null, title: document.title };
+function alertPing() {
+  if (store.get('wc_sound') === '0') return;
+  try { const ac = (alerts.ac ||= new (window.AudioContext || window.webkitAudioContext)()); const t = ac.currentTime; [0, 0.16].forEach((dt, i) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = i ? 1175 : 880; g.gain.setValueAtTime(0.0001, t + dt); g.gain.exponentialRampToValueAtTime(0.18, t + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.28); o.connect(g); g.connect(ac.destination); o.start(t + dt); o.stop(t + dt + 0.3); }); } catch {}
+}
+function startAlerts() {
+  if (alerts.timer || !S.tenant || S.super && !S.tenantId) return;
+  const tick = async () => {
+    const p = await api(T('/inbox/pulse')).catch(() => null);
+    if (!p) return;
+    if (alerts.last !== null && p.lastIn > alerts.last) {
+      alertPing();
+      if (document.hidden) document.title = `(${p.waiting || '•'}) ${alerts.title}`;
+      if (S.tab === 'inbox' && !document.querySelector('#rep:focus')) inbox(alerts.sel);
+      else toast('💬 New customer message – see the Inbox');
+    }
+    alerts.last = p.lastIn;
+  };
+  tick(); alerts.timer = setInterval(tick, 10000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = alerts.title; });
+}
+
 function render() {
+  startAlerts();
   const shopTabs = S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [];
   const showAll = store.get('wc_alltabs') === '1' || !MAIN_TABS.has(S.tab) && shopTabs.some(([k]) => k === S.tab);
   const setupLabel = S.setup ? `Setup ${S.setup.done === S.setup.total ? '✅' : `(${S.setup.done}/${S.setup.total})`}` : 'Setup';
@@ -469,10 +493,13 @@ async function simulator() {
 
 // ---------- inbox ----------
 async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
+  alerts.sel = sel;
   const [{ conversations: all }, { agents, me }] = await Promise.all([api(T('/conversations')), api(T('/agents')).catch(() => ({ agents: [], me: '' }))]);
   const conversations = all.filter((c) => filter === 'all' || (filter === 'mine' && c.assigned_to === me) || (filter === 'human' && c.human_handover) || (filter === 'unassigned' && !c.assigned_to));
+  setTimeout(() => { const cb = document.getElementById('isnd'); if (cb) cb.onchange = () => { store.set('wc_sound', cb.checked ? '1' : '0'); if (cb.checked) alertPing(); }; }, 0);
   const preview = (c) => { const b = c.last || {}; return esc((b.text || b.caption || b.type || '').slice(0, 60)); };
   $('#app').innerHTML = `<div class="split"><div class="card" style="max-height:600px;overflow:auto"><h2>Chats</h2>
+    <label style="display:flex;gap:6px;align-items:center;font-size:13px;margin-bottom:6px"><input type="checkbox" id="isnd" style="width:auto" ${store.get('wc_sound') === '0' ? '' : 'checked'}> 🔔 Sound for new messages</label>
     <select id="ifil" style="margin-bottom:8px">${[['all', 'All chats'], ['human', 'Needs a human'], ['mine', 'Assigned to me'], ['unassigned', 'Unassigned']].map(([k, l]) => `<option value="${k}" ${filter === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
     ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${pausedNow(c) ? '<span class="pill warn">⏸ Paused – owner replying</span>' : ''}${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}${c.assigned_to ? ` <span class="pill">👤 ${esc(c.assigned_to)}</span>` : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
     </div><div class="card" id="thread"><p class="mute">Select a chat</p></div></div>`;
