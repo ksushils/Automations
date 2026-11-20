@@ -4,7 +4,7 @@ import http from 'node:http';
 import { makeTenant, tenants, say, ids } from './helpers.js';
 import { createApp } from '../src/server.js';
 import { config } from '../src/config.js';
-import { htmlToText, searchKnowledge, addTextDoc, safeFetch, listDocs } from '../src/knowledge.js';
+import { htmlToText, searchKnowledge, addTextDoc, safeFetch, listDocs, footerFacts, rankPaths, pageLinks } from '../src/knowledge.js';
 import { getDb } from '../src/db.js';
 
 const listen = (srv) => new Promise((r) => srv.listen(0, () => r(`http://127.0.0.1:${srv.address().port}`)));
@@ -152,4 +152,26 @@ test('NEW SHOP JOURNEY: sign up with website → catalogue + knowledge base + AI
     Object.assign(config, prev);
     app.close(); shop.close(); dify.close();
   }
+});
+
+test('opening hours and contact details are kept from the footer; price table rows stay on one line', () => {
+  const html = `<html><head><title>Fees</title></head><body><main><h1>Fee guide</h1><table><tr><td><p>Hygiene 30 minutes visit</p></td><td><p>£70</p></td></tr><tr><td>Check-up</td><td>£50</td></tr></table></main>
+  <footer><nav><a href="/x">Menu</a></nav><h2>Opening Hours</h2><p>Monday 9.30am – 6.00pm<br>Tuesday 9.30am – 6.00pm<br>Saturday 10am – 4pm<br>Sunday – Closed</p><p>12 High Road, Harrow, HA2 0LH</p><p>Call 020 8123 4567</p><p>© 2026 Clinic. Cookie settings</p></footer></body></html>`;
+  const { text } = htmlToText(html);
+  assert.match(text, /Hygiene 30 minutes visit \| £70/);
+  assert.match(text, /Check-up \| £50/);
+  assert.match(text, /From the website footer[\s\S]*Saturday 10am – 4pm[\s\S]*Sunday – Closed/);
+  assert.match(text, /HA2 0LH/);
+  assert.match(text, /020 8123 4567/);
+  assert.ok(!/Cookie settings/.test(text), 'footer boilerplate still dropped');
+  assert.deepEqual(footerFacts('<p>no footer here</p>'), []);
+});
+
+test('pages customers ask about are read first; account, cookie and gallery pages last', () => {
+  const ranked = rankPaths(['/smile-gallery', '/my-account', '/cookie-policy', '/dental-implants', '/fee-guide', '/', '/contact', '/blog', '/category/news', '/faq']);
+  assert.equal(ranked[0], '/');
+  assert.deepEqual(ranked.slice(1, 4), ['/fee-guide', '/contact', '/faq']);
+  assert.ok(ranked.indexOf('/dental-implants') < ranked.indexOf('/smile-gallery'));
+  assert.ok(ranked.indexOf('/cookie-policy') > ranked.indexOf('/dental-implants'));
+  assert.deepEqual(pageLinks('<a href="/fee-guide/">Fees</a><a href="https://www.clinic.test/contact">C</a><a href="https://other.test/x">X</a><a href="/logo.png">L</a><a href="#top">T</a>', 'https://clinic.test'), ['/fee-guide', '/contact']);
 });

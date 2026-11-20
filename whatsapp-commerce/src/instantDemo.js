@@ -2,7 +2,7 @@ import express from 'express';
 import { config } from './config.js';
 import { getDb } from './db.js';
 import { createTenant, getTenant, listTenants, updateTenantSettings, deleteTenant, rotateKeys } from './tenants.js';
-import { detectWebsite, importUrl, sitemapPages, listDocs } from './knowledge.js';
+import { detectWebsite, importUrl, sitemapPages, listDocs, rankPaths, pageLinks, safeFetch } from './knowledge.js';
 import { chatCompletion, directConfigured } from './ai/direct.js';
 import { randomToken } from './crypto.js';
 import { rateLimit } from './routes/web.js';
@@ -30,7 +30,7 @@ export function demoTenantForToken(token) {
   return t && isDemo(t) ? t : null;
 }
 
-const SKIP = /\/(cart|checkout|account|login|register|search|wp-admin|wp-login|feed|tag|author)\b|\.(pdf|jpe?g|png|gif|zip|xml)$/i;
+const SKIP = /\/(cart|checkout|(my-)?account|login|register|search|wp-admin|wp-login|feed|tag|author|cookie[\w-]*)\b|\.(pdf|jpe?g|png|gif|zip|xml)$/i;
 
 /** Start a demo; the reading happens in the background (status is polled). Returns { token }. */
 export async function startDemo(rawUrl, { ip = '' } = {}) {
@@ -49,7 +49,7 @@ export async function startDemo(rawUrl, { ip = '' } = {}) {
   const { tenant } = createTenant({ name: u.hostname.replace(/^www\./, ''), plan: 'starter' });
   updateTenantSettings(tenant.id, {
     demo: { expiresAt: new Date(Date.now() + DEMO_HOURS * 3600000).toISOString(), url: u.origin, token, startedAt: new Date().toISOString() },
-    business: { website: u.origin },
+    business: { website: u.origin, supportHours: '' },
     store: { type: 'none' },
     knowledge: { autoRefresh: false },
     report: { monthlyEmail: false, unansweredEmail: false },
@@ -79,9 +79,12 @@ async function buildDemo(tenantId, token, origin) {
 
   const usual = shopify
     ? ['/', '/policies/shipping-policy', '/policies/refund-policy', '/pages/faq', '/pages/faqs', '/pages/about', '/pages/about-us', '/pages/contact']
-    : ['/', '/about', '/about-us', '/faq', '/faqs', '/delivery', '/shipping', '/returns', '/contact', '/services', '/prices', '/pricing'];
-  const fromMap = (await sitemapPages(site.origin, { limit: 30 }).catch(() => [])).map((x) => { try { return new URL(x).pathname; } catch { return null; } }).filter(Boolean);
-  const paths = [...new Set([...usual, ...fromMap])].filter((p) => !SKIP.test(p));
+    : ['/', '/about', '/about-us', '/faq', '/faqs', '/contact', '/prices', '/pricing', '/fees', '/fee-guide', '/price-list', '/services', '/delivery', '/returns'];
+  const fromMap = (await sitemapPages(site.origin, { limit: 60 }).catch(() => [])).map((x) => { try { return new URL(x).pathname; } catch { return null; } }).filter(Boolean);
+  const fromMenu = pageLinks((await safeFetch(site.origin).catch(() => null))?.body || '', site.origin);
+  // pages the site really links to come before guessed paths; then the ones customers ask about most (prices, contact...)
+  const known = rankPaths([...fromMenu, ...fromMap]);
+  const paths = [...new Set(['/', ...known.slice(0, 20), ...usual, ...known.slice(20)])].filter((p) => !SKIP.test(p));
   let ok = 0;
   const deadline = Date.now() + 40000;
   for (let i = 0; i < paths.length && ok < MAX_PAGES && Date.now() < deadline; i += 4) {

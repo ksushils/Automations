@@ -30,17 +30,17 @@ export function buildPrompt(tenant) {
     bookFact,
     (bookFact ? 'For anything else (other bookings, vouchers, quotes), ' : 'When someone wants to book, buy a voucher or get a quote, ') + 'give them the right page link from the shop\'s information' + (S.business.bookingUrl ? ` (bookings: ${S.business.bookingUrl})` : '') + ', or offer a person from the team.',
     'Prices, dates and availability: only quote what the shop\'s information says, and say dates and availability are confirmed when booking.',
-    S.business.supportHours && `Team support hours: ${S.business.supportHours}.`,
+    S.business.supportHours && `Team support hours (when a person replies in this chat, NOT the business's opening hours; for opening hours use only the shop's information, and if it doesn't say, offer to check): ${S.business.supportHours}.`,
   ].filter(Boolean) : ownCheckout ? [
     'Payment methods, delivery options and costs, and collection are chosen on the shop\'s own website checkout. Answer questions about them only from the shop\'s information (knowledge base); if it doesn\'t say, tell the customer they\'ll see the options at checkout, or offer to check with the team.',
-    S.business.supportHours && `Team support hours: ${S.business.supportHours}.`,
+    S.business.supportHours && `Team support hours (when a person replies in this chat, NOT the business's opening hours; for opening hours use only the shop's information, and if it doesn't say, offer to check): ${S.business.supportHours}.`,
   ].filter(Boolean) : [
     O.fulfilment?.length && `Fulfilment options: ${O.fulfilment.join(' and ')}.`,
     Number(O.deliveryFee) > 0 && `Delivery fee ${sym}${Number(O.deliveryFee).toFixed(2)}${Number(O.freeDeliveryOver) > 0 ? `, free over ${sym}${Number(O.freeDeliveryOver).toFixed(2)}` : ''}.`,
     Number(O.minOrder) > 0 && `Minimum order ${sym}${Number(O.minOrder).toFixed(2)}.`,
     O.pickupAddress && `Collection address: ${O.pickupAddress}.`,
     O.paymentMethods?.length && `Payment options: ${O.paymentMethods.map((m) => ({ payment_link: 'pay online by card', cod: 'cash on delivery/collection', bank_transfer: 'bank transfer' })[m] || m).join(', ')}.`,
-    S.business.supportHours && `Team support hours: ${S.business.supportHours}.`,
+    S.business.supportHours && `Team support hours (when a person replies in this chat, NOT the business's opening hours; for opening hours use only the shop's information, and if it doesn't say, offer to check): ${S.business.supportHours}.`,
   ].filter(Boolean);
 
   return `You are ${ai.assistantName || 'the shopping assistant'} for {{store_name}}, chatting with {{customer_name}} on WhatsApp. Prices are in {{currency}}.

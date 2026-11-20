@@ -85,13 +85,55 @@ export function htmlToText(html) {
   const text = main
     .replace(/<(script|style|noscript|svg|template|iframe)[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<(nav|footer|header|form|aside)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<tr\b[\s\S]*?<\/tr>/gi, (row) => row.replace(/\s+/g, ' ').replace(/<\/t[dh]>/gi, ' | ').replace(/<br\s*\/?>|<\/(p|div|h[1-6]|li)>/gi, ' ') + '\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|li|h[1-6]|tr|section|article|dd|dt)>/gi, '\n')
     .replace(/<li[^>]*>/gi, '• ')
     .replace(/<[^>]+>/g, ' ')
 
-    .split('\n').map((l) => decodeEntities(l).replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n');
-  return { title, text };
+    .split('\n').map((l) => decodeEntities(l).replace(/[ \t]+/g, ' ').trim().replace(/^(\|\s*)+|(\s*\|)+$/g, '').replace(/(\s*\|)+\s*\|/g, ' |')).filter(Boolean).join('\n');
+  const facts = footerFacts(html).filter((l) => !text.includes(l));
+  return { title, text: facts.length ? `${text}\n\nFrom the website footer (opening hours and contact details):\n${facts.join('\n')}` : text };
+}
+
+const DAY = /\b(mon|tues?|wed(nes)?|thu(rs)?|fri|sat(ur)?|sun)(day|s|\.)?\b/i;
+const TIME = /\b\d{1,2}([:.]\d{2})?\s*(am|pm)\b|\b\d{1,2}[:.]\d{2}\b|\bclosed\b|\b24\s*hours\b/i;
+/** Opening hours, phone numbers, addresses and emails from the page footer (kept short; boilerplate otherwise dropped). */
+export function footerFacts(html) {
+  const foot = [...String(html).matchAll(/<footer[\s\S]*?<\/footer>/gi)].map((m) => m[0]).join('\n');
+  if (!foot) return [];
+  const lines = foot
+    .replace(/<(script|style|noscript|svg|template|iframe|form)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h[1-6]|tr|td|th|dd|dt|span)>/gi, '\n').replace(/<[^>]+>/g, ' ')
+    .split('\n').map((l) => decodeEntities(l).replace(/[ \t]+/g, ' ').trim()).filter((l) => l.length >= 3 && l.length <= 160);
+  const keep = lines.filter((l) => (DAY.test(l) && TIME.test(l)) || /opening hours|open(ing)? times|^hours\b/i.test(l)
+    || /(\+44|\b0)\s?\d{2,4}[\s-]?\d{3,4}[\s-]?\d{3,4}\b/.test(l) || /\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b/.test(l) || /\b[\w.+-]+@[\w-]+\.[\w.]+\b/.test(l));
+  return [...new Set(keep)].slice(0, 20);
+}
+
+/** Rank a site's page paths so the ones customers ask about (prices, services, hours, FAQ, contact) are read first. */
+export function rankPaths(paths) {
+  const score = (p) => {
+    const s = p.toLowerCase();
+    if (s === '/' || s === '') return 100;
+    let n = 0;
+    if (/\b(fees?|prices?|pricing|costs?|tariffs?|rates|menus?|packages?|plans)\b/.test(s)) n += 50;
+    if (/\b(faqs?|frequently|help|contact(-us)?|opening|hours|find-us|locations?|visit)\b/.test(s)) n += 40;
+    if (/\b(about|delivery|shipping|returns?|refunds?|book(ing)?|appointments?|emergency|treatments?|services?|finance)\b/.test(s)) n += 25;
+    if (/gallery|blog|news|careers|jobs|cookie|privacy|terms|gdpr|policy|policies|compliance|accessibility|sitemap|feedback|questionnaire|my-account|login|testimonial|review|category|tag/.test(s)) n -= 40;
+    return n - s.split('/').filter(Boolean).length * 3;
+  };
+  return [...new Set(paths)].map((p, i) => ({ p, i, s: score(p) })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.p);
+}
+
+/** Same-site page links from a page's HTML (its menu and footer), as paths. */
+export function pageLinks(html, origin) {
+  const host = new URL(origin).host.replace(/^www\./, '');
+  const out = [];
+  for (const m of String(html).matchAll(/<a\b[^>]*href=["']([^"'#]+)["']/gi)) {
+    try { const u = new URL(decodeEntities(m[1]), origin); if (/^https?:$/.test(u.protocol) && u.host.replace(/^www\./, '') === host && u.pathname.split('/').filter(Boolean).length <= 2 && !/\.(jpe?g|png|gif|pdf|zip|xml|css|js)$|\/(feed|wp-|cart|checkout)/i.test(u.pathname)) out.push(u.pathname.replace(/(.)\/$/, '$1')); } catch {}
+  }
+  return [...new Set(out)];
 }
 
 function isPrivateIp(ip) {
@@ -175,7 +217,10 @@ export async function sitemapPages(origin, { limit = 25, catalogue = false } = {
   } else if (urls.some((u) => /\.xml(\?|$)/.test(u))) return []; // an index of sitemaps we can't classify: skip
   const host = new URL(origin).host;
   const skip = catalogue ? /\/(cart|account|checkout|tags?|blogs?\/[^/]+\/.+|search)(\/|$)|opt-out|unsubscribe|\.(jpg|png|pdf|xml)$/i : /\/(products?|collections?|shop|cart|account|checkout|tags?|category|categories|blogs?\/[^/]+\/.+|search)(\/|$)|opt-out|unsubscribe|\.(jpg|png|pdf|xml)$/i;
-  return [...new Set(urls)].filter((u) => { try { const x = new URL(u); return x.host === host && !skip.test(x.pathname) && x.pathname.split('/').filter(Boolean).length <= 2; } catch { return false; } }).slice(0, limit);
+  const ok = [...new Set(urls)].filter((u) => { try { const x = new URL(u); return x.host === host && !skip.test(x.pathname) && x.pathname.split('/').filter(Boolean).length <= 2; } catch { return false; } });
+  if (catalogue) return ok.slice(0, limit);
+  const byPath = new Map(ok.map((u) => [new URL(u).pathname, u]));
+  return rankPaths([...byPath.keys()]).map((p) => byPath.get(p)).slice(0, limit);
 }
 
 export async function onboardFromWebsite(tenantId, url) {
