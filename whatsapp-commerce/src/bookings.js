@@ -2,6 +2,7 @@ import { getDb } from './db.js';
 import { getTenant, listTenants } from './tenants.js';
 import { createSender, notify } from './whatsapp/cloudApi.js';
 import { emailShop } from './email.js';
+import { sendHook } from './hooks.js';
 import { createCheckoutSession } from './payments/stripe.js';
 import { config } from './config.js';
 import { createHmac } from 'node:crypto';
@@ -335,6 +336,8 @@ async function customerCancel(ctx, id) {
 function alertTeam(tenant, b, what) {
   const text = `📅 Booking ${what}\n${b.service ? `${b.service}\n` : ''}${whenText(b)}\n${b.name || ''} (+${String(b.wa_id).replace(/^web:.*/, 'website chat')})${b.deposit ? `\nDeposit: ${money(b.deposit, sym(tenant.settings))}` : ''}`;
   emailShop(tenant, `Booking ${what.toLowerCase()}: ${whenText(b)}`, text, { button: 'Open Bookings' }).catch(() => {});
+  const ev = /cancel/i.test(what) ? 'booking.cancelled' : /^confirmed –/.test(what) ? 'booking.confirmed' : 'booking.new';
+  sendHook(tenant, ev, { id: b.id, service: b.service || '', when: whenText(b), day: b.day, time: b.time, name: b.name || '', phone: String(b.wa_id).startsWith('web:') ? '' : `+${b.wa_id}`, notes: [what, b.notes].filter(Boolean).join(' – '), status: b.status }).catch(() => {});
   const send = createSender(tenant);
   const tpl = tenant.settings.notifications?.templates?.staffAlert;
   for (const s of tenant.settings.notifications?.staffWaIds || []) {

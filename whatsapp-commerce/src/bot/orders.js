@@ -7,6 +7,7 @@ import { emailShop } from '../email.js';
 import { randomToken } from '../crypto.js';
 import { createCheckoutSession } from '../payments/stripe.js';
 import { toPlainText, notify } from '../whatsapp/cloudApi.js';
+import { sendHook } from '../hooks.js';
 
 const PAYMENT_LABELS = { payment_link: 'Pay online', cod: 'Cash on delivery/collection', bank_transfer: 'Bank transfer' };
 export const paymentLabel = (m) => PAYMENT_LABELS[m] || m;
@@ -154,11 +155,7 @@ export async function notifyStaff(tenant, order, send, { lowStock = [], text: cu
   }
   const subject = event === 'order.paid' ? `Paid: order ${order.store_order_name} (${money(order.subtotal, sym)})` : `New order ${order.store_order_name}: ${money(order.subtotal, sym)}`;
   jobs.push(emailShop(tenant, subject, text, { button: 'See the order' }).catch((e) => console.error('[notify email]', e.message)));
-  if (S.notifications?.webhookUrl) {
-    jobs.push(
-      fetch(S.notifications.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event, tenant: tenant.id, order }), signal: AbortSignal.timeout(10000) }).catch((e) => console.error('[notify webhook]', e.message)),
-    );
-  }
+  jobs.push(sendHook(tenant, event, order)); // webhook (Zapier / Make / n8n) and Google Sheet, when set
   await Promise.all(jobs);
 }
 

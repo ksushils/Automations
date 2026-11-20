@@ -1,4 +1,8 @@
 import express from 'express';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
 import { getTenant, bumpUsage, withinLimit, PLANS } from '../tenants.js';
 import { getDb, json } from '../db.js';
@@ -25,6 +29,31 @@ function cors(req, res, next) {
 }
 
 const visitorId = (sessionId) => `web:${sessionId}`;
+
+// Files visitors send in the website chat (photos and PDFs): kept beside the database, unguessable names, 90 days.
+export const FILE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'application/pdf': 'pdf' };
+const MIME = Object.fromEntries(Object.entries(FILE_TYPES).map(([m, e]) => [e, m]));
+const MAGIC = {
+  jpg: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  png: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  webp: (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
+  gif: (b) => /^GIF8[79]a$/.test(b.subarray(0, 6).toString('latin1')),
+  pdf: (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
+};
+export const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const FILES_PER_DAY = 10;
+const KEEP_DAYS = 90;
+export function chatFilesDir() {
+  return config.databasePath === ':memory:' ? path.join(os.tmpdir(), 'wa-chat-files') : path.join(path.dirname(path.resolve(config.databasePath)), 'chat-files');
+}
+function pruneFiles(dir) {
+  try { for (const f of fs.readdirSync(dir)) { const p = path.join(dir, f); if (Date.now() - fs.statSync(p).mtimeMs > KEEP_DAYS * 86400000) fs.unlinkSync(p); } } catch {}
+}
+const chatPageHtml = (t) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>Chat with ${escHtml(t.settings.webchat?.title || t.settings.business.name)}</title>
+<style>html,body{margin:0;height:100%;background:#eef1f0}#chat{height:100vh;height:100dvh;max-width:720px;margin:0 auto}</style></head>
+<body><div id="chat"></div><script src="${config.publicUrl}/chat-widget/${encodeURIComponent(t.id)}.js" data-embed="#chat" data-page="1"></script></body></html>`;
+const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 /** Campaign tags from the page the visitor landed on (utm_*, gclid, fbclid) – kept for lead attribution. */
 export function cleanUtm(u) {
@@ -136,6 +165,59 @@ export function webchatRouter() {
     res.json({ code, url: `https://wa.me/${num}?text=${encodeURIComponent(text)}` });
   });
 
+  // A photo or PDF from the visitor (sent as the raw file): saved, shown in the Inbox, and the team is asked to look.
+  r.post('/chat/:tenantId/upload', limiter, express.raw({ type: () => true, limit: MAX_FILE_BYTES }), async (req, res) => {
+    const t = getTenant(req.params.tenantId);
+    if (!t?.active || t.settings.webchat?.enabled === false || t.settings.webchat?.uploads === false) return res.status(404).json({ error: 'Sending files is not available here' });
+    const sessionId = String(req.query.sessionId || '');
+    if (!SESSION.test(sessionId)) return res.status(400).json({ error: 'invalid session' });
+    if (isDemo(t)) return res.status(403).json({ error: "Sending files isn't part of the demo." });
+    const mime = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    const ext = FILE_TYPES[mime];
+    const buf = Buffer.isBuffer(req.body) ? req.body : null;
+    if (!ext || !buf?.length || !MAGIC[ext](buf)) return res.status(400).json({ error: 'Please send a photo (JPG, PNG, WebP or GIF) or a PDF, up to 5 MB.' });
+    const waId = visitorId(sessionId);
+    const today = getDb().prepare("SELECT COUNT(*) AS n FROM messages WHERE tenant_id = ? AND wa_id = ? AND type = 'file' AND created_at > datetime('now', '-1 day')").get(t.id, waId).n;
+    if (today >= FILES_PER_DAY) return res.status(429).json({ error: "That's the most files we can take today – please email them to us instead." });
+    if (!withinLimit(t, 'inbound')) return res.json({ replies: [{ type: 'text', text: `Thanks! The ${t.settings.business.name} team will get back to you soon.` }] });
+    const name = String(req.query.name || `file.${ext}`).replace(/[\u0000-\u001f<>"\\/]+/g, ' ').trim().slice(0, 80) || `file.${ext}`;
+    const dir = path.join(chatFilesDir(), t.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = `${randomBytes(16).toString('hex')}.${ext}`;
+    fs.writeFileSync(path.join(dir, file), buf);
+    if (Math.random() < 0.05) pruneFiles(dir);
+    const fileUrl = `${config.publicUrl}/chat-files/${encodeURIComponent(t.id)}/${file}`;
+    logMessage(t.id, waId, 'in', { type: 'file', text: `📎 [${ext === 'pdf' ? 'PDF' : 'photo'}: ${name}]`, channel: 'web', fileUrl, fileName: name, mime });
+    bumpUsage(t.id, 'inbound');
+    const sink = [{ type: 'text', text: `📎 Thanks – we've got *${name}*.` }];
+    const conv = getDb().prepare('SELECT human_handover FROM conversations WHERE tenant_id = ? AND wa_id = ?').get(t.id, waId);
+    if (!conv?.human_handover) {
+      // ask the team to take a look (the usual hand-over: Inbox, email and staff WhatsApp alerts)
+      const toVisitor = createSender(t, { sink });
+      const real = createSender(t);
+      await enqueue(`${t.id}:${waId}`, () => handleInbound(t, { waId, kind: 'action', id: 'human', text: '' }, (to, m) => (to === waId ? toVisitor(to, m) : real(to, m))));
+    } else sink.push({ type: 'text', text: 'Our team will take a look and reply here.' });
+    const lastId = getDb().prepare('SELECT MAX(id) AS id FROM messages WHERE tenant_id = ? AND wa_id = ?').get(t.id, waId).id || 0;
+    res.json({ replies: sink, lastId });
+  });
+
+  r.get('/chat-files/:tenantId/:file', (req, res) => {
+    const m = String(req.params.file).match(/^([a-f0-9]{32})\.(jpg|png|webp|gif|pdf)$/);
+    if (!m || !/^[\w-]+$/.test(req.params.tenantId)) return res.sendStatus(404);
+    const p = path.join(chatFilesDir(), req.params.tenantId, req.params.file);
+    if (!fs.existsSync(p)) return res.sendStatus(404);
+    res.set({ 'Content-Type': MIME[m[2]], 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, max-age=86400', 'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'", 'X-Robots-Tag': 'noindex' });
+    if (m[2] === 'pdf') res.set('Content-Disposition', `inline; filename="file.pdf"`);
+    fs.createReadStream(p).pipe(res);
+  });
+
+  // A full-page chat with its own link (emails, social bios, QR codes, ads)
+  r.get('/c/:tenantId', (req, res) => {
+    const t = getTenant(req.params.tenantId);
+    if (!t?.active || t.settings.webchat?.enabled === false) return res.status(404).send('This chat is not available.');
+    res.type('html').send(chatPageHtml(t));
+  });
+
   // New messages for the visitor (staff replies from the inbox, reminders)
   r.get('/chat/:tenantId/poll', limiter, (req, res) => {
     const t = getTenant(req.params.tenantId);
@@ -165,6 +247,7 @@ export function webchatRouter() {
       launcher: String(W.launcherText ?? DEFAULT_LAUNCHER).slice(0, 120), // static speech bubble beside the button when the pop-up greeting is off; '' hides it
       opener: openerConfig(t),
       whatsapp: t.settings.business.whatsappNumber ? String(t.settings.business.whatsappNumber).replace(/\D/g, '') : null,
+      upload: W.uploads !== false && !isDemo(t),
       badge: PLANS[t.plan]?.badge ? { text: `Powered by ${config.productName}`, url: `${config.publicUrl}/?ref=chat-${encodeURIComponent(t.id)}` } : null,
     };
     res.send(WIDGET.replace('__CFG__', JSON.stringify(cfg).replace(/</g, '\\u003c')));
@@ -177,6 +260,7 @@ export const DEFAULT_LAUNCHER = "Hello! I'm the chat assistant. Talk to me anyti
 const WIDGET = String.raw`(function(){
 if(window.__waChat)return;window.__waChat=1;
 var C=__CFG__,d=document,K='wachat-'+C.tenant,sid,last=0,open=false,polling,busy=0;
+var CS=d.currentScript,EMB=null;try{var sel=CS&&CS.getAttribute('data-embed');if(sel)EMB=d.querySelector(sel)}catch(e){}
 try{sid=localStorage.getItem(K)}catch(e){}
 if(!sid){sid=(crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()).replace(/[^A-Za-z0-9]/g,'').slice(0,32);try{localStorage.setItem(K,sid)}catch(e){}}
 var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#111}'+
@@ -193,12 +277,14 @@ var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;f
 '.wc-c{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}.wc-c button,.wc-c a{border:1px solid #d6ddd9;background:#fff;color:'+C.color+';border-radius:9px;padding:5px 9px;cursor:pointer;font:inherit;font-size:13px;text-decoration:none}'+
 '.wc-f{display:flex;gap:6px;padding:8px;border-top:1px solid #e3e8e5;background:#fff}.wc-f input{flex:1;border:1px solid #d6ddd9;border-radius:10px;padding:9px;font:inherit}.wc-f button{border:0;background:'+C.color+';color:#fff;border-radius:10px;padding:0 14px;cursor:pointer;font:inherit}'+
 '.wc-cal{margin-top:8px}.wc-cal b{font-size:13px}.wc-g{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:4px;text-align:center;font-size:12px}.wc-g i{font-style:normal;color:#889}.wc-g button{border:1px solid '+C.color+';background:#fff;color:'+C.color+';border-radius:8px;padding:0;min-height:32px;cursor:pointer;font:inherit;font-weight:600}.wc-g button:hover{background:'+C.color+';color:#fff}.wc-g .x{color:#c8ced0;line-height:32px}'+
-'.wc-w{font-size:12px;text-align:center;padding:4px;color:#667}.wc-w a{color:inherit}.wc-t{align-self:flex-start;color:#889;font-size:12px}';
+'.wc-w{font-size:12px;text-align:center;padding:4px;color:#667}.wc-w a{color:inherit}.wc-t{align-self:flex-start;color:#889;font-size:12px}'+
+'.wc-f .wc-up{background:#fff;color:'+C.color+';border:1px solid #d6ddd9;padding:0 10px;font-size:18px}'+
+'.wc.wc-in{position:relative;bottom:auto;left:auto;right:auto;z-index:auto;height:100%;min-height:360px}.wc-in .wc-p{position:relative;bottom:auto;left:auto;right:auto;width:100%;height:100%;display:flex;box-shadow:0 2px 12px rgba(0,0,0,.12)}.wc-in .wc-b,.wc-in .wc-x{display:none}';
 var st=d.createElement('style');st.textContent=css;d.head.appendChild(st);
 var w=d.createElement('div');w.className='wc';
-w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button><b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f"><input placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.badge?'<div class="wc-w" style="font-size:11px;opacity:.75"><a class="wc-pb" target="_blank" rel="noopener"></a></div>':'')+(C.whatsapp?'<div class="wc-w">📱 <a class="wc-wa" target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Continue on WhatsApp</a> – your chat comes with you</div>':'')+'</div>'+(C.launcher||C.opener?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
+w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button><b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f">'+(C.upload?'<button type="button" class="wc-up" aria-label="Send a photo or PDF" title="Send a photo or PDF">📎</button><input type="file" class="wc-fi" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" hidden>':'')+'<input class="wc-in-t" placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.badge?'<div class="wc-w" style="font-size:11px;opacity:.75"><a class="wc-pb" target="_blank" rel="noopener"></a></div>':'')+(C.whatsapp?'<div class="wc-w">📱 <a class="wc-wa" target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Continue on WhatsApp</a> – your chat comes with you</div>':'')+'</div>'+(!EMB&&(C.launcher||C.opener)?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
 w.querySelector('.wc-h b').textContent=C.title;w.querySelector('.wc-h span').textContent=C.subtitle;
-var P=w.querySelector('.wc-p'),M=w.querySelector('.wc-m'),F=w.querySelector('form'),I=F.querySelector('input');
+var P=w.querySelector('.wc-p'),M=w.querySelector('.wc-m'),F=w.querySelector('form'),I=F.querySelector('.wc-in-t');
 function mark(k,v,ss){try{(ss?sessionStorage:localStorage).setItem(k,v)}catch(e){}}
 function got(k,ss){try{return (ss?sessionStorage:localStorage).getItem(k)}catch(e){return null}}
 function prod(){try{var out=null;[].slice.call(d.querySelectorAll('script[type="application/ld+json"]')).some(function(s){var j=JSON.parse(s.textContent),list=[].concat(j&&j['@graph']||j);for(var i=0;i<list.length;i++){var x=list[i],ty=x&&x['@type'];if(ty==='Product'||(Array.isArray(ty)&&ty.indexOf('Product')>=0)){var o=[].concat(x.offers||[])[0]||{};if(o['@type']==='AggregateOffer')o={price:o.lowPrice,priceCurrency:o.priceCurrency,availability:o.availability};out={name:x.name,price:o.price,currency:o.priceCurrency,availability:String(o.availability||'').replace(/^https?:\/\/schema\.org\//,''),sku:x.sku};return true}}return false});
@@ -297,8 +383,15 @@ var PB=w.querySelector('.wc-pb');if(PB){PB.textContent=C.badge.text;PB.href=C.ba
 var WA=w.querySelector('.wc-wa');if(WA)WA.onclick=function(e){e.preventDefault();var win=window.open('','_blank');fetch(C.api+'/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})}).then(function(r){return r.json()}).then(function(r){var u=r.url||WA.href;if(win)win.location=u;else location.href=u}).catch(function(){if(win)win.location=WA.href})};
 M.addEventListener('click',function(e){var hl=e.target.closest('button[data-hl]');if(hl){showSection(hl.dataset.hl);return}var b=e.target.closest('button[data-a]');if(b)send({actionId:b.dataset.a},b.dataset.l)});
 F.onsubmit=function(e){e.preventDefault();var v=I.value.trim();if(!v)return;I.value='';send({text:v},v)};
+var UP=w.querySelector('.wc-up'),FI=w.querySelector('.wc-fi');
+if(UP&&FI){UP.onclick=function(){FI.click()};FI.onchange=function(){var f=FI.files&&FI.files[0];FI.value='';if(!f)return;
+  if(f.size>5242880){add('That file is too big – please send one under 5 MB.','a');return}
+  add(esc('📎 '+f.name),'u');var typing=add('Sending…','a wc-t');busy++;
+  fetch(C.api+'/upload?sessionId='+sid+'&name='+encodeURIComponent(f.name.slice(0,80)),{method:'POST',headers:{'Content-Type':f.type||'application/octet-stream'},body:f})
+  .then(function(r){return r.json()}).then(function(r){busy--;typing.remove();if(r.error)add(esc(r.error),'a');(r.replies||[]).forEach(render);if(r.lastId)last=Math.max(last,r.lastId)})
+  .catch(function(){busy--;typing.remove();add('Sorry – the file didn\'t send, please try again.','a')})}}
 var O=C.opener;
-function toggle(first,label){open=!open;P.classList.toggle('on',open);w.classList.toggle('open',open);if(open){I.focus();if(L)L.style.display='none';if(!M.children.length)send(first||(O?{actionId:'open'}:{text:C.greeting}),label);clearInterval(polling);polling=setInterval(poll,8000);poll()}else clearInterval(polling)}
+function toggle(first,label){if(EMB&&open)return;open=!open;P.classList.toggle('on',open);w.classList.toggle('open',open);if(open){I.focus();if(L)L.style.display='none';if(!M.children.length)send(first||(O?{actionId:'open'}:{text:C.greeting}),label);clearInterval(polling);polling=setInterval(poll,8000);poll()}else clearInterval(polling)}
 w.querySelector('.wc-b').onclick=function(){toggle()};w.querySelector('.wc-x').onclick=function(){toggle()};
 var L=w.querySelector('.wc-l');
 function snoozed(){return got(K+'-hint')==='1'}
@@ -325,7 +418,7 @@ if(L&&O){
   if(snoozed())L.remove();else{L.querySelector('span').textContent=C.launcher;
     L.onclick=function(e){if(e.target.closest('.wc-lx')){e.stopPropagation();L.remove();mark(K+'-hint','1');return}toggle()};
     L.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle()}}}}
-(d.body||d.documentElement).appendChild(w);
+if(EMB){w.classList.add('wc-in');EMB.appendChild(w);toggle()}else(d.body||d.documentElement).appendChild(w);
 })();`;
 
 /** Remember which website loaded the chat widget, so the shop's guide can say "we can see it on yourshop.co.uk". */

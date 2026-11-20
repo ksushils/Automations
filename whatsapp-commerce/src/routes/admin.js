@@ -37,6 +37,7 @@ import { currentKeyId } from '../crypto.js';
 import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
 import { listChatLeads, setLeadStatus } from '../leads.js';
+import { sendHook, SHEETS_SCRIPT } from '../hooks.js';
 import { googleConfigured, calendarConnected, authUrl, disconnectCalendar, redirectUri } from '../gcal.js';
 import { resumeAi } from '../coexistence.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
@@ -654,6 +655,18 @@ export function adminRouter() {
     res.json({ ...out, tenant: (await import('../tenants.js')).getTenant(req.tenant.id) });
   }));
   r.get('/tenants/:tenantId/leads', requireTenant, (req, res) => res.json({ leads: listChatLeads(req.tenant.id) }));
+  r.get('/tenants/:tenantId/export/leads.csv', requireTenant, (req, res) => {
+    const cell = (v) => { const s = String(v ?? '').replace(/^[=+\-@\t\r]/, "'$&"); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const cols = [['created_at', 'Date'], ['kind', 'Wants'], ['topic', 'Topic'], ['name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['call_time', 'Best time'], ['message', 'Message'], ['summary', 'Chat summary'], ['page', 'Page'], ['channel', 'Channel'], ['marketing_opt_in', 'Offers by email'], ['status', 'Status']];
+    const rows = listChatLeads(req.tenant.id, { limit: 10000 }).map((l) => cols.map(([k]) => cell(k === 'marketing_opt_in' ? (l[k] ? 'Yes' : 'No') : k === 'kind' ? (l[k] === 'call' ? 'Call back' : 'Details') : l[k])).join(','));
+    res.type('text/csv').set('Content-Disposition', `attachment; filename="leads-${new Date().toISOString().slice(0, 10)}.csv"`).send('\ufeff' + [cols.map((c) => c[1]).join(','), ...rows].join('\r\n'));
+  });
+  r.get('/tenants/:tenantId/hooks/sheets-script', requireTenant, (req, res) => res.json({ script: SHEETS_SCRIPT }));
+  r.post('/tenants/:tenantId/hooks/test', requireTenant, requireOwner, async (req, res) => {
+    const results = await sendHook(req.tenant, 'test', { message: `Test from ${req.tenant.settings.business.name} – it works!` });
+    if (!results.length) return res.status(400).json({ error: 'Add a webhook address or a Google Sheets address first, and save.' });
+    res.json({ results });
+  });
   r.patch('/tenants/:tenantId/leads/:id', requireTenant, (req, res) => { setLeadStatus(req.tenant.id, req.params.id, String(req.body?.status || '')); res.json({ ok: true }); });
   r.post('/tenants/:tenantId/conversations/:waId/resume', requireTenant, (req, res) => {
     const c = resumeAi(req.tenant.id, req.params.waId);

@@ -85,7 +85,9 @@ export function defaultSettings(name) {
     },
     notifications: {
       staffWaIds: [], // staff phone numbers (international, digits only) that get new-order alerts
-      webhookUrl: '', // optional: POST every new order as JSON (Zapier/n8n/Make)
+      webhookUrl: '', // optional: POST every new lead, booking and order as JSON (Zapier/n8n/Make)
+      webhookSecret: '', // optional: signs each webhook (X-Signature: sha256=HMAC of the body)
+      sheetsUrl: '', // optional: a Google Sheets Apps Script web app URL – each lead/booking/order becomes a row
       abandonedCartMinutes: 120, // 0 disables reminders
       // Win-back: approved template sent to opted-in customers who haven't ordered for N days
       winBack: { enabled: false, template: '', language: 'en_GB', afterDays: 30 },
