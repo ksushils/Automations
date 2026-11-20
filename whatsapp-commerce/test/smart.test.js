@@ -40,9 +40,10 @@ test('booking: soonest times first, a typed day finds its times, a full day offe
     let r = await say(t, wa, { action: 'book' });
     assert.ok(ids(r)[0].startsWith('bslot:'));
     assert.match(r[0].text, /Or type a day, e\.g\. _Friday afternoon_/);
-    // they type a day instead
-    const fri = parseWhen('friday', { timeZone: 'Europe/London' }).day;
-    r = await say(t, wa, 'friday afternoon please');
+    // they type a day instead (two days ahead, so it never falls on today with the afternoon already gone)
+    const dayName = new Date(Date.now() + 2 * 86400000).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Europe/London' }).toLowerCase();
+    const fri = parseWhen(dayName, { timeZone: 'Europe/London' }).day;
+    r = await say(t, wa, `${dayName} afternoon please`);
     assert.deepEqual(ids(r), [`bslot:${fri}T14:00`, 'bdays']);
     r = await say(t, wa, { action: `bslot:${fri}T14:00` });
     assert.ok(ids(r).includes('bconfirm'));
@@ -52,8 +53,8 @@ test('booking: soonest times first, a typed day finds its times, a full day offe
     const cal = r.find((m) => m.type === 'cta');
     assert.match(cal.url, /^https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE&text=Planning%20call/);
     assert.match(cal.text, /\/b\/.+\.ics/);
-    // Friday afternoon is now full → the nearest free times instead
-    r = await say(t, '447700920002', 'book friday afternoon');
+    // that afternoon is now full → the nearest free times instead
+    r = await say(t, '447700920002', `book ${dayName} afternoon`);
     assert.match(r[0].text, /is full\. The nearest free times/);
     assert.ok(!ids(r).includes(`bslot:${fri}T14:00`));
   } finally { globalThis.fetch = prev; }
