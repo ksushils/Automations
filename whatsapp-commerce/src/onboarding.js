@@ -4,7 +4,7 @@ import { embeddedSignupConfigured, billingInfo } from './platform.js';
 import { directConfigured } from './ai/direct.js';
 import { json } from './db.js';
 import { config } from './config.js';
-import { updateTenantSettings } from './tenants.js';
+import { updateTenantSettings, PLANS } from './tenants.js';
 import { stripe } from './platformSetup.js';
 import { alertEmails, emailConfigured } from './email.js';
 
@@ -55,9 +55,9 @@ export function onboardingStatus(tenant) {
     { key: 'assistant', phase: 'setup', title: 'Teach your assistant', why: 'Delivery, returns, opening hours: what customers ask most.', done: !!(s.ai?.about || s.ai?.faq) || docs > 0, data: { docs, aiReady: directConfigured() } },
     { key: 'test', phase: 'setup', title: 'Try it like a customer', why: 'Check the answers before real customers see them.', done: tested > 0 },
     { key: 'website', phase: 'sell', title: 'Add the chat to your website', why: 'Customers can ask and order straight away, no WhatsApp needed.', done: webChats > 0 || !!seen, data: { chats: webChats, seenOn: seen?.origin || null, seenAt: seen?.at || null } },
-    { key: 'whatsapp', phase: 'whatsapp', title: 'Connect your WhatsApp number', why: 'Customers order inside WhatsApp.', done: waConnected, data: { oneClick: embeddedSignupConfigured(), pending: !!(W.wabaId && !waConnected), numberStatus: W.numberStatus || null } },
+    { key: 'whatsapp', phase: 'whatsapp', title: 'Connect your WhatsApp number', why: PLANS[tenant.plan]?.whatsapp === false ? 'Customers order inside WhatsApp. Not in the Free plan: upgrade on the Billing tab first.' : 'Customers order inside WhatsApp.', done: waConnected, data: { upgrade: PLANS[tenant.plan]?.whatsapp === false, oneClick: embeddedSignupConfigured(), pending: !!(W.wabaId && !waConnected), numberStatus: W.numberStatus || null } },
     { key: 'golive', phase: 'whatsapp', title: 'Finish the WhatsApp go-live checks', why: 'Order updates and staff alerts keep working, and you see messages arrive.', done: waConnected && templatesIn.length === REQUIRED_TEMPLATES.length && staff && realInbound > 0, data: { templates: templatesIn, required: REQUIRED_TEMPLATES, staff, inbound: realInbound } },
-    { key: 'plan', phase: 'plan', title: 'Choose your plan', why: 'Keep everything running after your free trial.', done: bill.subscription_status === 'active', data: { status: bill.subscription_status || null, trialEndsAt: bill.trial_ends_at || null, billing: !!bill.configured } },
+    { key: 'plan', phase: 'plan', title: 'Choose your plan', why: 'Keep everything running after your free trial.', done: ['active', 'free'].includes(bill.subscription_status), data: { free: bill.subscription_status === 'free', status: bill.subscription_status || null, trialEndsAt: bill.trial_ends_at || null, billing: !!bill.configured } },
   ];
   for (const st of steps) st.skipped = !st.done && !!skipped[st.key];
   const next = steps.find((x) => !x.done && !x.skipped) || steps.find((x) => !x.done) || null;

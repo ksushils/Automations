@@ -39,6 +39,7 @@ input{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;bac
 </main>
 <script>
 const FEATURES = {
+  free: ['AI chat on your website, set up from your site in a minute', 'Answers from your own pages, leads and call-backs', '100 chats · 100 AI replies / month', 'No card needed · "Powered by" link'],
   starter: ['Tap-to-order WhatsApp shop & storefront', 'Shopify / WooCommerce / built-in catalogue', 'AI assistant & agent', 'Flow builder & auto-replies', '1,000 messages · 300 AI replies / month'],
   growth: ['Everything in Starter', 'Campaigns, segments & retargeting', '5,000 messages · 3,000 AI replies / month'],
   pro: ['Everything in Growth', 'No limit on incoming messages · 20,000 AI replies / month', 'Changes made for you every month', 'Phone support, same day'],
@@ -53,8 +54,13 @@ fetch('/api/plans').then((r) => r.json()).then((d) => {
   if (!d.signupEnabled) document.getElementById('f').innerHTML = '<p>Sign-up is currently closed – please contact us.</p>';
   const el = document.getElementById('plans');
   const draw = () => (el.innerHTML = Object.entries(d.plans).map(([k, p]) => `<div class="card plan ${k === plan ? 'on' : ''}" data-p="${k}"><b>${p.label}</b><div class="price">£${p.priceGbp}<span class="mute" style="font-size:14px;font-weight:400">/month</span></div><ul>${(FEATURES[k] || []).map((x) => `<li>${x}</li>`).join('')}</ul></div>`).join(''));
-  draw();
-  el.onclick = (e) => { const c = e.target.closest('[data-p]'); if (c) { plan = c.dataset.p; draw(); } };
+  const words = () => {
+    const free = plan === 'free';
+    document.querySelector('#f .btn').textContent = free ? 'Start free' : 'Start free trial';
+    document.getElementById('trial').textContent = free ? 'Free for ever, no card needed.' : `${d.trialDays}-day free trial.`;
+  };
+  draw(); words();
+  el.onclick = (e) => { const c = e.target.closest('[data-p]'); if (c) { plan = c.dataset.p; draw(); words(); } };
 });
 document.getElementById('f').onsubmit = async (e) => {
   e.preventDefault();
@@ -73,7 +79,7 @@ document.getElementById('f').onsubmit = async (e) => {
     <div style="display:flex;gap:6px"><input id="key" readonly value="${r.adminKey.replace(/"/g, '&quot;')}"><button type="button" class="btn" id="copy" style="width:auto;margin:0">Copy</button></div>
     <label class="chk" style="margin-top:14px"><input type="checkbox" id="saved"> I've saved my key</label>
     <p><a class="btn" id="go" style="display:block;text-align:center;text-decoration:none;opacity:.5;pointer-events:none" href="/admin/">Open my dashboard →</a></p>
-    <p class="mute">Your dashboard shows you what to do first, step by step.${r.checkoutUrl ? ` You can <a href="${r.checkoutUrl}">add your card now</a> or later; you won't be charged until your free trial ends.` : ''}</p>`;
+    <p class="mute">Your dashboard shows you what to do first, step by step${r.plan === 'free' ? ': copy one line onto your website and your assistant is live.' : '.'}${r.checkoutUrl ? ` You can <a href="${r.checkoutUrl}">add your card now</a> or later; you won't be charged until your free trial ends.` : ''}</p>`;
   document.getElementById('copy').onclick = () => navigator.clipboard?.writeText(r.adminKey).then(() => (document.getElementById('copy').textContent = 'Copied ✓'), () => document.getElementById('key').select());
   document.getElementById('saved').onchange = (ev) => { const g = document.getElementById('go'); g.style.opacity = ev.target.checked ? 1 : 0.5; g.style.pointerEvents = ev.target.checked ? 'auto' : 'none'; };
 };

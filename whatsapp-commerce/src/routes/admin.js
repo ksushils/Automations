@@ -127,16 +127,20 @@ export function adminRouter() {
     const plan = PLANS[req.body?.plan] ? req.body.plan : 'starter';
     // Came from "your assistant in 60 seconds": keep that shop (everything it learnt) instead of starting empty
     const claimed = req.body?.demo ? claimDemo(String(req.body.demo), { name, email }) : null;
+    const free = plan === 'free';
+    const markFree = (id) => getDb().prepare("UPDATE tenants SET trial_ends_at = NULL, subscription_status = 'free' WHERE id = ?").run(id);
     if (claimed) {
       updateTenantMeta(claimed.tenant.id, { plan });
+      if (free) markFree(claimed.tenant.id);
       const website = claimed.tenant.settings.business?.website;
       if (website) onboardFromWebsite(claimed.tenant.id, website).catch((e) => console.warn('[signup onboarding]', e.message)); // the rest of the site
       let checkoutUrl = null;
-      if (billingConfigured() && config.stripePrices[plan]) checkoutUrl = await createSubscriptionCheckout(getTenant(claimed.tenant.id), plan).catch(() => null);
-      return res.status(201).json({ tenantId: claimed.tenant.id, adminKey: claimed.adminKey, checkoutUrl, trialDays: config.trialDays, fromDemo: true });
+      if (!free && billingConfigured() && config.stripePrices[plan]) checkoutUrl = await createSubscriptionCheckout(getTenant(claimed.tenant.id), plan).catch(() => null);
+      return res.status(201).json({ tenantId: claimed.tenant.id, adminKey: claimed.adminKey, checkoutUrl, trialDays: free ? 0 : config.trialDays, plan, fromDemo: true });
     }
     const { tenant, adminKey } = createTenant({ name, plan });
     getDb().prepare("UPDATE tenants SET owner_email = ?, trial_ends_at = datetime('now', ?), subscription_status = 'trialing' WHERE id = ?").run(email, `+${config.trialDays} days`, tenant.id);
+    if (free) markFree(tenant.id);
     // Website given → detect the shop, connect its catalogue, import policy/FAQ pages; then build the AI chatbot
     const website = String(req.body?.website || '').trim();
     (async () => {
@@ -144,8 +148,8 @@ export function adminRouter() {
       if (consoleConfigured() && config.difyLicensed) await provisionDifyBot(tenant.id).catch((e) => console.warn('[signup ai]', e.message));
     })();
     let checkoutUrl = null;
-    if (billingConfigured() && config.stripePrices[plan]) checkoutUrl = await createSubscriptionCheckout(getTenant(tenant.id), plan).catch((e) => { console.warn('[signup billing]', e.message); return null; });
-    res.status(201).json({ tenantId: tenant.id, adminKey, checkoutUrl, trialDays: config.trialDays });
+    if (!free && billingConfigured() && config.stripePrices[plan]) checkoutUrl = await createSubscriptionCheckout(getTenant(tenant.id), plan).catch((e) => { console.warn('[signup billing]', e.message); return null; });
+    res.status(201).json({ tenantId: tenant.id, adminKey, checkoutUrl, trialDays: free ? 0 : config.trialDays, plan });
   }));
 
   // Who am I? Super admin gets tenant list, tenant admin gets their tenant.

@@ -1,6 +1,6 @@
 import express from 'express';
 import { config } from '../config.js';
-import { getTenant, bumpUsage, withinLimit } from '../tenants.js';
+import { getTenant, bumpUsage, withinLimit, PLANS } from '../tenants.js';
 import { getDb, json } from '../db.js';
 import { createSender, logMessage } from '../whatsapp/cloudApi.js';
 import { handleInbound, menuOptions, openerFor, PAGE_OPENERS, DEFAULT_OPENER } from '../bot/engine.js';
@@ -165,6 +165,7 @@ export function webchatRouter() {
       launcher: String(W.launcherText ?? DEFAULT_LAUNCHER).slice(0, 120), // static speech bubble beside the button when the pop-up greeting is off; '' hides it
       opener: openerConfig(t),
       whatsapp: t.settings.business.whatsappNumber ? String(t.settings.business.whatsappNumber).replace(/\D/g, '') : null,
+      badge: PLANS[t.plan]?.badge ? { text: `Powered by ${config.productName}`, url: `${config.publicUrl}/?ref=chat-${encodeURIComponent(t.id)}` } : null,
     };
     res.send(WIDGET.replace('__CFG__', JSON.stringify(cfg).replace(/</g, '\\u003c')));
   });
@@ -195,7 +196,7 @@ var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;f
 '.wc-w{font-size:12px;text-align:center;padding:4px;color:#667}.wc-w a{color:inherit}.wc-t{align-self:flex-start;color:#889;font-size:12px}';
 var st=d.createElement('style');st.textContent=css;d.head.appendChild(st);
 var w=d.createElement('div');w.className='wc';
-w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button><b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f"><input placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.whatsapp?'<div class="wc-w">📱 <a class="wc-wa" target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Continue on WhatsApp</a> – your chat comes with you</div>':'')+'</div>'+(C.launcher||C.opener?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
+w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button><b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f"><input placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.badge?'<div class="wc-w" style="font-size:11px;opacity:.75"><a class="wc-pb" target="_blank" rel="noopener"></a></div>':'')+(C.whatsapp?'<div class="wc-w">📱 <a class="wc-wa" target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Continue on WhatsApp</a> – your chat comes with you</div>':'')+'</div>'+(C.launcher||C.opener?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
 w.querySelector('.wc-h b').textContent=C.title;w.querySelector('.wc-h span').textContent=C.subtitle;
 var P=w.querySelector('.wc-p'),M=w.querySelector('.wc-m'),F=w.querySelector('form'),I=F.querySelector('input');
 function mark(k,v,ss){try{(ss?sessionStorage:localStorage).setItem(k,v)}catch(e){}}
@@ -292,6 +293,7 @@ function send(body,label){
   .catch(function(){busy--;typing.remove();add('Sorry – connection problem, please try again.','a')});
 }
 function poll(){if(busy)return;fetch(C.api+'/poll?sessionId='+sid+'&after='+last).then(function(r){return r.json()}).then(function(r){if(last&&r.messages)r.messages.forEach(render);last=Math.max(last,r.lastId||0)}).catch(function(){})}
+var PB=w.querySelector('.wc-pb');if(PB){PB.textContent=C.badge.text;PB.href=C.badge.url}
 var WA=w.querySelector('.wc-wa');if(WA)WA.onclick=function(e){e.preventDefault();var win=window.open('','_blank');fetch(C.api+'/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})}).then(function(r){return r.json()}).then(function(r){var u=r.url||WA.href;if(win)win.location=u;else location.href=u}).catch(function(){if(win)win.location=WA.href})};
 M.addEventListener('click',function(e){var hl=e.target.closest('button[data-hl]');if(hl){showSection(hl.dataset.hl);return}var b=e.target.closest('button[data-a]');if(b)send({actionId:b.dataset.a},b.dataset.l)});
 F.onsubmit=function(e){e.preventDefault();var v=I.value.trim();if(!v)return;I.value='';send({text:v},v)};

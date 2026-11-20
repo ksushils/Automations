@@ -154,7 +154,7 @@ function demoPage(token, s, layout) {
     <div id="chips" class="chips"></div>
     <div class="card" style="margin-top:18px"><h3 style="margin-top:0">Like it? Keep it.</h3>
       <p class="mute">Start your free trial and this exact assistant becomes yours: we keep everything it learnt, add it to your website with one line, and connect your WhatsApp when you're ready.</p>
-      <p><a class="btn" id="keep" href="/signup?demo=${esc(token)}&website=${encodeURIComponent(s?.origin || '')}">Keep this assistant – start free trial</a></p>
+      <p><a class="btn" id="keep" href="/signup?demo=${esc(token)}&website=${encodeURIComponent(s?.origin || '')}">Keep this assistant – start free trial</a> <a class="btn ghost" href="/signup?demo=${esc(token)}&plan=free&website=${encodeURIComponent(s?.origin || '')}">Keep it free (website chat only)</a></p>
       <p class="mute" style="font-size:13px">This demo is deleted after ${DEMO_HOURS} hours if you don't keep it. No card needed to try.</p></div>
   </div>
   <div class="card" id="failed" hidden><h3 style="margin-top:0">We couldn't build it automatically</h3><p id="ferr" class="mute"></p><p><a class="btn" href="/demo">Book a demo instead</a></p></div>

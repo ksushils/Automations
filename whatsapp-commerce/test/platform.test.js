@@ -123,3 +123,24 @@ test('marketing home page is served', () => withServer(async (base) => {
   assert.match(html, /Your customers message at 11pm/);
   assert.match(html, /href="\/pricing"/);
 }));
+
+test('Free plan sign-up: no trial, never paused, website chat with a "Powered by" link, no WhatsApp replies', () => withServer(async (base) => {
+  const r = await fetch(`${base}/api/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ business: 'Smile Clinic', email: 'hello@smile.test', plan: 'free', acceptTerms: true }) });
+  assert.equal(r.status, 201);
+  const b = await r.json();
+  assert.equal(b.plan, 'free');
+  assert.equal(b.checkoutUrl, null);
+  assert.equal(b.trialDays, 0);
+  const row = getDb().prepare('SELECT plan, subscription_status, trial_ends_at FROM tenants WHERE id = ?').get(b.tenantId);
+  assert.deepEqual({ ...row }, { plan: 'free', subscription_status: 'free', trial_ends_at: null });
+  const widget = await (await fetch(`${base}/chat-widget/${b.tenantId}.js`)).text();
+  assert.match(widget, /"badge":\{"text":"Powered by [^"]+","url":"[^"]+\/\?ref=chat-/);
+  const { PLANS } = await import('../src/tenants.js');
+  assert.equal(PLANS.free.whatsapp, false);
+  assert.equal(PLANS.starter.whatsapp, undefined);
+  // a paid shop's widget has no badge
+  const { tenant } = tenants.createTenant({ name: 'Paid Shop', plan: 'starter' });
+  assert.match(await (await fetch(`${base}/chat-widget/${tenant.id}.js`)).text(), /"badge":null/);
+  // pricing page shows the Free plan
+  assert.match(await (await fetch(`${base}/pricing`)).text(), /<th>Free<\/th>/);
+}));

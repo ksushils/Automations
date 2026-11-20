@@ -107,7 +107,8 @@ export function queryTerms(q) {
 const ftsQuery = (q) => {
   const terms = queryTerms(q);
   // Each word as written (stemmed: "returns" finds "return") and as a prefix ("deliver" finds "delivery", which stems differently).
-  return terms.length ? terms.map((t) => `"${t}" OR "${t}"*`).join(' OR ') : null;
+  // Long words also as a shorter prefix: "hygienist" finds "hygiene", "orthodontist" finds "orthodontic".
+  return terms.length ? terms.map((t) => `"${t}" OR "${t}"*${t.length >= 8 ? ` OR "${t.slice(0, t.length - 3)}"*` : ''}`).join(' OR ') : null;
 };
 const STOP = new Set('the and for you your are was were have has had can could would should will what when where which who why how does did do this that with from about into our not but any all get got there their them they its it is me my we us an a of to in on at by be or if'.split(' '));
 
@@ -134,7 +135,7 @@ export async function retrieve(tenantId, query, { k = 4 } = {}) {
   const terms = queryTerms(query).filter((t) => t.length > 2);
   if (terms.length) {
     const words = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/);
-    const hits = (name) => { const w = words(name); return terms.filter((t) => w.some((x) => x === t || (t.length >= 4 && x.startsWith(t.slice(0, Math.max(4, t.length - 2)))))).length; };
+    const hits = (name) => { const w = words(name); return terms.filter((t) => w.some((x) => x === t || (t.length >= 4 && x.startsWith(t.slice(0, Math.max(4, t.length - (t.length >= 8 ? 3 : 2))))))).length; };
     const docs = d.prepare("SELECT id, name FROM knowledge_docs WHERE tenant_id = ? AND status NOT IN ('deleted', 'to_delete')").all(tenantId)
       .map((x) => ({ ...x, h: hits(x.name) })).filter((x) => x.h >= Math.min(2, terms.length)).sort((a, b) => b.h - a.h).slice(0, 3);
     docs.forEach((doc, i) => {

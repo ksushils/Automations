@@ -6,6 +6,7 @@ import { getDb, json } from '../db.js';
 import { verifyMetaSignature, safeEqual } from '../crypto.js';
 import { createSender, parseInbound, logMessage, markRead } from './cloudApi.js';
 import { handleInbound } from '../bot/engine.js';
+import { PLANS } from '../tenants.js';
 import { recordStatus, recordReply } from '../campaigns.js';
 import { noteAppActivity, pauseAi } from '../coexistence.js';
 
@@ -24,7 +25,7 @@ async function processStored(tenant, ev, waMessageId, send) {
   getDb().prepare('UPDATE messages SET attempts = attempts + 1 WHERE tenant_id = ? AND wa_message_id = ? AND direction = ?').run(tenant.id, waMessageId, 'in');
   markRead(tenant, waMessageId, { typing: true });
   try {
-    await handleInbound(tenant, ev, send);
+    if (PLANS[tenant.plan]?.whatsapp !== false) await handleInbound(tenant, ev, send);
   } finally {
     getDb().prepare('UPDATE messages SET processed = 1 WHERE tenant_id = ? AND wa_message_id = ? AND direction = ?').run(tenant.id, waMessageId, 'in');
   }

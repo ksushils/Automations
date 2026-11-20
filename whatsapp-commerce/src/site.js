@@ -27,7 +27,7 @@ const legal = () => ({
 
 export const PAGES = [
   { path: '/', title: () => `WhatsApp and website AI assistant for UK small businesses | ${brand()}`, description: 'Answer customer questions, take orders and recover abandoned carts on WhatsApp and your website. Set up for you in a day.' },
-  { path: '/pricing', title: () => `Pricing | ${brand()}`, description: "Plans from £29 a month, plus a set-up service. A clear explanation of Meta's own per-message fees, so there are no surprises." },
+  { path: '/pricing', title: () => `Pricing | ${brand()}`, description: "Free website chat plan, paid plans from £29 a month plus a set-up service. A clear explanation of Meta's own per-message fees, so there are no surprises." },
   { path: '/takeaways', title: () => `WhatsApp ordering for UK takeaways | ${brand()}`, description: 'Take orders and answer questions on WhatsApp automatically. No commission per order, unlike the delivery apps.' },
   { path: '/whatsapp-cost-calculator', title: () => 'WhatsApp Business API cost calculator (UK, 2026)', description: 'Work out what Meta will charge you per month. Current UK rates, free service-message allowance included.' },
   { path: '/whatsapp-fee-checker', title: () => 'WhatsApp fee checker: how much is your provider adding? (UK)', description: "See how much your WhatsApp platform adds on top of Meta's own UK message fees, per month and per year: markups, per-message fees and per-user fees." },
@@ -137,7 +137,7 @@ function home() {
 <div class="trow"><input id="tryurl" name="website" required placeholder="yourshop.co.uk" autocomplete="url" inputmode="url"><input type="text" name="company_website" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true"><button class="btn">Build my assistant →</button></div>
 <p class="mute" style="font-size:13px;margin:6px 0 0">Free, no sign-up. We read a few public pages of your site and you chat with the result.</p>
 </form>
-<p style="margin-top:18px"><a href="/demo">Or book a 20-minute demo</a>${siteChatTenant() ? ' <span class="mute">· The chat button in the corner is the real thing, answering questions about ' + B + '.</span>' : ''}</p>
+<p style="margin-top:18px">${config.signupEnabled ? '<a href="/signup?plan=free">Start free</a> (website chat, no card) · ' : ''}<a href="/demo">Or book a 20-minute demo</a>${siteChatTenant() ? ' <span class="mute">· The chat button in the corner is the real thing, answering questions about ' + B + '.</span>' : ''}</p>
 </div></section>
 
 <section><div class="wrap grid">
@@ -187,6 +187,7 @@ ${faqHtml(HOME_FAQ)}
 
 // ---------------- Pricing ----------------
 const PRICING_FAQ = [
+  ['Is there a free plan?', 'Yes, for website chat: 100 chats and 100 AI replies a month, set up by our AI from your website, with a small "Powered by" link. No card needed. WhatsApp needs a paid plan.'],
   ['Is there a free trial?', "The website assistant, yes. We'll put it on your site and you can watch it work before you pay the monthly fee. WhatsApp can't be trialled properly because Meta has to verify your business first, which takes days."],
   ['How long is the contract?', 'Monthly, cancel whenever. The set-up fee is non-refundable once the work is done.'],
   ['What if I go over my AI replies?', 'We tell you before you get there, and you move up a plan or we add a top-up. It never just stops answering your customers.'],
@@ -197,15 +198,17 @@ function pricing() {
   const r = getRates().GB;
   const p = (x) => `${+(x * 100).toFixed(1)}p`;
   const rows = [
-    ['Monthly', '£29', '£79', '£249'],
-    ['Website assistant', 'Yes', 'Yes', 'Yes'],
-    ['WhatsApp', 'Yes', 'Yes', 'Yes'],
-    ['AI replies included', '300', '3,000', '20,000'],
-    ['Products and knowledge base', 'Yes', 'Yes', 'Yes'],
-    ['Order updates and cart recovery', '—', 'Yes', 'Yes'],
-    ['Campaigns with consent records', '—', 'Yes', 'Yes'],
-    ['Changes made for you', '—', '—', 'Monthly'],
-    ['Support', 'Email', 'Email', 'Phone, same day'],
+    ['Monthly', '£0', '£29', '£79', '£249'],
+    ['Set-up', 'Do it yourself (AI sets it up)', 'From £500', 'From £500', 'From £500'],
+    ['Website assistant', 'Yes', 'Yes', 'Yes', 'Yes'],
+    ['WhatsApp', '—', 'Yes', 'Yes', 'Yes'],
+    ['AI replies included', '100', '300', '3,000', '20,000'],
+    ['Website pages learnt', '15', '20', '100', '500'],
+    ['Order updates and cart recovery', '—', '—', 'Yes', 'Yes'],
+    ['Campaigns with consent records', '—', '—', 'Yes', 'Yes'],
+    ['Changes made for you', '—', '—', '—', 'Monthly'],
+    ['"Powered by" link in the chat', 'Yes', '—', '—', '—'],
+    ['Support', 'Email', 'Email', 'Email', 'Phone, same day'],
   ];
   return layout('/pricing', `
 <section class="hero"><div class="wrap">
@@ -216,18 +219,19 @@ function pricing() {
 <section><div class="wrap">
 <h2>Set-up: from £500</h2>
 <p>We load your products, prices, policies and opening hours, write your message templates, take you through Meta's verification, and test it against real questions until it holds up. One day for a straightforward shop, two or three for something complicated.</p>
-<p>This isn't optional, and it's the reason it works. A bot loaded badly is worse than no bot.</p>
+<p>On the paid plans this isn't optional, and it's the reason it works. A bot loaded badly is worse than no bot.</p>
+<p>Just want the chat on your website? The <b>Free plan</b> is do-it-yourself: type your website, our AI reads it and sets the assistant up, and you paste one line onto your site.${config.signupEnabled ? ' <a href="/signup?plan=free">Start free</a>' : ''}</p>
 </div></section>
 
 <section><div class="wrap">
 <h2>Monthly plans</h2>
 <p class="mute">Most businesses we work with take Managed, because they'd rather we kept it right than learn the dashboard.</p>
 <div class="tablewrap"><table>
-<thead><tr><th></th><th>Starter</th><th>Growth</th><th>Managed</th></tr></thead>
+<thead><tr><th></th><th>Free</th><th>Starter</th><th>Growth</th><th>Managed</th></tr></thead>
 <tbody>${rows.map(([k, ...v], i) => `<tr><th scope="row">${esc(k)}</th>${v.map((x) => `<td>${i === 0 ? `<span class="price">${esc(x)}</span>` : esc(x)}</td>`).join('')}</tr>`).join('')}</tbody>
 </table></div>
 <p class="mute">Prices exclude VAT where it applies.</p>
-<p><a class="btn" href="/demo">Book a demo</a></p>
+<p><a class="btn" href="/demo">Book a demo</a>${config.signupEnabled ? ' <a class="btn ghost" href="/signup?plan=free">Start free</a>' : ''}</p>
 </div></section>
 
 <section id="meta-fees"><div class="wrap">
@@ -244,7 +248,7 @@ function pricing() {
 </div></section>
 
 <section><div class="wrap"><h2>Pricing questions</h2>${faqHtml(PRICING_FAQ)}</div></section>`, {
-    ld: [faqLd(PRICING_FAQ), { '@type': 'Product', name: `${brand()} monthly plans`, brand: { '@type': 'Brand', name: brand() }, offers: [['Starter', 29], ['Growth', 79], ['Managed', 249]].map(([n, v]) => ({ '@type': 'Offer', name: n, price: String(v), priceCurrency: 'GBP', url: url('/pricing') })) }],
+    ld: [faqLd(PRICING_FAQ), { '@type': 'Product', name: `${brand()} monthly plans`, brand: { '@type': 'Brand', name: brand() }, offers: [['Free', 0], ['Starter', 29], ['Growth', 79], ['Managed', 249]].map(([n, v]) => ({ '@type': 'Offer', name: n, price: String(v), priceCurrency: 'GBP', url: url('/pricing') })) }],
   });
 }
 
@@ -540,7 +544,7 @@ export function siteAssistantKnowledge() {
   const r = getRates().GB;
   return {
     about: `${brand()} is an assistant for UK small businesses' websites and WhatsApp. It answers customer questions from the business's own website, price list and policies, takes orders, chases abandoned baskets, sends order updates, runs campaigns to opted-in customers, and hands over to a person when asked. It is set up for the business (done for you), usually in a day.`,
-    faq: `Pricing: one-off set-up from £500, then monthly: Starter £29, Growth £79, Managed £249. Starter: website assistant, WhatsApp, 300 AI replies, products and knowledge base, email support. Growth adds order updates, cart recovery and campaigns with consent records, 3,000 AI replies. Managed: 20,000 AI replies, changes made for you monthly, same-day phone support. Prices exclude VAT where it applies. Monthly, cancel any time; set-up fee non-refundable once the work is done. No cut of sales.
+    faq: `Pricing: a Free plan for website chat only (do-it-yourself, 100 AI replies a month, no card, "Powered by" link; sign up at /signup?plan=free). Paid plans: one-off set-up from £500, then monthly: Starter £29, Growth £79, Managed £249. Starter: website assistant, WhatsApp, 300 AI replies, products and knowledge base, email support. Growth adds order updates, cart recovery and campaigns with consent records, 3,000 AI replies. Managed: 20,000 AI replies, changes made for you monthly, same-day phone support. Prices exclude VAT where it applies. Monthly, cancel any time; set-up fee non-refundable once the work is done. No cut of sales.
 Meta fees: Meta bills the business directly for WhatsApp messages. In the UK: first ${FREE_SERVICE_PER_MONTH} replies a month free, then about ${pence(r.service)} each; order updates about ${pence(r.utility)}; marketing about ${pence(r.marketing)}. Most small businesses pay £0 to £30 a month. Calculator: ${url('/whatsapp-cost-calculator')}.
 Trial: the website assistant can be trialled on your site before paying monthly. WhatsApp can't be trialled properly because Meta must verify the business first (days).
 How it works: 1) we set it up from your website, price list and policies; 2) one line of code on your website, WhatsApp after Meta verification (we help); 3) every conversation lands in one inbox and you can step in from your phone.

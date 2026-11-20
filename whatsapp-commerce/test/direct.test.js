@@ -194,3 +194,16 @@ test('knowledge ranking: a page whose title matches the question wins over many 
   assert.ok((await retrieve(t.id, "what's included in a test day?", { k: 3 })).some((h) => h.doc === 'What a test day involves'));
   assert.equal((await retrieve(t.id, 'my son is 14, can he do karting with you?', { k: 3 }))[0]?.doc, 'Under 18s');
 });
+
+test('knowledge retrieval: "hygienist" finds the fee guide that says "Hygiene" (different stems)', async () => {
+  const { indexDoc, retrieve } = await import('../src/ai/rag.js');
+  const { getDb } = await import('../src/db.js');
+  const t = makeTenant();
+  const d = getDb();
+  const add = (name, text) => { const id = d.prepare("INSERT INTO knowledge_docs (tenant_id, name, source, status, text) VALUES (?, ?, 'text', 'ready', ?)").run(t.id, name, text).lastInsertRowid; return indexDoc(d.prepare('SELECT * FROM knowledge_docs WHERE id = ?').get(id)); };
+  await add('Dental Treatment Fee Guide', 'HYGIENE\nDental Treatment | Private Fee\nDirect Access Dental Hygiene 30 minutes visit | £70\nExtended Hygiene 40 minutes visit | £90');
+  await add('Dental Implants', 'Replace missing teeth with titanium implants placed by our implant surgeon. Book a consultation appointment.');
+  await add('Meet the team', 'Our dentists and nurses welcome you to every appointment.');
+  const hits = await retrieve(t.id, 'how much is a hygienist appointment?', { k: 2 });
+  assert.equal(hits[0]?.doc, 'Dental Treatment Fee Guide');
+});

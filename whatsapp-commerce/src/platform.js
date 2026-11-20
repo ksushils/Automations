@@ -143,6 +143,7 @@ export function billingBanner(tenantId) {
   if (!billingConfigured()) return null;
   const r = getDb().prepare('SELECT subscription_status AS s, trial_ends_at AS t FROM tenants WHERE id = ?').get(tenantId);
   if (!r) return null;
+  if (r.s === 'free') return { level: 'info', text: 'Free plan: website chat, 100 chats and 100 AI replies a month. Upgrade on the Billing tab for WhatsApp, more replies and no "Powered by" link.' };
   if (r.s === 'trialing' && r.t) {
     const days = Math.ceil((Date.parse(r.t + 'Z') - Date.now()) / 864e5);
     return { level: days <= 3 ? 'warn' : 'info', text: `Free trial: ${Math.max(0, days)} day${days === 1 ? '' : 's'} left. Choose a plan to keep your WhatsApp shop running.` };
