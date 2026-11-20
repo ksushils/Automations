@@ -383,6 +383,7 @@ var PB=w.querySelector('.wc-pb');if(PB){PB.textContent=C.badge.text;PB.href=C.ba
 var WA=w.querySelector('.wc-wa');if(WA)WA.onclick=function(e){e.preventDefault();var win=window.open('','_blank');fetch(C.api+'/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})}).then(function(r){return r.json()}).then(function(r){var u=r.url||WA.href;if(win)win.location=u;else location.href=u}).catch(function(){if(win)win.location=WA.href})};
 M.addEventListener('click',function(e){var hl=e.target.closest('button[data-hl]');if(hl){showSection(hl.dataset.hl);return}var b=e.target.closest('button[data-a]');if(b)send({actionId:b.dataset.a},b.dataset.l)});
 F.onsubmit=function(e){e.preventDefault();var v=I.value.trim();if(!v)return;I.value='';send({text:v},v)};
+window.waChat={ask:function(q){if(!open)toggle();send({text:q},q)}};
 var UP=w.querySelector('.wc-up'),FI=w.querySelector('.wc-fi');
 if(UP&&FI){UP.onclick=function(){FI.click()};FI.onchange=function(){var f=FI.files&&FI.files[0];FI.value='';if(!f)return;
   if(f.size>5242880){add('That file is too big – please send one under 5 MB.','a');return}

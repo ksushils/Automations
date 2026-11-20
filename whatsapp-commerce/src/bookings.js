@@ -161,7 +161,7 @@ export async function syncBookingToCalendar(tenant, id) {
   const svc = services(tenant.settings).find((s) => s.name === b.service);
   const start = zonedToUtc(b.day, b.time, tz(tenant.settings));
   const end = new Date(start.getTime() + (Number(svc?.minutes) || slotMinutes(tenant.settings.bookings || {})) * 60000);
-  const phone = String(b.wa_id).startsWith('web:') ? 'website chat' : `+${b.wa_id}`;
+  const phone = String(b.wa_id).startsWith('web:') ? `website chat${b.notes ? `, ${b.notes}` : ''}` : `+${b.wa_id}`;
   const evId = await addBookingEvent(tenant.id, b, { startIso: start.toISOString(), endIso: end.toISOString(), summary: `${b.service || 'Booking'} – ${b.name || 'customer'} (via chat)`, description: `Booked in the chat.\nName: ${b.name || '–'}\nContact: ${phone}\nBooking #${b.id}`, location: tenant.settings.business?.address || undefined });
   if (evId) getDb().prepare('UPDATE bookings SET gcal_event_id = ? WHERE id = ?').run(evId, b.id);
   return evId;
@@ -266,7 +266,14 @@ export async function bookingAction(ctx, cmd, arg) {
 /** Free-text answer while we're waiting for the booking name. */
 export function bookingText(ctx, text) {
   if (ctx.conv.state !== 'booking_name' || !ctx.conv.data.booking?.time) return false;
-  ctx.conv.data.booking.name = String(text).trim().slice(0, 200);
+  // "Sam 07700 900123": the name and the phone number apart. The website chat has no number, so one is needed.
+  const raw = String(text).trim().slice(0, 200);
+  const m = raw.match(/(\+?\d[\d\s().-]{6,18}\d)/);
+  const phone = m && m[1].replace(/[^\d+]/g, '').length >= 10 ? m[1].replace(/[^\d+]/g, '') : null;
+  const name = (m ? raw.replace(m[1], ' ') : raw).replace(/[,;:–-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (String(ctx.conv.waId).startsWith('web:') && !phone) return ctx.reply({ type: 'text', text: '📞 And a phone number, please, so the team can reach you about the booking? (Name and number, e.g. *Sam 07700 900123*)' }) || true;
+  ctx.conv.data.booking.name = (name || ctx.customer?.name || 'Customer').slice(0, 100);
+  if (phone) ctx.conv.data.booking.phone = phone;
   ctx.conv.state = 'idle';
   return bookingSummary(ctx) || true;
 }
@@ -274,7 +281,7 @@ export function bookingText(ctx, text) {
 function bookingSummary(ctx) {
   const b = ctx.conv.data.booking;
   const S = ctx.S;
-  const lines = [`📋 *Your booking*`, b.service ? `• ${b.service}` : '', `• ${whenText(b)}`, `• Name: ${b.name || ctx.customer.name}`, b.deposit ? `• Deposit: ${money(b.deposit, sym(S))} (paid now by card, taken off the price)` : ''].filter(Boolean);
+  const lines = [`📋 *Your booking*`, b.service ? `• ${b.service}` : '', `• ${whenText(b)}`, `• Name: ${b.name || ctx.customer.name}`, b.phone ? `• Phone: ${b.phone}` : '', b.deposit ? `• Deposit: ${money(b.deposit, sym(S))} (paid now by card, taken off the price)` : ''].filter(Boolean);
   ctx.reply({ type: 'buttons', text: `${lines.join('\n')}\n\nShall I book it?`, buttons: [{ id: 'bconfirm', title: b.deposit ? '✅ Book & pay' : '✅ Book it' }, { id: 'bstart', title: '🔁 Change' }, { id: 'menu', title: '❌ Cancel' }] });
   return true;
 }
@@ -289,8 +296,8 @@ async function confirmDraft(ctx) {
   const deposit = b.deposit && stripeKey ? b.deposit : 0;
   const status = deposit ? 'awaiting_deposit' : S.bookings?.autoConfirm ? 'confirmed' : 'requested';
   const startsAt = zonedToUtc(b.day, b.time, tz(S)).toISOString().replace('T', ' ').slice(0, 19);
-  const id = Number(getDb().prepare('INSERT INTO bookings (tenant_id, wa_id, name, service, day, time, starts_at, status, deposit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(ctx.tenant.id, ctx.conv.waId, b.name || ctx.customer.name || null, b.service, b.day, b.time, startsAt, status, deposit).lastInsertRowid);
+  const id = Number(getDb().prepare('INSERT INTO bookings (tenant_id, wa_id, name, service, day, time, starts_at, status, deposit, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(ctx.tenant.id, ctx.conv.waId, b.name || ctx.customer.name || null, b.service, b.day, b.time, startsAt, status, deposit, b.phone ? `Phone: ${b.phone}` : null).lastInsertRowid);
   delete ctx.conv.data.booking;
   const booking = getBooking(ctx.tenant.id, id);
   if (b.rescheduleOf) {
@@ -334,10 +341,10 @@ async function customerCancel(ctx, id) {
 }
 
 function alertTeam(tenant, b, what) {
-  const text = `📅 Booking ${what}\n${b.service ? `${b.service}\n` : ''}${whenText(b)}\n${b.name || ''} (+${String(b.wa_id).replace(/^web:.*/, 'website chat')})${b.deposit ? `\nDeposit: ${money(b.deposit, sym(tenant.settings))}` : ''}`;
+  const text = `📅 Booking ${what}\n${b.service ? `${b.service}\n` : ''}${whenText(b)}\n${b.name || ''} (${String(b.wa_id).startsWith('web:') ? `website chat${b.notes ? `, ${b.notes}` : ''}` : `+${b.wa_id}`})${b.deposit ? `\nDeposit: ${money(b.deposit, sym(tenant.settings))}` : ''}`;
   emailShop(tenant, `Booking ${what.toLowerCase()}: ${whenText(b)}`, text, { button: 'Open Bookings' }).catch(() => {});
   const ev = /cancel/i.test(what) ? 'booking.cancelled' : /^confirmed –/.test(what) ? 'booking.confirmed' : 'booking.new';
-  sendHook(tenant, ev, { id: b.id, service: b.service || '', when: whenText(b), day: b.day, time: b.time, name: b.name || '', phone: String(b.wa_id).startsWith('web:') ? '' : `+${b.wa_id}`, notes: [what, b.notes].filter(Boolean).join(' – '), status: b.status }).catch(() => {});
+  sendHook(tenant, ev, { id: b.id, service: b.service || '', when: whenText(b), day: b.day, time: b.time, name: b.name || '', phone: String(b.wa_id).startsWith('web:') ? String(b.notes || '').match(/Phone: (\S+)/)?.[1] || '' : `+${b.wa_id}`, notes: [what, b.notes].filter(Boolean).join(' – '), status: b.status }).catch(() => {});
   const send = createSender(tenant);
   const tpl = tenant.settings.notifications?.templates?.staffAlert;
   for (const s of tenant.settings.notifications?.staffWaIds || []) {

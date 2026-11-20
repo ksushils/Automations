@@ -395,7 +395,22 @@ function setAddress(ctx, text) {
 }
 
 // ---------- enquiries & bookings shops ----------
+/** The AI said something is booked/confirmed – it can't book, so that would be a promise nobody made. */
+export const FAKE_BOOKING = /\b(you('| a)re (all )?(booked|confirmed|scheduled)|(appointment|booking|reservation|slot|table)\b[^.\n]{0,70}\b(is|has been|now|are)\s+(all\s+)?(set|booked|confirmed|reserved|scheduled)|i('ve| have) (booked|reserved|scheduled|confirmed)|(would you like|shall i|do you want me) to (confirm|book|reserve) (this|that|it|the|your))\b/i;
+/** Someone asks to book while bookings aren't switched on: take their details for the team instead of pretending. */
+export const WANTS_BOOKING = /(^|\b(i'?d like to|i would like to|i want to|can i|could i|please|let me|i need to|want to)\s+)(book|make an? (appointment|booking)|get an appointment|reserve)\b/;
+function appointmentRequest(ctx, intro) {
+  const url = ctx.S.business.bookingUrl;
+  if (url) {
+    ctx.reply({ type: 'cta', text: intro || 'You can pick a time and book online here.', buttonText: String(ctx.S.business.bookingLinkText || 'Book online').slice(0, 20), url });
+    return ctx.reply(leadOffer(ctx, 'Appointment request', 'Or would you like our team to arrange it with you?'));
+  }
+  ctx.reply({ type: 'text', text: intro || "I can't confirm appointments in this chat myself, but I'll pass your request to the team and they'll confirm a time with you. 🙂" });
+  return leadAction(ctx, 'call:Appointment request');
+}
+
 function bookInfo(ctx) {
+  if (!ctx.S.business.bookingUrl && !ctx.S.business.bookingInfo && leadSettings(ctx.S).enabled) return appointmentRequest(ctx);
   const url = ctx.S.business.bookingUrl || ctx.S.business.website;
   const text = ctx.S.business.bookingInfo || `You can book online${url ? ' here' : ''}. Tell me what you're interested in and I'll point you to the right page.`;
   if (url) return ctx.reply({ type: 'cta', text, buttonText: String(ctx.S.business.bookingLinkText || 'Book online').slice(0, 20), url });
@@ -469,6 +484,9 @@ export function extractShow(answer, sections = []) {
   return { text, show: hit || null };
 }
 export function extractChoices(answer) {
+  // the model sometimes writes its own buttons: a last line like "[ Yes ] [ No ]" → real buttons
+  const br = String(answer || '').match(/\n\s*((?:\[\s*[^\[\]\n]{1,30}?\s*\]\s*){2,4})$/);
+  if (br && !/\[CHOICES?:/i.test(br[1])) answer = `${String(answer).slice(0, br.index)}\n[CHOICES: ${[...br[1].matchAll(/\[\s*([^\]]+?)\s*\]/g)].map((x) => x[1]).join(' | ')}]`;
   const m = String(answer || '').match(/\n*\s*\[CHOICES?:\s*([^\]]*)\]\s*$/i);
   if (!m) return { text: String(answer || '').replace(/\[CHOICES?:[^\]]*\]/gi, '').trim(), choices: [] };
   const choices = [...new Set(m[1].split('|').map((c) => c.replace(/\s+/g, ' ').trim()).filter((c) => c && c.length <= 40))].slice(0, 3);
@@ -693,6 +711,7 @@ async function handleText(ctx, raw) {
   if (ctx.conv.state === 'booking_name' && !GREETING.test(t) && !COMMANDS.has(t)) return bookingText(ctx, text);
   if (bookingsEnabled(ctx.S) && /^(book|booking|book now|make a booking|i want to book|i'?d like to book|reserve|book a (slot|table|session|appointment))[.!]?$/.test(t)) return bookingAction(ctx, 'bstart');
   if (/^(my|see my|change my|check my|cancel my|reschedule( my)?) (booking|bookings|appointment|reservation)s?\b|^my bookings?$/.test(t)) return bookingAction(ctx, 'bmine');
+  if (!bookingsEnabled(ctx.S) && WANTS_BOOKING.test(t) && !/\b(how much|price|cost|fee|need to book|do i have to)\b/.test(t) && leadSettings(ctx.S).enabled && !LEAD_STATES.has(ctx.conv.state)) return appointmentRequest(ctx);
   // a day/time typed while choosing ("Friday afternoon"), or "book … next Tuesday at 2"
   if (bookingsEnabled(ctx.S) && ((ctx.conv.data.booking && !ctx.conv.data.booking.time && 'service' in ctx.conv.data.booking) || /\b(book|booking|appointment|reserve|slot)\b/.test(t))) {
     const r = await bookingFromText(ctx, text);
@@ -738,7 +757,8 @@ async function handleText(ctx, raw) {
     const first = !ctx.conv.data.greeted;
     ctx.conv.data.greeted = true;
     ctx.conv.state = 'idle';
-    const welcome = (ctx.S.business.welcomeMessage || 'Welcome!').replace('{{name}}', ctx.customer.name ? ` ${ctx.customer.name.split(' ')[0]}` : '');
+    let welcome = (ctx.S.business.welcomeMessage || 'Welcome!').replace('{{name}}', ctx.customer.name ? ` ${ctx.customer.name.split(' ')[0]}` : '');
+    if (bookingsOnly(ctx)) welcome = welcome.replace('Browse our products, ask me anything', 'Ask me anything'); // no shop in the chat
     ctx.reply(mainMenu(ctx, first ? welcome : undefined));
     const again = reorderOffer(ctx); // returning customer: one tap to repeat the last order
     if (again) ctx.reply(again);
@@ -1022,6 +1042,11 @@ async function askDirect(ctx, text) {
   const { text: noShow, show } = extractShow(out, ctx.conv.data?.page?.sections || []);
   const H = (m) => (show && String(ctx.conv.waId).startsWith('web:') ? { ...m, highlight: show } : m);
   const { text: plain, choices: offered } = extractChoices(noShow);
+  if (FAKE_BOOKING.test(plain) && !ctx.conv.humanHandover) {
+    // never let a made-up "you're booked" stand: show the real calendar, or take their details for the team
+    if (bookingsEnabled(ctx.S)) { ctx.reply({ type: 'text', text: "Let's find you a real time – pick one below. 🙂" }); return bookingAction(ctx, 'bstart'); }
+    return appointmentRequest(ctx);
+  }
   if (ctx.S.ai?.memory !== false && !/^qa:/.test(ctx.conv.waId)) {
     ctx.conv.data.memTurns = (ctx.conv.data.memTurns || 0) + 1;
     if (ctx.conv.data.memTurns % 4 === 2) extractMemory(ctx.tenant, ctx.conv.waId).then((f) => f?.length && rememberFacts(ctx.tenant.id, ctx.conv.waId, f)).catch(() => {});

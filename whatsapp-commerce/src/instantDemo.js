@@ -96,7 +96,13 @@ async function buildDemo(tenantId, token, origin) {
   if (!ok && !shopify) throw new Error("We couldn't read any pages from that website (it may block automated visits). Book a demo and we'll set it up by hand.");
 
   setState(token, { step: 'Writing your welcome menu and questions' });
-  const auto = import('./autoSetup.js').then(({ autoSetup }) => autoSetup(tenantId)).catch(() => null);
+  const auto = import('./autoSetup.js').then(({ autoSetup }) => autoSetup(tenantId)).then(async (r) => {
+    // a salon, clinic or experience: let them try real booking (typical services and times) in the demo
+    const { TRADES } = await import('./trades.js');
+    const t = getTenant(tenantId), T = TRADES[t?.settings?.trade];
+    if (T?.bookings && t.settings.store?.type === 'none' && !t.settings.bookings?.enabled) updateTenantSettings(tenantId, { bookings: { enabled: true, days: 14, perSlot: 1, autoConfirm: false, reminderHours: 0, ...T.bookings }, demo: { bookings: true } });
+    return r;
+  }).catch(() => null);
   let suggestions = [];
   try {
     const docs = listDocs(tenantId).slice(0, 10).map((d) => `- ${d.name}`).join('\n');
@@ -116,7 +122,8 @@ async function buildDemo(tenantId, token, origin) {
 export function claimDemo(token, { name, email }) {
   const t = demoTenantForToken(token);
   if (!t) return null;
-  // a kept demo becomes a live (protected) shop
+  // a kept demo becomes a live (protected) shop; the demo's sample booking times are switched off (the owner sets real ones)
+  if (t.settings.demo?.bookings) updateTenantSettings(t.id, { bookings: { enabled: false } });
   updateTenantSettings(t.id, { demo: null, claimedFromDemoAt: new Date().toISOString(), knowledge: { autoRefresh: true }, report: { monthlyEmail: true, unansweredEmail: true }, ...(name ? { business: { name } } : {}) });
   if (name) getDb().prepare('UPDATE tenants SET name = ? WHERE id = ?').run(name, t.id);
   getDb().prepare("UPDATE tenants SET owner_email = ?, trial_ends_at = datetime('now', ?), subscription_status = 'trialing' WHERE id = ?").run(email, `+${config.trialDays} days`, t.id);
@@ -159,15 +166,14 @@ function demoPage(token, s, layout) {
   </div>
   <div class="card" id="failed" hidden><h3 style="margin-top:0">We couldn't build it automatically</h3><p id="ferr" class="mute"></p><p><a class="btn" href="/demo">Book a demo instead</a></p></div>
 </div>
-<div class="phone" aria-label="Chat preview"><div class="ph-top"><span class="ph-av">${name.slice(0, 1).toUpperCase()}</span><div><b>${name}</b><div style="font-size:12px;opacity:.85">online · replies instantly</div></div></div>
-  <div class="ph-msgs" id="msgs"><div class="ph-note">🔒 Demo chat – messages are not sent to anyone</div></div>
-  <form class="ph-in" id="f"><input id="q" placeholder="Type a message" autocomplete="off" ${s?.status === 'ready' ? '' : 'disabled'}><button aria-label="Send">➤</button></form></div>
+<div><div class="phone" aria-label="Chat preview"><div id="wbox" class="ph-box"><div class="ph-msgs"><div class="ph-note">Building your assistant…</div></div></div></div>
+  <p class="mute" style="text-align:center;font-size:13px">🔒 Demo chat – messages are not sent to anyone</p></div>
 </div></section>
 <style>
 .demo-grid{display:grid;grid-template-columns:1fr 360px;gap:28px;align-items:start}@media(max-width:820px){.demo-grid{grid-template-columns:1fr}}
 .phone{border:10px solid #1b1f1d;border-radius:34px;overflow:hidden;background:#efeae2;height:620px;display:flex;flex-direction:column;box-shadow:0 18px 40px rgba(0,0,0,.18);max-width:360px;width:100%;margin:0 auto}
 .ph-top{background:#075e54;color:#fff;display:flex;gap:10px;align-items:center;padding:12px}.ph-av{width:36px;height:36px;border-radius:50%;background:#25d366;display:grid;place-items:center;font-weight:700}
-.ph-msgs{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:6px}.ph-note{align-self:center;background:#fff7d6;color:#5b5030;font-size:12px;padding:4px 10px;border-radius:8px;margin-bottom:6px}
+.ph-box{flex:1;min-height:0;display:flex;flex-direction:column}.ph-box .wc-p{border-radius:0!important;box-shadow:none!important}.ph-msgs{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:6px}.ph-note{align-self:center;background:#fff7d6;color:#5b5030;font-size:12px;padding:4px 10px;border-radius:8px;margin-bottom:6px}
 .b{max-width:85%;padding:7px 10px;border-radius:8px;font-size:14.5px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;color:#111;box-shadow:0 1px 1px rgba(0,0,0,.08)}.b.in{background:#fff;align-self:flex-start}.b.out{background:#d9fdd3;align-self:flex-end}
 .b a{color:#0b6b38}.btns{display:flex;flex-wrap:wrap;gap:6px;align-self:flex-start;max-width:85%}.btns button{background:#fff;border:1px solid #cfd8d3;color:#0b6b38;border-radius:16px;padding:6px 10px;font-size:13.5px;cursor:pointer}
 .ph-in{display:flex;gap:6px;padding:8px;background:#f0f0f0}.ph-in input{flex:1;border:0;border-radius:20px;padding:10px 14px;font-size:15px}.ph-in button{border:0;background:#128c4a;color:#fff;border-radius:50%;width:42px;height:42px;font-size:16px;cursor:pointer}
@@ -179,37 +185,15 @@ function demoPage(token, s, layout) {
 (() => {
   const token = ${JSON.stringify(token)};
   let tenant = ${JSON.stringify(s?.tenantId || '')};
-  const sid = 'demo' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const $ = (id) => document.getElementById(id);
-  const msgs = $('msgs');
-  const escH = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-  const fmt = (t) => escH(t).replace(/\\*([^*\\n]+)\\*/g, '<b>$1</b>').replace(/_([^_\\n]+)_/g, '<i>$1</i>').replace(/(https?:\\/\\/[^\\s<]+)/g, '<a href="$1" target="_blank" rel="noopener nofollow">$1</a>');
-  const bubble = (t, cls) => { const d = document.createElement('div'); d.className = 'b ' + cls; d.innerHTML = fmt(t); msgs.appendChild(d); msgs.scrollTop = 1e9; };
-  function render(m) {
-    if (m.type === 'cta') { bubble(m.text + '\\n' + (m.url || ''), 'in'); return; }
-    bubble(m.text || '', 'in');
-    const opts = (m.buttons || []).concat(...(m.sections || []).map((s) => s.rows || []));
-    if (opts.length) { const w = document.createElement('div'); w.className = 'btns'; opts.slice(0, 10).forEach((o) => { const b = document.createElement('button'); b.textContent = o.title; b.onclick = () => send({ actionId: o.id, label: o.title }); w.appendChild(b); }); msgs.appendChild(w); msgs.scrollTop = 1e9; }
-  }
-  let busy = false;
-  async function send({ text, actionId, label }) {
-    if (busy || !tenant) return; busy = true;
-    bubble(text || label, 'out');
-    const ty = document.createElement('div'); ty.className = 'typing'; ty.textContent = 'typing…'; msgs.appendChild(ty); msgs.scrollTop = 1e9;
-    try {
-      const r = await fetch('/chat/' + tenant + '/message', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid, text, actionId }) }).then((x) => x.json());
-      ty.remove(); (r.replies || []).forEach(render);
-      if (r.error) bubble(r.error, 'in');
-    } catch { ty.remove(); bubble('Sorry, something went wrong – please try again.', 'in'); }
-    busy = false;
-  }
-  $('f').onsubmit = (e) => { e.preventDefault(); const q = $('q').value.trim(); if (!q) return; $('q').value = ''; send({ text: q }); };
+  const ask = (q) => { if (window.waChat) window.waChat.ask(q); };
   function ready(st) {
-    tenant = st.tenantId; $('progress').hidden = true; $('ready').hidden = false; $('q').disabled = false;
+    tenant = st.tenantId; $('progress').hidden = true; $('ready').hidden = false;
     $('h').textContent = 'Meet the ' + (st.name || 'your') + ' assistant';
     $('lead').textContent = 'It has read ' + st.pages + ' pages of ' + st.origin + (st.shopify ? ' and is connected to your Shopify catalogue' : '') + '. Ask it what your customers ask you.';
-    $('chips').innerHTML = ''; (st.suggestions || []).forEach((q) => { const b = document.createElement('button'); b.textContent = q; b.onclick = () => send({ text: q }); $('chips').appendChild(b); });
-    if (!msgs.querySelector('.b')) send({ text: 'Hi' });
+    $('chips').innerHTML = ''; (st.suggestions || []).forEach((q) => { const b = document.createElement('button'); b.textContent = q; b.onclick = () => ask(q); $('chips').appendChild(b); });
+    // the real website chat (calendar, buttons, file upload), shown inside the phone
+    if (!window.__waChat) { $('wbox').innerHTML = ''; const sc = document.createElement('script'); sc.src = '/chat-widget/' + encodeURIComponent(tenant) + '.js'; sc.setAttribute('data-embed', '#wbox'); document.body.appendChild(sc); }
   }
   async function poll() {
     const st = await fetch('/try/' + token + '/status').then((r) => r.json()).catch(() => null);
