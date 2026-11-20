@@ -39,6 +39,8 @@ import { difyAllowed } from '../ai/gate.js';
 import { listChatLeads, setLeadStatus } from '../leads.js';
 import { sendHook, SHEETS_SCRIPT } from '../hooks.js';
 import { TRADES, tradeList, applyTrade } from '../trades.js';
+import { ratingSummary, ratingAsk, ratingsOn } from '../ratings.js';
+import { isTyping } from './webchat.js';
 import { googleConfigured, calendarConnected, authUrl, disconnectCalendar, redirectUri } from '../gcal.js';
 import { resumeAi } from '../coexistence.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
@@ -688,10 +690,18 @@ export function adminRouter() {
     const c = resumeAi(req.tenant.id, req.params.waId);
     res.json({ ok: true, aiPausedUntil: c.aiPausedUntil, humanHandover: c.humanHandover });
   });
-  r.post('/tenants/:tenantId/conversations/:waId/handover', requireTenant, (req, res) => {
+  r.post('/tenants/:tenantId/conversations/:waId/handover', requireTenant, wrap(async (req, res) => {
+    const was = getDb().prepare('SELECT human_handover FROM conversations WHERE tenant_id = ? AND wa_id = ?').get(req.tenant.id, req.params.waId)?.human_handover;
     const c = setHandover(req.tenant.id, req.params.waId, !!req.body?.on);
-    res.json({ ok: true, humanHandover: c.humanHandover });
-  });
+    // the team finished: ask how it went (website chat or WhatsApp, inside the 24h window)
+    let asked = false;
+    if (was && !req.body?.on && req.body?.askRating !== false && ratingsOn(req.tenant.settings) && !/^qa:/.test(req.params.waId)) {
+      asked = await createSender(req.tenant)(req.params.waId, ratingAsk('Thanks for chatting with our team! How did we do?')).then(() => true, () => false);
+    }
+    res.json({ ok: true, humanHandover: c.humanHandover, ratingAsked: asked });
+  }));
+  r.get('/tenants/:tenantId/conversations/:waId/typing', requireTenant, (req, res) => res.json({ typing: isTyping(req.tenant.id, req.params.waId) }));
+  r.get('/tenants/:tenantId/ratings', requireTenant, (req, res) => res.json(ratingSummary(req.tenant.id, Math.min(365, Number(req.query.days) || 30))));
 
   // Customers + broadcasts (approved WhatsApp templates only)
   r.get('/tenants/:tenantId/customers', requireTenant, (req, res) => {

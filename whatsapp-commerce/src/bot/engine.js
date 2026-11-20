@@ -23,6 +23,7 @@ import { directConfigured, directTurn, suggestChoices, summarizeTopic, extractMe
 import { isUnsure, recordUnanswered } from '../insights.js';
 import { voiceConfigured, transcribe } from '../ai/voice.js';
 import { bookingsEnabled, bookingAction, bookingText, bookingFromText } from '../bookings.js';
+import { saveRating, addRatingComment } from '../ratings.js';
 import { ownerCommand } from '../briefing.js';
 import { visionConfigured, describeForSearch } from '../ai/vision.js';
 import { difyAllowed } from '../ai/gate.js';
@@ -607,6 +608,12 @@ async function handleAction(ctx, id) {
       if (!bookingsEnabled(ctx.S) && !['bcxl', 'bmine', 'bcal'].includes(cmd)) return bookInfo(ctx);
       return bookingAction(ctx, cmd, arg);
     case 'ask': return ctx.reply({ type: 'text', text: 'Sure, type your question and I\'ll answer from our information. 🙂' });
+    case 'rate': {
+      const team = !!(ctx.conv.humanHandover || ctx.conv.data?.staffActiveAt || ctx.conv.data?.handoverAt);
+      const id = saveRating(ctx.tenant.id, ctx.conv.waId, arg, team ? 'team' : 'ai');
+      if (Number(arg) === 1) { ctx.conv.state = 'rate_comment'; ctx.conv.data.ratingId = id; return ctx.reply({ type: 'buttons', text: "Sorry to hear that. What could we have done better? (Type it, or tap Skip.)", buttons: [{ id: 'menu', title: 'Skip' }] }); }
+      return ctx.reply({ type: 'text', text: Number(arg) === 3 ? 'Thank you! 😊 That made our day.' : 'Thanks for letting us know. 🙂' });
+    }
     case 'cat': return showCategory(ctx, arg);
     case 'p': return showProduct(ctx, arg);
     case 'v': { const [pid, vid] = arg.split('|'); return chooseVariant(ctx, pid, vid); }
@@ -707,6 +714,14 @@ async function handleText(ctx, raw) {
   if (['stock_email', 'order_addr'].includes(ctx.conv.state)) {
     if (GREETING.test(t) || COMMANDS.has(t)) ctx.conv.state = 'idle';
     else { const r = ctx.conv.state === 'stock_email' ? await stockEmailText(ctx, text) : await orderAddressText(ctx, text); if (r !== false) return r; }
+  }
+  if (ctx.conv.state === 'rate_comment') {
+    ctx.conv.state = 'idle';
+    if (!GREETING.test(t) && !COMMANDS.has(t) && ctx.conv.data.ratingId) {
+      addRatingComment(ctx.tenant.id, ctx.conv.data.ratingId, text);
+      emailShop(ctx.tenant, 'A customer rated a chat "not good"', `A customer wasn't happy with a chat:\n\n"${String(text).slice(0, 500)}"\n\nOpen the Inbox to see the chat.`, { button: 'Open the Inbox' }).catch(() => {});
+      return ctx.reply({ type: 'text', text: "Thank you – I've passed that to the team. 🙏" });
+    }
   }
   if (ctx.conv.state === 'booking_name' && !GREETING.test(t) && !COMMANDS.has(t)) return bookingText(ctx, text);
   if (bookingsEnabled(ctx.S) && /^(book|booking|book now|make a booking|i want to book|i'?d like to book|reserve|book a (slot|table|session|appointment))[.!]?$/.test(t)) return bookingAction(ctx, 'bstart');

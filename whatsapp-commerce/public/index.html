@@ -494,14 +494,17 @@ async function simulator() {
 // ---------- inbox ----------
 async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
   alerts.sel = sel;
-  const [{ conversations: all }, { agents, me }] = await Promise.all([api(T('/conversations')), api(T('/agents')).catch(() => ({ agents: [], me: '' }))]);
+  const [{ conversations: all }, { agents, me }, rt] = await Promise.all([api(T('/conversations')), api(T('/agents')).catch(() => ({ agents: [], me: '' })), api(T('/ratings')).catch(() => null)]);
+  clearInterval(alerts.typingTimer);
+  const face = (n) => ({ 3: '😀', 2: '😐', 1: '😞' })[n] || '';
   const conversations = all.filter((c) => filter === 'all' || (filter === 'mine' && c.assigned_to === me) || (filter === 'human' && c.human_handover) || (filter === 'unassigned' && !c.assigned_to));
   setTimeout(() => { const cb = document.getElementById('isnd'); if (cb) cb.onchange = () => { store.set('wc_sound', cb.checked ? '1' : '0'); if (cb.checked) alertPing(); }; }, 0);
   const preview = (c) => { const b = c.last || {}; return esc((b.text || b.caption || b.type || '').slice(0, 60)); };
   $('#app').innerHTML = `<div class="split"><div class="card" style="max-height:600px;overflow:auto"><h2>Chats</h2>
+    ${rt && rt.great + rt.ok + rt.bad ? `<p class="mute" style="font-size:13px;margin:0 0 6px" title="Ratings in the last ${rt.days} days (assistant ${rt.ai}, team ${rt.team})">Ratings, ${rt.days} days: 😀 ${rt.great} · 😐 ${rt.ok} · 😞 ${rt.bad}</p>` : ''}
     <label style="display:flex;gap:6px;align-items:center;font-size:13px;margin-bottom:6px"><input type="checkbox" id="isnd" style="width:auto" ${store.get('wc_sound') === '0' ? '' : 'checked'}> 🔔 Sound for new messages</label>
     <select id="ifil" style="margin-bottom:8px">${[['all', 'All chats'], ['human', 'Needs a human'], ['mine', 'Assigned to me'], ['unassigned', 'Unassigned']].map(([k, l]) => `<option value="${k}" ${filter === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-    ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${pausedNow(c) ? '<span class="pill warn">⏸ Paused – owner replying</span>' : ''}${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}${c.assigned_to ? ` <span class="pill">👤 ${esc(c.assigned_to)}</span>` : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
+    ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${rt?.byChat?.[c.wa_id] ? `<span title="${esc(rt.byChat[c.wa_id].comment || 'Customer rating')}">${face(rt.byChat[c.wa_id].score)}</span> ` : ''}${pausedNow(c) ? '<span class="pill warn">⏸ Paused – owner replying</span>' : ''}${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}${c.assigned_to ? ` <span class="pill">👤 ${esc(c.assigned_to)}</span>` : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
     </div><div class="card" id="thread"><p class="mute">Select a chat</p></div></div>`;
   $('#app').querySelectorAll('[data-w]').forEach((el) => (el.onclick = () => inbox(el.dataset.w, filter)));
   $('#ifil').onchange = () => { store.set('wc_inbox', $('#ifil').value); inbox(sel, $('#ifil').value); };
@@ -512,13 +515,28 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
     <select id="asg" style="width:auto"><option value="">Unassigned</option>${agents.map((a) => `<option ${c?.assigned_to === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></h2>
     ${c?.cart?.length ? `<p class="mute">Cart: ${c.cart.map((i) => esc(i.title) + ' ×' + i.quantity).join(', ')}</p>` : ''}
     <div class="chat" id="tchat">${messages.map((m) => (m.direction === 'in' ? m.body.fileUrl ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<a href="${esc(m.body.fileUrl)}" target="_blank" rel="noopener"><img src="${esc(m.body.fileUrl)}" alt="photo" style="max-width:220px"></a>` : `<a href="${esc(m.body.fileUrl)}" target="_blank" rel="noopener">📎 ${esc(m.body.fileName || 'file')} – open</a>`}</div>` : (m.body.mediaId ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<img data-media="${esc(m.body.mediaId)}" alt="image">` : `<a href="#" data-mediadl="${esc(m.body.mediaId)}">📎 ${esc(m.body.raw || 'file')} – open</a>`}${m.body.text && !/^\[/.test(m.body.text) ? '<br>' + esc(m.body.text) : ''}</div>` : bubble(m.body.text || `[${m.body.raw || m.type}]`, 'in')) : bubble(m.body, 'out'))).join('')}</div>
-    <div style="display:flex;gap:8px;margin-top:8px"><input id="rep" placeholder="Reply as staff (takes over from bot)"><button class="btn" id="rs">Send</button></div>`;
+    <div id="ityping" class="mute" style="font-size:13px;min-height:18px"></div>
+    <div style="display:flex;gap:8px;margin-top:4px">${(S.tenant.settings.inbox?.savedReplies || []).length ? `<select id="sr" style="width:auto;max-width:160px"><option value="">💬 Saved replies</option>${S.tenant.settings.inbox.savedReplies.map((r, i) => `<option value="${i}">${esc(r.title)}</option>`).join('')}</select>` : ''}<input id="rep" placeholder="Reply as staff (takes over from bot)"><button class="btn" id="rs">Send</button></div>
+    <details style="margin-top:8px"><summary class="mute" style="font-size:13px">Saved replies${S.role === 'owner' ? ' – add or edit' : ''}</summary>
+      <p class="mute" style="font-size:13px">One per line: <b>title | message</b>. <code>{{name}}</code> becomes the customer's first name.</p>
+      <textarea id="srtxt" style="min-height:110px" ${S.role === 'owner' ? '' : 'readonly'} placeholder="Opening hours | Hi {{name}}, we're open Monday to Saturday, 9am to 5pm.&#10;Call back | Thanks {{name}}! Someone from the team will call you today.">${esc((S.tenant.settings.inbox?.savedReplies || []).map((r) => `${r.title} | ${r.text}`).join('\n'))}</textarea>
+      ${S.role === 'owner' ? '<p><button class="btn ghost" id="srsave">Save saved replies</button></p>' : ''}</details>`;
   $('#tchat').scrollTop = 1e9;
+  if ($('#sr')) $('#sr').onchange = () => { const r = S.tenant.settings.inbox.savedReplies[$('#sr').value]; if (r) { const first = String(c?.name || '').split(' ')[0]; $('#rep').value = r.text.replace(/\{\{\s*name\s*\}\}\s?/g, first ? first + ' ' : '').replace(/\s+([,!.?])/g, '$1'); $('#rep').focus(); } $('#sr').value = ''; };
+  if ($('#srsave')) $('#srsave').onclick = async () => {
+    const list = $('#srtxt').value.split('\n').map((l) => l.split('|')).filter((p) => p.length >= 2 && p[0].trim() && p.slice(1).join('|').trim()).map((p) => ({ title: p[0].trim().slice(0, 40), text: p.slice(1).join('|').trim().slice(0, 1000) })).slice(0, 50);
+    try { S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { inbox: { savedReplies: list } } })).tenant; toast(`${list.length} saved repl${list.length === 1 ? 'y' : 'ies'}`); inbox(sel, filter); } catch (e) { toast(e.message); }
+  };
+  if (/^web:/.test(sel)) alerts.typingTimer = setInterval(async () => {
+    if (S.tab !== 'inbox' || alerts.sel !== sel || !$('#ityping')) return clearInterval(alerts.typingTimer);
+    const r = await api(T(`/conversations/${encodeURIComponent(sel)}/typing`)).catch(() => null);
+    if ($('#ityping')) $('#ityping').textContent = r?.typing ? '✍️ The customer is typing…' : '';
+  }, 2500);
   const blobUrl = async (id) => { const r = await fetch('/api' + T('/media/' + id), { headers: { Authorization: 'Bearer ' + S.key } }); if (!r.ok) throw new Error('media unavailable'); return URL.createObjectURL(await r.blob()); };
   $('#tchat').querySelectorAll('img[data-media]').forEach(async (img) => { try { img.src = await blobUrl(img.dataset.media); } catch { img.replaceWith(document.createTextNode('[image expired]')); } });
   $('#tchat').querySelectorAll('[data-mediadl]').forEach((a) => (a.onclick = async (e) => { e.preventDefault(); try { window.open(await blobUrl(a.dataset.mediadl)); } catch (err) { toast(err.message); } }));
   $('#asg').onchange = async () => { await api(T(`/conversations/${sel}/assign`), { method: 'POST', body: { to: $('#asg').value || null } }); inbox(sel, filter); };
-  $('#ho').onclick = async () => { await api(T(`/conversations/${sel}/handover`), { method: 'POST', body: { on: !c?.human_handover } }); inbox(sel, filter); };
+  $('#ho').onclick = async () => { const r = await api(T(`/conversations/${sel}/handover`), { method: 'POST', body: { on: !c?.human_handover } }); if (r.ratingAsked) toast('Back to the bot – the customer was asked to rate the chat'); inbox(sel, filter); };
   if ($('#rsm')) $('#rsm').onclick = async () => { await api(T(`/conversations/${sel}/resume`), { method: 'POST' }); toast('The AI is answering this chat again'); inbox(sel, filter); };
   $('#rs').onclick = async () => { const r = await api(T(`/conversations/${sel}/reply`), { method: 'POST', body: { text: $('#rep').value } }); if (!r.ok) toast(r.error + ' ' + (r.hint || '')); inbox(sel); };
 }
@@ -1302,6 +1320,9 @@ async function grow() {
       <div><label>Title</label><input id="wct" value="${esc(s.webchat?.title || '')}" placeholder="${esc(s.business.name)}"></div>
       <div><label>Message beside the chat button (empty = none)</label><input id="wcl" value="${esc(s.webchat?.launcherText ?? '')}" placeholder="Hello! I'm the chat assistant. Talk to me anytime." maxlength="120"></div>
       <div><label>Subtitle</label><input id="wcs" value="${esc(s.webchat?.subtitle || '')}" placeholder="Ask us anything – we usually reply instantly"></div>
+      <div><label>Short form before the chat</label><select id="wcpc"><option value="off">Off</option><option value="optional" ${s.webchat?.preChat?.enabled && !s.webchat?.preChat?.required ? 'selected' : ''}>Optional (name, email, phone – with Skip)</option><option value="required" ${s.webchat?.preChat?.enabled && s.webchat?.preChat?.required ? 'selected' : ''}>Required</option></select></div>
+      <div><label>Sound when a reply arrives</label><select id="wcsnd"><option value="true">On (visitors can mute)</option><option value="false" ${s.webchat?.sound === false ? 'selected' : ''}>Off</option></select></div>
+      <div><label>Ask for a rating after the chat</label><select id="wcrt"><option value="true">Yes</option><option value="false" ${s.webchat?.rating === false ? 'selected' : ''}>No</option></select></div>
       <div><label>Visitors can send photos and PDFs</label><select id="wcup"><option value="true">Yes</option><option value="false" ${s.webchat?.uploads === false ? 'selected' : ''}>No</option></select></div>
       <div><label>Colour</label><input id="wcc" type="color" value="${esc(s.webchat?.color || s.storefront?.brandColor || '#128c4a')}"></div></div>
       <h3 style="margin-top:16px">👋 Pop-up greeting</h3>
@@ -1329,7 +1350,7 @@ async function grow() {
   $('#gdl').onclick = () => { const c = $('#gqr canvas'); if (!c) return; const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = 'whatsapp-qr.png'; a.click(); };
   $('#gsave').onclick = async () => {
     try {
-      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { webchat: { enabled: $('#wcen').value === 'true', uploads: $('#wcup').value === 'true', title: $('#wct').value, subtitle: $('#wcs').value, color: $('#wcc').value, opener: { enabled: $('#wpon').value === 'true', text: $('#wptext').value.trim() || null, delaySeconds: Number($('#wpdelay').value) || 0, mobileDelaySeconds: Number($('#wpmdelay').value) || 0, pages: $('#wppages').value.split('\n').map((l) => l.split(/\s=\s|=/)).filter((p) => p.length >= 2 && p[0].trim() && p.slice(1).join('=').trim()).map((p) => ({ match: p[0].trim().slice(0, 100), text: p.slice(1).join('=').trim().slice(0, 200) })).slice(0, 20) } }, storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
+      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { webchat: { enabled: $('#wcen').value === 'true', uploads: $('#wcup').value === 'true', sound: $('#wcsnd').value === 'true', rating: $('#wcrt').value === 'true', preChat: { enabled: $('#wcpc').value !== 'off', required: $('#wcpc').value === 'required' }, title: $('#wct').value, subtitle: $('#wcs').value, color: $('#wcc').value, opener: { enabled: $('#wpon').value === 'true', text: $('#wptext').value.trim() || null, delaySeconds: Number($('#wpdelay').value) || 0, mobileDelaySeconds: Number($('#wpmdelay').value) || 0, pages: $('#wppages').value.split('\n').map((l) => l.split(/\s=\s|=/)).filter((p) => p.length >= 2 && p[0].trim() && p.slice(1).join('=').trim()).map((p) => ({ match: p[0].trim().slice(0, 100), text: p.slice(1).join('=').trim().slice(0, 200) })).slice(0, 20) } }, storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
       toast('Saved');
     } catch (e) { toast(e.message); }
   };

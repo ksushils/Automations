@@ -199,6 +199,16 @@ CREATE TABLE IF NOT EXISTS quality_runs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_quality_runs ON quality_runs(tenant_id, id);
+CREATE TABLE IF NOT EXISTS chat_ratings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  wa_id TEXT NOT NULL,
+  score INTEGER NOT NULL,          -- 3 great, 2 ok, 1 not good
+  handled_by TEXT NOT NULL DEFAULT 'ai', -- ai | team
+  comment TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_ratings ON chat_ratings(tenant_id, id);
 CREATE TABLE IF NOT EXISTS unanswered (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id TEXT NOT NULL,

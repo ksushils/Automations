@@ -193,7 +193,7 @@ export function deleteTenant(id, { force = false } = {}) {
   if (t && !force && !t.settings?.demo) throw Object.assign(new Error(`${id} is a live shop, not a demo – it can only be deleted from the super admin dashboard`), { status: 409 });
   const d = getDb();
   d.prepare('DELETE FROM knowledge_fts WHERE tenant_id = ?').run(id);
-  for (const table of ['messages', 'orders', 'conversations', 'customers', 'usage', 'knowledge_chunks', 'knowledge_docs', 'bookings', 'unanswered', 'consents', 'store_events', 'flows', 'scheduled', 'campaigns', 'message_status', 'staff', 'link_clicks', 'chat_leads', 'stock_alerts', 'quality_runs']) d.prepare(`DELETE FROM ${table} WHERE tenant_id = ?`).run(id);
+  for (const table of ['messages', 'orders', 'conversations', 'customers', 'usage', 'knowledge_chunks', 'knowledge_docs', 'bookings', 'unanswered', 'consents', 'store_events', 'flows', 'scheduled', 'campaigns', 'message_status', 'staff', 'link_clicks', 'chat_leads', 'stock_alerts', 'quality_runs', 'chat_ratings']) d.prepare(`DELETE FROM ${table} WHERE tenant_id = ?`).run(id);
   d.prepare('DELETE FROM tenants WHERE id = ?').run(id);
 }
 

@@ -97,6 +97,8 @@ export function startLead(ctx, kind, topic) {
   const lead = { kind: kind === 'call' ? 'call' : 'email', topic: String(topic || 'general').slice(0, 80), done: [], startedAt: new Date().toISOString() };
   if (!isWeb(ctx)) lead.phone = '+' + String(ctx.conv.waId).replace(/\D/g, ''); // on WhatsApp we already have their number
   if (ctx.customer?.email && isEmail(ctx.customer.email)) lead.email = ctx.customer.email;
+  const known = cleanPhone(json(ctx.customer?.attributes, {})?.phone); // from the form before the chat
+  if (!lead.phone && known) lead.phone = known;
   ctx.conv.data.lead = lead;
   if (lead.kind === 'call' && lead.phone) ctx.reply({ type: 'text', text: `📞 Sure – we'll call you on ${lead.phone}.` });
   return continueLead(ctx);

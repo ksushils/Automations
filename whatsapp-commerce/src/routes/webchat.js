@@ -42,6 +42,9 @@ const MAGIC = {
 };
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const FILES_PER_DAY = 10;
+// Visitor typing (for the Inbox): kept in memory for a few seconds, never stored.
+const typingAt = new Map();
+export const isTyping = (tenantId, waId) => Date.now() - (typingAt.get(`${tenantId}:${waId}`) || 0) < 6000;
 const KEEP_DAYS = 90;
 export function chatFilesDir() {
   return config.databasePath === ':memory:' ? path.join(os.tmpdir(), 'wa-chat-files') : path.join(path.dirname(path.resolve(config.databasePath)), 'chat-files');
@@ -105,6 +108,13 @@ export function openerConfig(t) {
 }
 export { openerFor };
 
+/** The optional form before the website chat (off by default): settings.webchat.preChat = { enabled, required, email, phone, intro }. */
+export function preChatConfig(t) {
+  const P = t.settings.webchat?.preChat || {};
+  if (!P.enabled) return null;
+  return { required: !!P.required, email: P.email !== false, phone: P.phone !== false, intro: String(P.intro || 'Before we start, who are we chatting with? So the team can get back to you if we get cut off.').slice(0, 200) };
+}
+
 export function webchatRouter() {
   const r = express.Router();
   r.use('/chat', cors);
@@ -163,6 +173,36 @@ export function webchatRouter() {
     const code = createHandoff(t.id, visitorId(sessionId));
     const text = `Hi! I'd like to continue my chat from your website (ref ${code})`;
     res.json({ code, url: `https://wa.me/${num}?text=${encodeURIComponent(text)}` });
+  });
+
+  r.post('/chat/:tenantId/typing', limiter, (req, res) => {
+    const sessionId = String(req.body?.sessionId || '');
+    if (!SESSION.test(sessionId) || !getTenant(req.params.tenantId)?.active) return res.sendStatus(204);
+    if (typingAt.size > 5000) typingAt.clear();
+    typingAt.set(`${req.params.tenantId}:${visitorId(sessionId)}`, Date.now());
+    res.sendStatus(204);
+  });
+
+  // The short form before the chat: name, email, phone (whichever the shop asks for)
+  r.post('/chat/:tenantId/profile', limiter, (req, res) => {
+    const t = getTenant(req.params.tenantId);
+    const sessionId = String(req.body?.sessionId || '');
+    if (!t?.active) return res.sendStatus(404);
+    if (!SESSION.test(sessionId)) return res.status(400).json({ error: 'invalid session' });
+    const P = preChatConfig(t);
+    const c = (v, n) => String(v ?? '').replace(/[\r\n<>]+/g, ' ').trim().slice(0, n);
+    const name = c(req.body?.name, 80), email = c(req.body?.email, 200).toLowerCase(), phone = c(req.body?.phone, 30);
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return res.status(400).json({ error: 'Please check your email address' });
+    if (phone && phone.replace(/\D/g, '').length < 7) return res.status(400).json({ error: 'Please check your phone number' });
+    if (P?.required && (!name || (P.email && P.phone ? !email && !phone : (P.email && !email) || (P.phone && !phone)))) return res.status(400).json({ error: 'Please fill in your details to start the chat' });
+    const waId = visitorId(sessionId);
+    const d = getDb();
+    d.prepare("INSERT INTO customers (tenant_id, wa_id, name, last_seen_at) VALUES (?, ?, ?, datetime('now')) ON CONFLICT(tenant_id, wa_id) DO UPDATE SET last_seen_at = datetime('now')").run(t.id, waId, name || null);
+    if (name) d.prepare('UPDATE customers SET name = ? WHERE tenant_id = ? AND wa_id = ?').run(name, t.id, waId);
+    if (email) d.prepare('UPDATE customers SET email = ? WHERE tenant_id = ? AND wa_id = ?').run(email, t.id, waId);
+    if (phone) d.prepare("UPDATE customers SET attributes = json_set(COALESCE(attributes, '{}'), '$.phone', ?) WHERE tenant_id = ? AND wa_id = ?").run(phone, t.id, waId);
+    if (name || email || phone) logMessage(t.id, waId, 'in', { type: 'event', text: `[visitor details: ${[name, email, phone].filter(Boolean).join(' · ')}]`, channel: 'web' });
+    res.json({ ok: true });
   });
 
   // A photo or PDF from the visitor (sent as the raw file): saved, shown in the Inbox, and the team is asked to look.
@@ -249,6 +289,8 @@ export function webchatRouter() {
       whatsapp: t.settings.business.whatsappNumber ? String(t.settings.business.whatsappNumber).replace(/\D/g, '') : null,
       upload: W.uploads !== false && !isDemo(t),
       sound: W.sound !== false, // a soft ping when a reply arrives (the visitor can mute it)
+      preChat: preChatConfig(t),
+      rating: W.rating !== false && !isDemo(t), // "How did we do?" after a few messages and a quiet spell
       badge: PLANS[t.plan]?.badge ? { text: `Powered by ${config.productName}`, url: `${config.publicUrl}/?ref=chat-${encodeURIComponent(t.id)}` } : null,
     };
     res.send(WIDGET.replace('__CFG__', JSON.stringify(cfg).replace(/</g, '\\u003c')));
@@ -279,6 +321,7 @@ var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;f
 '.wc-f{display:flex;gap:6px;padding:8px;border-top:1px solid #e3e8e5;background:#fff}.wc-f input{flex:1;border:1px solid #d6ddd9;border-radius:10px;padding:9px;font:inherit}.wc-f button{border:0;background:'+C.color+';color:#fff;border-radius:10px;padding:0 14px;cursor:pointer;font:inherit}'+
 '.wc-cal{margin-top:8px}.wc-cal b{font-size:13px}.wc-g{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-top:4px;text-align:center;font-size:12px}.wc-g i{font-style:normal;color:#889}.wc-g button{border:1px solid '+C.color+';background:#fff;color:'+C.color+';border-radius:8px;padding:0;min-height:32px;cursor:pointer;font:inherit;font-weight:600}.wc-g button:hover{background:'+C.color+';color:#fff}.wc-g .x{color:#c8ced0;line-height:32px}'+
 '.wc-w{font-size:12px;text-align:center;padding:4px;color:#667}.wc-w a{color:inherit}.wc-t{align-self:flex-start;color:#889;font-size:12px}'+
+'.wc-pc{background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 1px rgba(0,0,0,.06);display:flex;flex-direction:column;gap:7px}.wc-pc input{border:1px solid #d6ddd9;border-radius:9px;padding:9px;font:inherit}.wc-pc button{border:0;background:'+C.color+';color:#fff;border-radius:9px;padding:9px;cursor:pointer;font:inherit}.wc-pc .sk{background:none;color:#667;text-decoration:underline;padding:2px}.wc-pc small{color:#667}.wc-pc .er{color:#b42318;font-size:12px}'+
 '.wc-snd{float:right;background:none;border:0;color:#fff;font-size:15px;cursor:pointer;opacity:.85;padding:4px 6px}'+
 '.wc-lf{display:flex;gap:5px;margin-top:8px}.wc-lf input{flex:1;min-width:0;border:1px solid #d6ddd9;border-radius:10px;padding:8px 9px;font:inherit;font-size:13px}.wc-lf button{border:0;background:'+C.color+';color:#fff;border-radius:10px;padding:0 11px;cursor:pointer;font:inherit;font-size:13px}'+
 '.wc-f .wc-up{background:#fff;color:'+C.color+';border:1px solid #d6ddd9;padding:0 10px;font-size:18px}'+
@@ -375,12 +418,15 @@ function render(m){
   if(!h&&!acts.length)return;
   add(h+(acts.length?'<div class="wc-c">'+acts.join('')+'</div>':''),'a');
 }
+var sentN=0,rateT=null;
+function rateLater(){if(!C.rating||got(K+'-rated',1)||sentN<3)return;clearTimeout(rateT);rateT=setTimeout(function(){if(busy||got(K+'-rated',1))return;mark(K+'-rated','1',1);render({type:'buttons',text:'How did we do today?',buttons:[{id:'rate:3',title:'😀 Great'},{id:'rate:2',title:'😐 OK'},{id:'rate:1',title:'😞 Not good'}]})},90000)}
 function send(body,label){
   if(label)add(esc(label),'u');
+  if(body.text){sentN++;clearTimeout(rateT)}if(body.actionId&&/^rate:/.test(body.actionId))mark(K+'-rated','1',1);
   var typing=add('…','a wc-t');busy++;
   if(body.text||(body.actionId&&body.actionId!=='open'))mark(K+'-chatted','1',1);
   fetch(C.api+'/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({sessionId:sid,page:pg(),utm:UTM||undefined},body))})
-  .then(function(r){return r.json()}).then(function(r){busy--;typing.remove();(r.replies||[]).forEach(render);if((r.replies||[]).length)ping();if(r.lastId)last=Math.max(last,r.lastId)})
+  .then(function(r){return r.json()}).then(function(r){busy--;typing.remove();(r.replies||[]).forEach(render);if((r.replies||[]).length)ping();if(r.lastId)last=Math.max(last,r.lastId);rateLater()})
   .catch(function(){busy--;typing.remove();add('Sorry – connection problem, please try again.','a')});
 }
 function poll(){if(busy)return;fetch(C.api+'/poll?sessionId='+sid+'&after='+last).then(function(r){return r.json()}).then(function(r){if(last&&r.messages&&r.messages.length){r.messages.forEach(render);ping()}last=Math.max(last,r.lastId||0)}).catch(function(){})}
@@ -388,6 +434,7 @@ var PB=w.querySelector('.wc-pb');if(PB){PB.textContent=C.badge.text;PB.href=C.ba
 var WA=w.querySelector('.wc-wa');if(WA)WA.onclick=function(e){e.preventDefault();var win=window.open('','_blank');fetch(C.api+'/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})}).then(function(r){return r.json()}).then(function(r){var u=r.url||WA.href;if(win)win.location=u;else location.href=u}).catch(function(){if(win)win.location=WA.href})};
 M.addEventListener('click',function(e){var hl=e.target.closest('button[data-hl]');if(hl){showSection(hl.dataset.hl);return}var b=e.target.closest('button[data-a]');if(b)send({actionId:b.dataset.a},b.dataset.l)});
 F.onsubmit=function(e){e.preventDefault();var v=I.value.trim();if(!v)return;I.value='';send({text:v},v)};
+var lastTyping=0;I.addEventListener('input',function(){var n=Date.now();if(n-lastTyping<3000||!I.value)return;lastTyping=n;fetch(C.api+'/typing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})}).catch(function(){})});
 var SND=w.querySelector('.wc-snd');function sndIcon(){if(SND){SND.textContent=MUTE?'🔕':'🔔';SND.setAttribute('aria-label',MUTE?'Sound off':'Sound on')}}sndIcon();
 if(SND)SND.onclick=function(){MUTE=!MUTE;mark(K+'-mute',MUTE?'1':'0');sndIcon();if(!MUTE)ping()};
 window.waChat={ask:function(q){if(!open)toggle();send({text:q},q)}};
@@ -399,7 +446,13 @@ if(UP&&FI){UP.onclick=function(){FI.click()};FI.onchange=function(){var f=FI.fil
   .then(function(r){return r.json()}).then(function(r){busy--;typing.remove();if(r.error)add(esc(r.error),'a');(r.replies||[]).forEach(render);if(r.lastId)last=Math.max(last,r.lastId)})
   .catch(function(){busy--;typing.remove();add('Sorry – the file didn\'t send, please try again.','a')})}}
 var O=C.opener;
-function toggle(first,label){if(EMB&&open)return;open=!open;P.classList.toggle('on',open);w.classList.toggle('open',open);if(open){I.focus();if(L)L.style.display='none';if(!M.children.length)send(first||(O?{actionId:'open'}:{text:C.greeting}),label);clearInterval(polling);polling=setInterval(poll,8000);poll()}else clearInterval(polling)}
+function preChat(go){var Q=C.preChat,b=d.createElement('div');b.className='wc-pc';
+  b.innerHTML='<b></b>'+'<input class="n" placeholder="Your name" autocomplete="name" maxlength="80">'+(Q.email?'<input class="e" type="email" placeholder="Email" autocomplete="email" maxlength="200">':'')+(Q.phone?'<input class="p" type="tel" placeholder="Phone" autocomplete="tel" maxlength="30">':'')+'<span class="er"></span><button class="go">Start chat</button>'+(Q.required?'':'<button class="sk">Skip</button>')+'<small>We only use these to reply to you.</small>';
+  b.querySelector('b').textContent=Q.intro;M.appendChild(b);
+  var v=function(c){var x=b.querySelector(c);return x?x.value.trim():''};
+  b.querySelector('.go').onclick=function(){fetch(C.api+'/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,name:v('.n'),email:v('.e'),phone:v('.p')})}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'Please check your details');b.remove();mark(K+'-pc','1');go()})}).catch(function(e){b.querySelector('.er').textContent=e.message})};
+  var sk=b.querySelector('.sk');if(sk)sk.onclick=function(){b.remove();mark(K+'-pc','1');go()}}
+function toggle(first,label){if(EMB&&open)return;open=!open;P.classList.toggle('on',open);w.classList.toggle('open',open);if(open){I.focus();if(L)L.style.display='none';if(!M.children.length){var go=function(){send(first||(O?{actionId:'open'}:{text:C.greeting}),label)};if(C.preChat&&!got(K+'-pc'))preChat(go);else go()}clearInterval(polling);polling=setInterval(poll,8000);poll()}else clearInterval(polling)}
 w.querySelector('.wc-b').onclick=function(){toggle()};w.querySelector('.wc-x').onclick=function(){toggle()};
 var L=w.querySelector('.wc-l');
 function snoozed(){return got(K+'-hint')==='1'}
