@@ -112,6 +112,21 @@ const ftsQuery = (q) => {
 };
 const STOP = new Set('the and for you your are was were have has had can could would should will what when where which who why how does did do this that with from about into our not but any all get got there their them they its it is me my we us an a of to in on at by be or if'.split(' '));
 
+/**
+ * For a price question, the passages that have a price AND name what was asked about ("hygienist" → the HYGIENE fee
+ * row, not the crown and Invisalign rows of the same fee guide). Rarer words count more. Exported for tests.
+ */
+const PRICE_WORDS = new Set(['much', 'price', 'prices', 'pricing', 'cost', 'costs', 'fee', 'fees', 'charge', 'charges', 'tariff', 'quote',
+  'appointment', 'appointments', 'session', 'sessions', 'visit', 'treatment', 'treatments', 'service', 'services', 'book', 'booking', 'one', 'per']); // too general to say what was asked about
+export function priceRows(query, rows, n = 3) {
+  const priced = rows.filter((r) => /£\s?\d|\d\s?(gbp|pounds?)\b/i.test(r.text));
+  const subject = queryTerms(query).filter((t) => !PRICE_WORDS.has(t) && t.length >= 4).map((t) => new RegExp(`\\b${t.slice(0, Math.max(4, t.length - (t.length >= 8 ? 3 : 1))).replace(/[^\p{L}\p{N}]/gu, '')}`, 'iu'));
+  if (!subject.length) return priced.slice(0, n);
+  const df = subject.map((re) => priced.filter((r) => re.test(r.text)).length || 1);
+  return priced.map((r, i) => ({ r, i, s: subject.reduce((sum, re, j) => sum + (re.test(r.text) ? 1 / df[j] : 0), 0) }))
+    .filter((x) => x.s > 0).sort((a, b) => b.s - a.s || a.i - b.i).slice(0, n).map((x) => x.r);
+}
+
 export async function retrieve(tenantId, query, { k = 4 } = {}) {
   const d = getDb();
   const ranked = new Map(); // chunk_id -> score (reciprocal rank fusion)
@@ -122,7 +137,7 @@ export async function retrieve(tenantId, query, { k = 4 } = {}) {
   if (fq) {
     const rows = d.prepare('SELECT chunk_id, text, bm25(knowledge_fts) AS s FROM knowledge_fts WHERE knowledge_fts MATCH ? AND tenant_id = ? ORDER BY s LIMIT ?').all(fq, tenantId, priceQ ? 40 : 12);
     rows.slice(0, 12).forEach((r, i) => add(Number(r.chunk_id), i));
-    if (priceQ) rows.filter((r) => /£\s?\d|\d\s?(gbp|pounds?)\b/i.test(r.text)).slice(0, 3).forEach((r, i) => { add(Number(r.chunk_id), i); add(Number(r.chunk_id), i); });
+    if (priceQ) priceRows(query, rows).forEach((r, i) => { add(Number(r.chunk_id), i); add(Number(r.chunk_id), i); });
   }
   if (embeddingsEnabled()) {
     try {

@@ -209,14 +209,21 @@ test('knowledge retrieval: "hygienist" finds the fee guide that says "Hygiene" (
 });
 
 test('knowledge retrieval: a price question gets the fee table row, not the pages that talk about the treatment most', async () => {
-  const { indexDoc, retrieve } = await import('../src/ai/rag.js');
+  const { indexDoc, retrieve, priceRows } = await import('../src/ai/rag.js');
   const { getDb } = await import('../src/db.js');
   const t = makeTenant();
   const d = getDb();
   const add = (name, text) => { const id = d.prepare("INSERT INTO knowledge_docs (tenant_id, name, source, status, text) VALUES (?, ?, 'text', 'ready', ?)").run(t.id, name, text).lastInsertRowid; return indexDoc(d.prepare('SELECT * FROM knowledge_docs WHERE id = ?').get(id)); };
-  const intro = 'Our Fee Guide outlines the costs and an explanation of your record should you require it. Please ask our staff for more information about any treatment plan, payment options and finance. '.repeat(6);
-  await add('Dental Treatment Fee Guide', `${intro}\nHYGIENE\nDental Treatment | Private Fee\nDirect Access Dental Hygiene 30 minutes visit | £70\nExtended Hygiene 40 minutes visit | £90\nIMPLANTS\nSingle implant | £2,400`);
-  for (let i = 1; i <= 4; i++) await add(`Dental Hygiene ${i}`, `Dental hygiene appointment with our hygienist. The hygienist removes plaque. Book a hygiene appointment with a hygienist for healthy gums. Hygienist appointments help hygiene. `.repeat(3));
-  const hits = await retrieve(t.id, 'how much is a hygienist appointment?', { k: 4 });
+  const section = (title, rows) => `${title}\nDental Treatment | Private Fee\n${rows.map(([n, p]) => `${n} (a standard appointment to assess and plan, fee redeemable against treatment) | ${p}`).join('\n')}\n`;
+  await add('Dental Treatment Fee Guide', 'Our Fee Guide outlines the costs. The fees listed are a guide only, all private fees are subject to consultation and appointment time.\n'
+    + section('CROWNS', [['Crown consultation', '£40'], ['Porcelain crown', 'From £900'], ['Zirconia crown', 'From £900']])
+    + section('BRIDGES', [['Bridge consultation', '£40'], ['Porcelain bridge', 'From £500 per unit'], ['Ceramic bridge', 'From £700 per unit']])
+    + section('INVISALIGN', [['Invisalign consultation', 'FREE'], ['Invisalign Express', '£1,650'], ['Invisalign Go Plus', '£3,300']])
+    + section('VENEERS', [['Veneer consultation', '£40'], ['Composite veneer', 'From £250'], ['Porcelain veneer', 'From £400']])
+    + section('HYGIENE', [['Direct Access Dental Hygiene 30 minutes visit', '£70'], ['Extended Hygiene 40 minutes visit', '£90']]));
+  for (let i = 1; i <= 3; i++) await add(`Dental Hygiene ${i}`, 'Make an appointment with the hygienist. Our hygienists remove plaque and tartar, and a hygienist appointment keeps gums healthy. '.repeat(4));
+  const hits = await retrieve(t.id, 'how much is a hygienist appointment?', { k: 6 });
   assert.ok(hits.some((h) => /£70/.test(h.text)), 'the fee row is in what the AI sees');
+  const rows = [{ text: 'Porcelain crown appointment | From £900' }, { text: 'Invisalign Express | £1,650' }, { text: 'HYGIENE / Dental Hygiene visit | £70' }];
+  assert.match(priceRows('how much is a hygienist appointment?', rows)[0].text, /£70/);
 });
