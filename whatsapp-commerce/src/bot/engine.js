@@ -24,6 +24,7 @@ import { isUnsure, recordUnanswered } from '../insights.js';
 import { voiceConfigured, transcribe } from '../ai/voice.js';
 import { bookingsEnabled, bookingAction, bookingText, bookingFromText } from '../bookings.js';
 import { saveRating, addRatingComment } from '../ratings.js';
+import { teamStatus } from '../hours.js';
 import { ownerCommand } from '../briefing.js';
 import { visionConfigured, describeForSearch } from '../ai/vision.js';
 import { difyAllowed } from '../ai/gate.js';
@@ -571,6 +572,11 @@ function noteGap(ctx, question, answer) {
 }
 
 function handover(ctx, text) {
+  // outside team hours: don't promise a quick reply – the assistant keeps helping and the team gets their details
+  const team = teamStatus(ctx.S);
+  if (!team.open && !text && leadSettings(ctx.S).enabled && !String(ctx.conv.waId).startsWith('qa:')) {
+    return ctx.reply(leadOffer(ctx, 'Talk to the team', `🌙 Our team is away right now${team.next ? ` – back ${team.next}` : ''}. Leave your details and they'll get back to you then, or ask me anything in the meantime.`));
+  }
   ctx.conv.humanHandover = true;
   ctx.conv.state = 'idle';
   ctx.conv.data = { ...(ctx.conv.data || {}), handoverAt: new Date().toISOString(), handoverAckAt: null };

@@ -40,7 +40,9 @@ import { listChatLeads, setLeadStatus } from '../leads.js';
 import { sendHook, SHEETS_SCRIPT } from '../hooks.js';
 import { TRADES, tradeList, applyTrade } from '../trades.js';
 import { ratingSummary, ratingAsk, ratingsOn } from '../ratings.js';
-import { isTyping } from './webchat.js';
+import { isTyping, typingDraft, liveVisitors, sayHello } from './webchat.js';
+import { teamStatus } from '../hours.js';
+import { suggestReply, translateText } from '../ai/assist.js';
 import { googleConfigured, calendarConnected, authUrl, disconnectCalendar, redirectUri } from '../gcal.js';
 import { resumeAi } from '../coexistence.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
@@ -700,7 +702,16 @@ export function adminRouter() {
     }
     res.json({ ok: true, humanHandover: c.humanHandover, ratingAsked: asked });
   }));
-  r.get('/tenants/:tenantId/conversations/:waId/typing', requireTenant, (req, res) => res.json({ typing: isTyping(req.tenant.id, req.params.waId) }));
+  r.get('/tenants/:tenantId/conversations/:waId/typing', requireTenant, (req, res) => res.json({ typing: isTyping(req.tenant.id, req.params.waId), draft: typingDraft(req.tenant.id, req.params.waId) }));
+  r.get('/tenants/:tenantId/visitors', requireTenant, (req, res) => res.json({ enabled: req.tenant.settings.webchat?.liveVisitors === true, visitors: liveVisitors(req.tenant.id), team: teamStatus(req.tenant.settings) }));
+  r.post('/tenants/:tenantId/visitors/:sessionId/hello', requireTenant, (req, res) => {
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Type a message first' });
+    if (!sayHello(req.tenant.id, req.params.sessionId, text)) return res.status(404).json({ error: 'That visitor has left the site' });
+    res.json({ ok: true });
+  });
+  r.post('/tenants/:tenantId/conversations/:waId/suggest', requireTenant, wrap(async (req, res) => res.json(await suggestReply(req.tenant, req.params.waId))));
+  r.post('/tenants/:tenantId/translate', requireTenant, wrap(async (req, res) => res.json(await translateText(req.tenant, String(req.body?.text || ''), String(req.body?.to || 'English')))));
   r.get('/tenants/:tenantId/ratings', requireTenant, (req, res) => res.json(ratingSummary(req.tenant.id, Math.min(365, Number(req.query.days) || 30))));
 
   // Customers + broadcasts (approved WhatsApp templates only)

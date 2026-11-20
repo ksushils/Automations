@@ -12,6 +12,7 @@ import { enqueue } from '../whatsapp/webhook.js';
 import { rateLimit } from './web.js';
 import { isDemo, DEMO_MESSAGE_CAP } from '../instantDemo.js';
 import { createHandoff } from '../continuity.js';
+import { teamStatus } from '../hours.js';
 
 /*
  * Website AI chat: the same bot (AI, knowledge base, catalogue, cart, flows, human hand-over) on the shop's own site.
@@ -43,8 +44,28 @@ const MAGIC = {
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const FILES_PER_DAY = 10;
 // Visitor typing (for the Inbox): kept in memory for a few seconds, never stored.
-const typingAt = new Map();
-export const isTyping = (tenantId, waId) => Date.now() - (typingAt.get(`${tenantId}:${waId}`) || 0) < 6000;
+const typingAt = new Map(); // key → { at, draft }
+export const isTyping = (tenantId, waId) => Date.now() - (typingAt.get(`${tenantId}:${waId}`)?.at || 0) < 6000;
+export const typingDraft = (tenantId, waId) => (isTyping(tenantId, waId) ? typingAt.get(`${tenantId}:${waId}`)?.draft || '' : '');
+
+// Live visitors (opt-in, settings.webchat.liveVisitors): who is on the site now and which pages they've seen.
+// In memory only, for 10 minutes after their last page – nothing is stored.
+const live = new Map(); // tenantId → Map(sessionId → { first, last, pages: [{url,title,at}], ref, hello })
+const LIVE_MS = 10 * 60000;
+export function liveVisitors(tenantId) {
+  const m = live.get(tenantId);
+  if (!m) return [];
+  const now = Date.now();
+  for (const [k, v] of m) if (now - v.last > LIVE_MS) m.delete(k);
+  return [...m.entries()].map(([sid, v]) => ({ sessionId: sid, waId: visitorId(sid), since: new Date(v.first).toISOString(), lastSeen: new Date(v.last).toISOString(), page: v.pages.at(-1) || null, pages: v.pages.length, ref: v.ref })).sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+}
+/** A message from the team to a visitor who hasn't opened the chat: shown on their next page heartbeat. */
+export function sayHello(tenantId, sessionId, text) {
+  const v = live.get(tenantId)?.get(sessionId);
+  if (!v) return false;
+  v.hello = String(text).slice(0, 500);
+  return true;
+}
 const KEEP_DAYS = 90;
 export function chatFilesDir() {
   return config.databasePath === ':memory:' ? path.join(os.tmpdir(), 'wa-chat-files') : path.join(path.dirname(path.resolve(config.databasePath)), 'chat-files');
@@ -177,10 +198,35 @@ export function webchatRouter() {
 
   r.post('/chat/:tenantId/typing', limiter, (req, res) => {
     const sessionId = String(req.body?.sessionId || '');
-    if (!SESSION.test(sessionId) || !getTenant(req.params.tenantId)?.active) return res.sendStatus(204);
+    const t = getTenant(req.params.tenantId);
+    if (!SESSION.test(sessionId) || !t?.active) return res.sendStatus(204);
     if (typingAt.size > 5000) typingAt.clear();
-    typingAt.set(`${req.params.tenantId}:${visitorId(sessionId)}`, Date.now());
+    // the draft itself only when the shop turned on "typing preview"
+    const draft = t.settings.webchat?.typingPreview === true ? String(req.body?.draft || '').replace(/[\r\n]+/g, ' ').slice(0, 300) : '';
+    typingAt.set(`${t.id}:${visitorId(sessionId)}`, { at: Date.now(), draft });
     res.sendStatus(204);
+  });
+
+  // page heartbeat for the live visitors list (only when the shop switched it on); answers with a team "hello"
+  r.post('/chat/:tenantId/seen', rateLimit({ max: 120, key: (req) => `${req.ip}:seen` }), (req, res) => {
+    const t = getTenant(req.params.tenantId);
+    const sessionId = String(req.body?.sessionId || '');
+    if (!t?.active || t.settings.webchat?.liveVisitors !== true || !SESSION.test(sessionId)) return res.json({});
+    const page = cleanPage(req.body?.page);
+    let m = live.get(t.id);
+    if (!m) { m = new Map(); live.set(t.id, m); }
+    if (m.size > 2000) m.clear();
+    const now = Date.now();
+    const v = m.get(sessionId) || { first: now, last: now, pages: [], ref: String(req.body?.ref || '').replace(/[^\w.:/?=&%-]/g, '').slice(0, 200) || null };
+    v.last = now;
+    if (page && v.pages.at(-1)?.url !== page.url) { v.pages.push({ url: page.url, title: page.title, at: new Date(now).toISOString() }); if (v.pages.length > 20) v.pages.shift(); }
+    m.set(sessionId, v);
+    const hello = v.hello;
+    if (hello) {
+      delete v.hello;
+      logMessage(t.id, visitorId(sessionId), 'out', { type: 'text', text: hello, staff: 'Team' });
+    }
+    res.json(hello ? { hello } : {});
   });
 
   // The short form before the chat: name, email, phone (whichever the shop asks for)
@@ -290,6 +336,10 @@ export function webchatRouter() {
       upload: W.uploads !== false && !isDemo(t),
       sound: W.sound !== false, // a soft ping when a reply arrives (the visitor can mute it)
       preChat: preChatConfig(t),
+      team: (() => { const s = teamStatus(t.settings); return s.on ? { open: s.open, next: s.next } : null; })(),
+      live: W.liveVisitors === true && !isDemo(t),
+      preview: W.typingPreview === true,
+      hide: { paths: (Array.isArray(W.hidePaths) ? W.hidePaths : String(W.hidePaths || '').split('\n')).map((p) => String(p).trim()).filter((p) => p.startsWith('/')).slice(0, 30), mobile: W.hideOnMobile === true },
       rating: W.rating !== false && !isDemo(t), // "How did we do?" after a few messages and a quiet spell
       badge: PLANS[t.plan]?.badge ? { text: `Powered by ${config.productName}`, url: `${config.publicUrl}/?ref=chat-${encodeURIComponent(t.id)}` } : null,
     };
@@ -304,6 +354,8 @@ const WIDGET = String.raw`(function(){
 if(window.__waChat)return;window.__waChat=1;
 var C=__CFG__,d=document,K='wachat-'+C.tenant,sid,last=0,open=false,polling,busy=0;
 var CS=d.currentScript,EMB=null;try{var sel=CS&&CS.getAttribute('data-embed');if(sel)EMB=d.querySelector(sel)}catch(e){}
+if(!EMB&&C.hide){var pth=location.pathname.toLowerCase();if(C.hide.paths.some(function(p){p=p.toLowerCase();return p.slice(-1)==='*'?pth.indexOf(p.slice(0,-1))===0:pth===p||pth===p.replace(/\/$/,'')})||(C.hide.mobile&&window.matchMedia&&matchMedia('(max-width:640px)').matches))return}
+if(C.team)C.subtitle=C.team.open?'🟢 Our team is online – ask us anything':'🌙 Team back '+(C.team.next||'soon')+' – the assistant can help now';
 try{sid=localStorage.getItem(K)}catch(e){}
 if(!sid){sid=(crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()).replace(/[^A-Za-z0-9]/g,'').slice(0,32);try{localStorage.setItem(K,sid)}catch(e){}}
 var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#111}'+
@@ -434,7 +486,8 @@ var PB=w.querySelector('.wc-pb');if(PB){PB.textContent=C.badge.text;PB.href=C.ba
 var WA=w.querySelector('.wc-wa');if(WA)WA.onclick=function(e){e.preventDefault();var win=window.open('','_blank');fetch(C.api+'/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})}).then(function(r){return r.json()}).then(function(r){var u=r.url||WA.href;if(win)win.location=u;else location.href=u}).catch(function(){if(win)win.location=WA.href})};
 M.addEventListener('click',function(e){var hl=e.target.closest('button[data-hl]');if(hl){showSection(hl.dataset.hl);return}var b=e.target.closest('button[data-a]');if(b)send({actionId:b.dataset.a},b.dataset.l)});
 F.onsubmit=function(e){e.preventDefault();var v=I.value.trim();if(!v)return;I.value='';send({text:v},v)};
-var lastTyping=0;I.addEventListener('input',function(){var n=Date.now();if(n-lastTyping<3000||!I.value)return;lastTyping=n;fetch(C.api+'/typing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid})}).catch(function(){})});
+var lastTyping=0;I.addEventListener('input',function(){var n=Date.now();if(n-lastTyping<(C.preview?1200:3000)||!I.value)return;lastTyping=n;fetch(C.api+'/typing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,draft:C.preview?I.value:undefined})}).catch(function(){})});
+if(C.live&&!EMB){var beats=0,beat=function(){if(d.hidden||beats++>60)return;fetch(C.api+'/seen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,page:{url:location.origin+location.pathname,title:d.title},ref:beats===1?d.referrer:''})}).then(function(r){return r.json()}).then(function(r){if(r.hello){if(!open){SKIPGREET=1;toggle()}render({type:'text',text:r.hello});ping();poll()}}).catch(function(){})};setTimeout(beat,1500);setInterval(beat,30000)}
 var SND=w.querySelector('.wc-snd');function sndIcon(){if(SND){SND.textContent=MUTE?'🔕':'🔔';SND.setAttribute('aria-label',MUTE?'Sound off':'Sound on')}}sndIcon();
 if(SND)SND.onclick=function(){MUTE=!MUTE;mark(K+'-mute',MUTE?'1':'0');sndIcon();if(!MUTE)ping()};
 window.waChat={ask:function(q){if(!open)toggle();send({text:q},q)}};
@@ -452,7 +505,8 @@ function preChat(go){var Q=C.preChat,b=d.createElement('div');b.className='wc-pc
   var v=function(c){var x=b.querySelector(c);return x?x.value.trim():''};
   b.querySelector('.go').onclick=function(){fetch(C.api+'/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,name:v('.n'),email:v('.e'),phone:v('.p')})}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'Please check your details');b.remove();mark(K+'-pc','1');go()})}).catch(function(e){b.querySelector('.er').textContent=e.message})};
   var sk=b.querySelector('.sk');if(sk)sk.onclick=function(){b.remove();mark(K+'-pc','1');go()}}
-function toggle(first,label){if(EMB&&open)return;open=!open;P.classList.toggle('on',open);w.classList.toggle('open',open);if(open){I.focus();if(L)L.style.display='none';if(!M.children.length){var go=function(){send(first||(O?{actionId:'open'}:{text:C.greeting}),label)};if(C.preChat&&!got(K+'-pc'))preChat(go);else go()}clearInterval(polling);polling=setInterval(poll,8000);poll()}else clearInterval(polling)}
+var SKIPGREET=0;
+function toggle(first,label){if(EMB&&open)return;open=!open;P.classList.toggle('on',open);w.classList.toggle('open',open);if(open){I.focus();if(L)L.style.display='none';if(!M.children.length&&!SKIPGREET){var go=function(){send(first||(O?{actionId:'open'}:{text:C.greeting}),label)};if(C.preChat&&!got(K+'-pc'))preChat(go);else go()}clearInterval(polling);polling=setInterval(poll,8000);poll()}else clearInterval(polling)}
 w.querySelector('.wc-b').onclick=function(){toggle()};w.querySelector('.wc-x').onclick=function(){toggle()};
 var L=w.querySelector('.wc-l');
 function snoozed(){return got(K+'-hint')==='1'}

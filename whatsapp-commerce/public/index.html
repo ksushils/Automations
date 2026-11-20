@@ -133,6 +133,22 @@ function alertPing() {
   if (store.get('wc_sound') === '0') return;
   try { const ac = (alerts.ac ||= new (window.AudioContext || window.webkitAudioContext)()); const t = ac.currentTime; [0, 0.16].forEach((dt, i) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = i ? 1175 : 880; g.gain.setValueAtTime(0.0001, t + dt); g.gain.exponentialRampToValueAtTime(0.18, t + dt + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.28); o.connect(g); g.connect(ac.destination); o.start(t + dt); o.stop(t + dt + 0.3); }); } catch {}
 }
+// Visitors on the website right now (when the shop switched the list on), with "Say hello"
+async function liveBox() {
+  const box = document.getElementById('livebox');
+  if (!box) return;
+  const v = await api(T('/visitors')).catch(() => null);
+  if (!v?.enabled) { box.innerHTML = ''; return; }
+  const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? 'now' : `${m} min`; };
+  box.innerHTML = `<details ${v.visitors.length ? 'open' : ''} style="margin-bottom:8px"><summary style="font-size:13px"><b>👀 On your website now (${v.visitors.length})</b>${v.team?.on ? ` · ${v.team.open ? '🟢 team online' : '🌙 team away'}` : ''}</summary>
+    ${v.visitors.slice(0, 15).map((x) => `<div class="list-item" style="font-size:13px"><div>${esc(x.page?.title || x.page?.url || 'A page')}</div><div class="mute">${x.pages} page${x.pages > 1 ? 's' : ''} · on site ${ago(x.since)}${x.ref ? ` · from ${esc(x.ref.replace(/^https?:\/\//, '').slice(0, 40))}` : ''}</div><button class="btn ghost" data-hello="${esc(x.sessionId)}" style="padding:3px 8px;margin-top:4px">👋 Say hello</button></div>`).join('') || '<p class="mute" style="font-size:13px">Nobody right now.</p>'}</details>`;
+  box.querySelectorAll('[data-hello]').forEach((b) => (b.onclick = async () => {
+    const text = prompt('Message to show this visitor (the chat opens for them):', 'Hi! 👋 Can I help you find anything?');
+    if (!text) return;
+    try { await api(T(`/visitors/${encodeURIComponent(b.dataset.hello)}/hello`), { method: 'POST', body: { text } }); toast('Sent – it pops up on their next page check (within 30 seconds)'); } catch (e) { toast(e.message); }
+  }));
+}
+
 function startAlerts() {
   if (alerts.timer || !S.tenant || S.super && !S.tenantId) return;
   const tick = async () => {
@@ -145,6 +161,7 @@ function startAlerts() {
       else toast('💬 New customer message – see the Inbox');
     }
     alerts.last = p.lastIn;
+    if (S.tab === 'inbox') liveBox();
   };
   tick(); alerts.timer = setInterval(tick, 10000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = alerts.title; });
@@ -498,9 +515,11 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
   clearInterval(alerts.typingTimer);
   const face = (n) => ({ 3: '😀', 2: '😐', 1: '😞' })[n] || '';
   const conversations = all.filter((c) => filter === 'all' || (filter === 'mine' && c.assigned_to === me) || (filter === 'human' && c.human_handover) || (filter === 'unassigned' && !c.assigned_to));
+  setTimeout(liveBox, 0);
   setTimeout(() => { const cb = document.getElementById('isnd'); if (cb) cb.onchange = () => { store.set('wc_sound', cb.checked ? '1' : '0'); if (cb.checked) alertPing(); }; }, 0);
   const preview = (c) => { const b = c.last || {}; return esc((b.text || b.caption || b.type || '').slice(0, 60)); };
   $('#app').innerHTML = `<div class="split"><div class="card" style="max-height:600px;overflow:auto"><h2>Chats</h2>
+    <div id="livebox"></div>
     ${rt && rt.great + rt.ok + rt.bad ? `<p class="mute" style="font-size:13px;margin:0 0 6px" title="Ratings in the last ${rt.days} days (assistant ${rt.ai}, team ${rt.team})">Ratings, ${rt.days} days: 😀 ${rt.great} · 😐 ${rt.ok} · 😞 ${rt.bad}</p>` : ''}
     <label style="display:flex;gap:6px;align-items:center;font-size:13px;margin-bottom:6px"><input type="checkbox" id="isnd" style="width:auto" ${store.get('wc_sound') === '0' ? '' : 'checked'}> 🔔 Sound for new messages</label>
     <select id="ifil" style="margin-bottom:8px">${[['all', 'All chats'], ['human', 'Needs a human'], ['mine', 'Assigned to me'], ['unassigned', 'Unassigned']].map(([k, l]) => `<option value="${k}" ${filter === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
@@ -516,12 +535,25 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
     ${c?.cart?.length ? `<p class="mute">Cart: ${c.cart.map((i) => esc(i.title) + ' ×' + i.quantity).join(', ')}</p>` : ''}
     <div class="chat" id="tchat">${messages.map((m) => (m.direction === 'in' ? m.body.fileUrl ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<a href="${esc(m.body.fileUrl)}" target="_blank" rel="noopener"><img src="${esc(m.body.fileUrl)}" alt="photo" style="max-width:220px"></a>` : `<a href="${esc(m.body.fileUrl)}" target="_blank" rel="noopener">📎 ${esc(m.body.fileName || 'file')} – open</a>`}</div>` : (m.body.mediaId ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<img data-media="${esc(m.body.mediaId)}" alt="image">` : `<a href="#" data-mediadl="${esc(m.body.mediaId)}">📎 ${esc(m.body.raw || 'file')} – open</a>`}${m.body.text && !/^\[/.test(m.body.text) ? '<br>' + esc(m.body.text) : ''}</div>` : bubble(m.body.text || `[${m.body.raw || m.type}]`, 'in')) : bubble(m.body, 'out'))).join('')}</div>
     <div id="ityping" class="mute" style="font-size:13px;min-height:18px"></div>
-    <div style="display:flex;gap:8px;margin-top:4px">${(S.tenant.settings.inbox?.savedReplies || []).length ? `<select id="sr" style="width:auto;max-width:160px"><option value="">💬 Saved replies</option>${S.tenant.settings.inbox.savedReplies.map((r, i) => `<option value="${i}">${esc(r.title)}</option>`).join('')}</select>` : ''}<input id="rep" placeholder="Reply as staff (takes over from bot)"><button class="btn" id="rs">Send</button></div>
+    <div style="display:flex;gap:8px;margin-top:4px">${(S.tenant.settings.inbox?.savedReplies || []).length ? `<select id="sr" style="width:auto;max-width:160px"><option value="">💬 Saved replies</option>${S.tenant.settings.inbox.savedReplies.map((r, i) => `<option value="${i}">${esc(r.title)}</option>`).join('')}</select>` : ''}<input id="rep" placeholder="Reply as staff (takes over from bot)"><button class="btn ghost" id="rsug" title="The AI drafts a reply from your own information – you check it and press Send">✨ Suggest</button><button class="btn" id="rs">Send</button></div>
+    <div style="margin-top:6px;font-size:13px"><a href="#" id="trin">🌐 Translate their last message</a> <span id="trout" class="mute"></span></div>
     <details style="margin-top:8px"><summary class="mute" style="font-size:13px">Saved replies${S.role === 'owner' ? ' – add or edit' : ''}</summary>
       <p class="mute" style="font-size:13px">One per line: <b>title | message</b>. <code>{{name}}</code> becomes the customer's first name.</p>
       <textarea id="srtxt" style="min-height:110px" ${S.role === 'owner' ? '' : 'readonly'} placeholder="Opening hours | Hi {{name}}, we're open Monday to Saturday, 9am to 5pm.&#10;Call back | Thanks {{name}}! Someone from the team will call you today.">${esc((S.tenant.settings.inbox?.savedReplies || []).map((r) => `${r.title} | ${r.text}`).join('\n'))}</textarea>
       ${S.role === 'owner' ? '<p><button class="btn ghost" id="srsave">Save saved replies</button></p>' : ''}</details>`;
   $('#tchat').scrollTop = 1e9;
+  $('#rsug').onclick = async () => { $('#rsug').disabled = true; $('#rsug').textContent = '✨ Writing…'; try { const r = await api(T(`/conversations/${encodeURIComponent(sel)}/suggest`), { method: 'POST' }); $('#rep').value = r.text; $('#rep').focus(); if (r.sources?.length) toast('From: ' + r.sources.join(', ')); } catch (e) { toast(e.message); } $('#rsug').disabled = false; $('#rsug').textContent = '✨ Suggest'; };
+  $('#trin').onclick = async (e) => {
+    e.preventDefault();
+    const last = [...messages].reverse().find((m) => m.direction === 'in' && m.body.text && !/^\[/.test(m.body.text));
+    if (!last) return toast('No customer message to translate');
+    $('#trout').textContent = 'Translating…';
+    try {
+      const r = await api(T('/translate'), { method: 'POST', body: { text: last.body.text, to: 'English' } });
+      $('#trout').innerHTML = `${r.from ? `(${esc(r.from)}) ` : ''}“${esc(r.text)}”${r.from && !/english/i.test(r.from) ? ` · <a href="#" id="trrep">Translate my reply into ${esc(r.from)}</a>` : ''}`;
+      if ($('#trrep')) $('#trrep').onclick = async (ev) => { ev.preventDefault(); if (!$('#rep').value.trim()) return toast('Type your reply first'); try { $('#rep').value = (await api(T('/translate'), { method: 'POST', body: { text: $('#rep').value, to: r.from } })).text; } catch (er) { toast(er.message); } };
+    } catch (er) { $('#trout').textContent = er.message; }
+  };
   if ($('#sr')) $('#sr').onchange = () => { const r = S.tenant.settings.inbox.savedReplies[$('#sr').value]; if (r) { const first = String(c?.name || '').split(' ')[0]; $('#rep').value = r.text.replace(/\{\{\s*name\s*\}\}\s?/g, first ? first + ' ' : '').replace(/\s+([,!.?])/g, '$1'); $('#rep').focus(); } $('#sr').value = ''; };
   if ($('#srsave')) $('#srsave').onclick = async () => {
     const list = $('#srtxt').value.split('\n').map((l) => l.split('|')).filter((p) => p.length >= 2 && p[0].trim() && p.slice(1).join('|').trim()).map((p) => ({ title: p[0].trim().slice(0, 40), text: p.slice(1).join('|').trim().slice(0, 1000) })).slice(0, 50);
@@ -530,7 +562,7 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
   if (/^web:/.test(sel)) alerts.typingTimer = setInterval(async () => {
     if (S.tab !== 'inbox' || alerts.sel !== sel || !$('#ityping')) return clearInterval(alerts.typingTimer);
     const r = await api(T(`/conversations/${encodeURIComponent(sel)}/typing`)).catch(() => null);
-    if ($('#ityping')) $('#ityping').textContent = r?.typing ? '✍️ The customer is typing…' : '';
+    if ($('#ityping')) $('#ityping').textContent = r?.typing ? (r.draft ? `✍️ Typing: “${r.draft}”` : '✍️ The customer is typing…') : '';
   }, 2500);
   const blobUrl = async (id) => { const r = await fetch('/api' + T('/media/' + id), { headers: { Authorization: 'Bearer ' + S.key } }); if (!r.ok) throw new Error('media unavailable'); return URL.createObjectURL(await r.blob()); };
   $('#tchat').querySelectorAll('img[data-media]').forEach(async (img) => { try { img.src = await blobUrl(img.dataset.media); } catch { img.replaceWith(document.createTextNode('[image expired]')); } });
@@ -1320,6 +1352,11 @@ async function grow() {
       <div><label>Title</label><input id="wct" value="${esc(s.webchat?.title || '')}" placeholder="${esc(s.business.name)}"></div>
       <div><label>Message beside the chat button (empty = none)</label><input id="wcl" value="${esc(s.webchat?.launcherText ?? '')}" placeholder="Hello! I'm the chat assistant. Talk to me anytime." maxlength="120"></div>
       <div><label>Subtitle</label><input id="wcs" value="${esc(s.webchat?.subtitle || '')}" placeholder="Ask us anything – we usually reply instantly"></div>
+      <div><label>Team hours (when a person can reply)</label><input id="wcth" value="${esc(s.teamHours?.enabled ? s.teamHours.text || '' : '')}" placeholder="Mon-Fri 09:00-17:30; Sat 10:00-14:00 (empty = always)"></div>
+      <div><label>Show live visitors in the Inbox</label><select id="wclv"><option value="false">No</option><option value="true" ${s.webchat?.liveVisitors === true ? 'selected' : ''}>Yes (mention it in your cookie/privacy notice)</option></select></div>
+      <div><label>Typing preview (see what they type before they send)</label><select id="wctp"><option value="false">Off</option><option value="true" ${s.webchat?.typingPreview === true ? 'selected' : ''}>On (mention it in your privacy notice)</option></select></div>
+      <div><label>Hide the chat on phones</label><select id="wchm"><option value="false">No</option><option value="true" ${s.webchat?.hideOnMobile === true ? 'selected' : ''}>Yes</option></select></div>
+      <div><label>Hide the chat on these pages (one per line, * at the end for a whole section)</label><textarea id="wchp" style="min-height:60px" placeholder="/checkout*&#10;/careers">${esc((Array.isArray(s.webchat?.hidePaths) ? s.webchat.hidePaths : []).join('\n'))}</textarea></div>
       <div><label>Short form before the chat</label><select id="wcpc"><option value="off">Off</option><option value="optional" ${s.webchat?.preChat?.enabled && !s.webchat?.preChat?.required ? 'selected' : ''}>Optional (name, email, phone – with Skip)</option><option value="required" ${s.webchat?.preChat?.enabled && s.webchat?.preChat?.required ? 'selected' : ''}>Required</option></select></div>
       <div><label>Sound when a reply arrives</label><select id="wcsnd"><option value="true">On (visitors can mute)</option><option value="false" ${s.webchat?.sound === false ? 'selected' : ''}>Off</option></select></div>
       <div><label>Ask for a rating after the chat</label><select id="wcrt"><option value="true">Yes</option><option value="false" ${s.webchat?.rating === false ? 'selected' : ''}>No</option></select></div>
@@ -1350,7 +1387,7 @@ async function grow() {
   $('#gdl').onclick = () => { const c = $('#gqr canvas'); if (!c) return; const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = 'whatsapp-qr.png'; a.click(); };
   $('#gsave').onclick = async () => {
     try {
-      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { webchat: { enabled: $('#wcen').value === 'true', uploads: $('#wcup').value === 'true', sound: $('#wcsnd').value === 'true', rating: $('#wcrt').value === 'true', preChat: { enabled: $('#wcpc').value !== 'off', required: $('#wcpc').value === 'required' }, title: $('#wct').value, subtitle: $('#wcs').value, color: $('#wcc').value, opener: { enabled: $('#wpon').value === 'true', text: $('#wptext').value.trim() || null, delaySeconds: Number($('#wpdelay').value) || 0, mobileDelaySeconds: Number($('#wpmdelay').value) || 0, pages: $('#wppages').value.split('\n').map((l) => l.split(/\s=\s|=/)).filter((p) => p.length >= 2 && p[0].trim() && p.slice(1).join('=').trim()).map((p) => ({ match: p[0].trim().slice(0, 100), text: p.slice(1).join('=').trim().slice(0, 200) })).slice(0, 20) } }, storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
+      S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { teamHours: { enabled: !!$('#wcth').value.trim(), text: $('#wcth').value.trim() }, webchat: { liveVisitors: $('#wclv').value === 'true', typingPreview: $('#wctp').value === 'true', hideOnMobile: $('#wchm').value === 'true', hidePaths: $('#wchp').value.split('\n').map((x) => x.trim()).filter((x) => x.startsWith('/')).slice(0, 30), enabled: $('#wcen').value === 'true', uploads: $('#wcup').value === 'true', sound: $('#wcsnd').value === 'true', rating: $('#wcrt').value === 'true', preChat: { enabled: $('#wcpc').value !== 'off', required: $('#wcpc').value === 'required' }, title: $('#wct').value, subtitle: $('#wcs').value, color: $('#wcc').value, opener: { enabled: $('#wpon').value === 'true', text: $('#wptext').value.trim() || null, delaySeconds: Number($('#wpdelay').value) || 0, mobileDelaySeconds: Number($('#wpmdelay').value) || 0, pages: $('#wppages').value.split('\n').map((l) => l.split(/\s=\s|=/)).filter((p) => p.length >= 2 && p[0].trim() && p.slice(1).join('=').trim()).map((p) => ({ match: p[0].trim().slice(0, 100), text: p.slice(1).join('=').trim().slice(0, 200) })).slice(0, 20) } }, storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
       toast('Saved');
     } catch (e) { toast(e.message); }
   };
