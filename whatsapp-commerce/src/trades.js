@@ -100,7 +100,7 @@ export const TRADES = {
     businessType: 'experiences', store: 'none',
     intro: 'Which experience are you interested in?',
     greeting: '🎟️ Hi! Looking for an experience, a date or a gift voucher?',
-    menu: [{ label: '📅 Book a date', action: 'book' }, ask('🎟️ Experiences', 'What experiences do you offer and how much are they?'), ask('🎁 Gift vouchers', 'Do you sell gift vouchers and how long are they valid?'), ask('👥 Groups', 'Do you do group or corporate bookings?'), ask('🌦️ Weather and changes', 'What happens if the weather is bad or I need to change my date?')],
+    menu: [{ label: '📅 Book a date', action: 'book' }, ask('🎟️ Experiences', 'What experiences do you offer and how much are they?'), ask('🎁 Gift vouchers', 'Do you sell gift vouchers and how long are they valid?'), ask('👥 Groups', 'Do you do group or corporate bookings?'), ask('🌦️ Weather & changes', 'What happens if the weather is bad or I need to change my date?')],
     requirement: 'Which experience, which date (or month), and how many people?',
     instructions: 'Mention age, height or licence requirements whenever the information gives them. Quote voucher validity and change rules exactly as written.',
     questions: ['How much is the experience?', 'How long is a gift voucher valid?', 'Can I change my date?', 'Is there an age limit?', 'Do you do group bookings?', 'What should I wear or bring?'],
@@ -115,6 +115,82 @@ export const TRADES = {
     requirement: 'Briefly, what would you like help with, and when is a good time for a call?',
     instructions: 'Never give legal, tax or financial advice for someone\'s own situation: explain what the firm can help with and offer a call with an adviser. Keep personal details to a minimum in the chat.',
     questions: ['How much do you charge?', 'Do you offer a free consultation?', 'Can you help with a tax return?', 'How quickly can you start?', 'Are you regulated?', 'Where is your office?'],
+  },
+  garage: {
+    label: 'Garage, MOT or car service', emoji: '🚗', blurb: 'MOTs, servicing, repairs, tyres, quotes',
+    businessType: 'services', store: 'none',
+    intro: 'What does your car need?',
+    greeting: '🚗 Hi! Need an MOT, a service or a repair quote?',
+    menu: [{ label: '📅 Book MOT or service', action: 'book' }, ask('💷 Prices', 'How much is an MOT and a service?'), { label: '📝 Repair quote', action: 'callback' }, ask('🕒 Opening hours', 'What are your opening hours?'), ask('🚙 Courtesy car', 'Do you have a courtesy car or can you collect my car?')],
+    requirement: 'What do you need (MOT, service, repair), your car make, model and registration, and when suits you?',
+    instructions: 'The legal maximum fee for a standard car MOT in Great Britain is £54.85: never quote more than the garage\'s own MOT price. Never diagnose a fault for certain from a description: say a technician will check it. If the customer describes brakes, steering or a warning light that could be unsafe, advise them not to drive the car and to call the garage.',
+    questions: ['How much is an MOT?', 'How much is a full service?', 'Can you do it today?', 'Do you have a courtesy car?', 'Can you check my car is due an MOT?', 'Do you fit tyres?'],
+    bookings: { services: [{ name: 'MOT', minutes: 60 }, { name: 'Interim service', minutes: 90 }, { name: 'Full service', minutes: 180 }, { name: 'Diagnostic check', minutes: 60 }], times: ['08:30', '09:30', '10:30', '11:30', '13:30', '14:30', '15:30'], closedDays: [0], leadHours: 12 },
+  },
+  property: {
+    label: 'Estate or letting agent', emoji: '🏠', blurb: 'Viewings, valuations, tenant repairs, property questions',
+    businessType: 'services', store: 'none',
+    intro: 'Buying, selling, renting or letting?',
+    greeting: '🏠 Hi! Looking for a property, a valuation, or reporting a repair?',
+    menu: [{ label: '🏡 Book a valuation', action: 'callback' }, ask('🔑 To rent', 'What properties do you have to rent?'), ask('🏷️ For sale', 'What properties do you have for sale?'), { label: '🛠️ Report a repair', action: 'ticket' }, ask('💷 Fees', 'What are your fees for landlords and sellers?')],
+    requirement: 'Are you buying, selling, renting or letting – which area, your budget, and when suits you for a call or viewing?',
+    instructions: 'Never promise a property is still available or that an offer will be accepted. Tenant fees: in England most fees to tenants are banned (Tenant Fees Act 2019) – only describe fees the agent\'s information lists. For gas leaks, flooding or no heat in winter, tell tenants to call the emergency number in the agent\'s information straight away.',
+    questions: ['Can I book a viewing?', 'How much is a valuation?', 'What are your letting fees?', 'Is the flat still available?', 'How do I report a repair?', 'Do you accept pets?'],
+    tickets: true,
+  },
+  fitness: {
+    label: 'Gym, studio or classes', emoji: '🏋️', blurb: 'Class times, trial passes, memberships',
+    businessType: 'services', store: 'none',
+    intro: 'Ready to get moving?',
+    greeting: '🏋️ Hi! Want class times, a free trial or membership prices?',
+    menu: [{ label: '📅 Book a class or trial', action: 'book' }, ask('🗓️ Timetable', 'What is the class timetable?'), ask('💷 Memberships', 'How much is membership?'), ask('🆓 Free trial', 'Do you offer a free trial or day pass?'), ask('🕒 Opening hours', 'What are your opening hours?')],
+    requirement: 'What are you interested in (classes, gym, personal training), and when suits you to come in?',
+    instructions: 'Never give medical or injury advice: suggest they check with a GP first if they mention a health condition or pregnancy. Quote membership prices and contract terms exactly as written, including any joining fee.',
+    questions: ['How much is membership?', 'Do you have a free trial?', 'What time is yoga?', 'Is there a contract?', 'Do you have parking?', 'Can I cancel my membership?'],
+    bookings: { services: [{ name: 'Free trial session', minutes: 60 }, { name: 'Personal training taster', minutes: 45 }], times: ['07:00', '09:00', '12:00', '17:30', '18:30'], closedDays: [], leadHours: 4 },
+  },
+  education: {
+    label: 'Tutor, nursery or school', emoji: '🎓', blurb: 'Admissions, trial lessons, fees, term dates',
+    businessType: 'services', store: 'none',
+    intro: 'How can we help your family?',
+    greeting: '🎓 Hello! Asking about places, fees or a trial lesson?',
+    menu: [{ label: '📅 Book a visit or trial', action: 'book' }, ask('💷 Fees', 'What are your fees?'), ask('📋 Places & admissions', 'Do you have places available and how do I apply?'), ask('🗓️ Term dates', 'What are your term dates and hours?'), { label: '📞 Call me back', action: 'callback' }],
+    requirement: "Who is it for (child's age or year group), what are you looking for, and when suits you for a call or visit?",
+    instructions: "Keep personal details about children to a minimum in the chat – a first name and age is enough. Mention funded hours or funding only as the information describes them; never promise a place.",
+    questions: ['Do you have places for a 3 year old?', 'How much are your fees?', 'Do you take funded hours?', 'Can we come for a visit?', 'What are your term dates?', 'Do you offer a trial lesson?'],
+    bookings: { services: [{ name: 'Visit or tour', minutes: 45 }, { name: 'Trial lesson', minutes: 60 }], times: ['09:30', '11:00', '14:00', '16:00'], closedDays: [0, 6], leadHours: 24 },
+  },
+  hospitality: {
+    label: 'Hotel, B&B or holiday let', emoji: '🛏️', blurb: 'Availability, rooms, check-in, local tips',
+    businessType: 'services', store: 'none',
+    intro: 'Planning a stay?',
+    greeting: '🛏️ Hi! Checking dates, rooms or how to find us?',
+    menu: [{ label: '📅 Check availability', action: 'callback' }, ask('🛏️ Rooms and prices', 'What rooms do you have and how much are they?'), ask('🕒 Check-in and out', 'What time are check-in and check-out?'), ask('🚗 Parking & directions', 'Is there parking and how do I find you?'), ask('🐶 Dogs and children', 'Are dogs and children welcome?')],
+    requirement: 'Which dates, how many guests (adults and children), and any special requests?',
+    instructions: 'Never confirm a room is available or take a booking in the chat unless the booking system does it: offer to check, or point to the online booking link in the information. Quote cancellation terms exactly as written.',
+    questions: ['Do you have a room this weekend?', 'What time is check-in?', 'Is breakfast included?', 'Is there parking?', 'Are dogs allowed?', 'What is your cancellation policy?'],
+  },
+  it_support: {
+    label: 'IT support or software', emoji: '💻', blurb: 'Troubleshooting, tickets, account help',
+    businessType: 'services', store: 'none',
+    intro: "What's not working?",
+    greeting: "💻 Hi! Something not working? Tell me what's happening and I'll help.",
+    menu: [{ label: '🛠️ Something broken', action: 'ask', value: "Something isn't working – can you help me fix it?" }, { label: '🎫 Open a ticket', action: 'ticket' }, ask('📦 Services & prices', 'What services do you offer and what do they cost?'), ask('🔐 Password / account', 'I need help with my password or account'), ask('🕒 Support hours', 'What are your support hours?')],
+    requirement: "What's the problem, which device or system, and the best way to reach you?",
+    instructions: 'Troubleshoot one step at a time and wait for the answer before the next step (e.g. "Is the light on the router green or red?"). Only suggest safe steps a customer can do themselves: restarting, checking cables, signing out and in. Never ask for passwords, two-factor codes or card details. If it is not fixed after a couple of steps, offer to open a ticket.',
+    questions: ['My internet is not working', 'I forgot my password', 'My email is not syncing', 'How much is monthly support?', 'Can someone come on site?', 'What are your support hours?'],
+    tickets: true,
+  },
+  venue: {
+    label: 'Wedding or event venue', emoji: '💍', blurb: 'Date availability, packages, brochure, viewings',
+    businessType: 'services', store: 'none',
+    intro: 'Planning something special?',
+    greeting: '💍 Congratulations! Checking a date, packages or booking a viewing?',
+    menu: [{ label: '📅 Book a viewing', action: 'book' }, { label: '📩 Get the brochure', action: 'callback' }, ask('💷 Packages & prices', 'What packages do you offer and how much are they?'), ask('📆 Date availability', 'Is my date available?'), ask('🍽️ Catering & capacity', 'How many guests can you hold and what catering do you offer?')],
+    requirement: 'What is the occasion, your preferred date (or season), roughly how many guests, and your budget?',
+    instructions: 'Never confirm a date is free: say the team will check the diary. Quote package prices and what is included exactly as written, including any minimum numbers or seasonal prices.',
+    questions: ['Is our date available?', 'How much is a wedding package?', 'How many guests can you hold?', 'Can we bring our own caterer?', 'Can we come and look round?', 'Do you have accommodation?'],
+    bookings: { services: [{ name: 'Venue viewing', minutes: 60 }], times: ['11:00', '14:00', '16:00'], closedDays: [], leadHours: 48 },
   },
 };
 
@@ -147,6 +223,7 @@ export function tradeSettings(key, S = {}) {
   if (storeType !== type) patch.store = { type: storeType };
   if (T.bookings && !(S.bookings?.services || []).length) patch.bookings = { enabled: false, days: 14, perSlot: 1, autoConfirm: false, reminderHours: 24, ...T.bookings };
   if (T.ordering) patch.ordering = T.ordering;
+  if (T.tickets) patch.tickets = { enabled: true, replyHours: S.tickets?.replyHours || 8 };
   if (T.categories && storeType === 'manual' && !(S.store?.manual?.products || []).length) patch.store = { ...(patch.store || {}), manual: { categories: T.categories, products: [] } };
   return patch;
 }
@@ -166,6 +243,7 @@ export function applyTrade(tenantId, key, { force = false } = {}) {
   if (p.store) { patch.store = p.store; applied.push(p.store.type === 'none' ? 'enquiries and bookings mode' : 'menu categories'); }
   if (p.bookings) { patch.bookings = p.bookings; applied.push('typical services and times (bookings stay off until you turn them on)'); }
   if (p.ordering) { patch.ordering = p.ordering; applied.push('delivery, collection and time slots'); }
+  if (p.tickets && !S.tickets?.enabled) { patch.tickets = p.tickets; applied.push('support tickets'); }
   patch.autoSetup = { ...(S.autoSetup || {}), sigs };
   updateTenantSettings(tenantId, patch);
   return { trade: key, label: TRADES[key].label, applied };
@@ -174,7 +252,7 @@ export function applyTrade(tenantId, key, { force = false } = {}) {
 /** A best guess at the trade from what auto-setup saw (the AI's answer, else the business name and pages). */
 export function guessTrade(text) {
   const s = String(text || '').toLowerCase();
-  const rules = [['dental', /\bdent(al|ist|istry)|orthodont|invisalign/], ['clinic', /physio|chiropract|osteopath|aesthetic|botox|optician|veterinar|\bvets?\b|clinic|therap/], ['salon', /salon|barber|hair|beauty|nails?\b|lash|brow|spa\b/], ['takeaway', /takeaway|restaurant|pizza|kebab|curry|cafe|café|grill|kitchen|food|burger|sushi|bakery/], ['travel', /travel|holiday|tours?\b|visa|flights?|cruise/], ['trades', /plumb|electric|builder|roof|heating|boiler|locksmith|clean(ing|ers)|gardener|handyman|decorat/], ['experiences', /experience|activity|activities|escape room|driving day|track day|workshop|classes/], ['professional', /accountan|solicitor|law(yer)?\b|estate agent|letting|consult|bookkeep|mortgage/]];
+  const rules = [['it_support', /\b(it support|it services|managed services|msp|tech support|computer repair|software|saas|helpdesk)\b/], ['garage', /\bgarage|\bmot\b|car service|auto(motive)? (repair|centre)|tyres?\b|motors\b/], ['property', /estate agent|letting|lettings|property management|properties\b/], ['fitness', /\bgym\b|fitness|pilates|yoga|crossfit|personal train/], ['education', /nursery|tutor|tuition|school|academy|driving school|preschool/], ['hospitality', /\bhotel|b&b|bed and breakfast|guest ?house|holiday (let|cottage)|\binn\b|lodge\b/], ['venue', /wedding venue|event venue|banqueting|function room|venue\b/], ['dental', /\bdent(al|ist|istry)|orthodont|invisalign/], ['clinic', /physio|chiropract|osteopath|aesthetic|botox|optician|veterinar|\bvets?\b|clinic|therap/], ['salon', /salon|barber|hair|beauty|nails?\b|lash|brow|spa\b/], ['takeaway', /takeaway|restaurant|pizza|kebab|curry|cafe|café|grill|kitchen|food|burger|sushi|bakery/], ['travel', /travel|holiday|tours?\b|visa|flights?|cruise/], ['trades', /plumb|electric|builder|roof|heating|boiler|locksmith|clean(ing|ers)|gardener|handyman|decorat/], ['experiences', /experience|activity|activities|escape room|driving day|track day|workshop|classes/], ['professional', /accountan|solicitor|law(yer)?\b|estate agent|letting|consult|bookkeep|mortgage/]];
   for (const [k, re] of rules) if (re.test(s)) return k;
   return null;
 }

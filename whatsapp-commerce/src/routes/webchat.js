@@ -13,6 +13,8 @@ import { rateLimit } from './web.js';
 import { isDemo, DEMO_MESSAGE_CAP } from '../instantDemo.js';
 import { createHandoff } from '../continuity.js';
 import { teamStatus } from '../hours.js';
+import { voiceConfigured, transcribe, audioFormat, MAX_VOICE_BYTES } from '../ai/voice.js';
+import { visionConfigured, describeForSearch } from '../ai/vision.js';
 
 /*
  * Website AI chat: the same bot (AI, knowledge base, catalogue, cart, flows, human hand-over) on the shop's own site.
@@ -251,6 +253,34 @@ export function webchatRouter() {
     res.json({ ok: true });
   });
 
+  // A voice message from the website chat (the raw recording): transcribed, then answered like a typed message
+  r.post('/chat/:tenantId/voice', limiter, express.raw({ type: () => true, limit: MAX_VOICE_BYTES }), async (req, res) => {
+    const t = getTenant(req.params.tenantId);
+    if (!t?.active || t.settings.webchat?.enabled === false || t.settings.webchat?.voice === false || !voiceConfigured()) return res.status(404).json({ error: 'Voice messages are not available here' });
+    const sessionId = String(req.query.sessionId || '');
+    if (!SESSION.test(sessionId)) return res.status(400).json({ error: 'invalid session' });
+    const mime = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!audioFormat(mime) || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'That recording format is not supported – please type your message.' });
+    if (isDemo(t)) {
+      const used = getDb().prepare("SELECT COUNT(*) AS n FROM messages WHERE tenant_id = ? AND direction = 'in'").get(t.id).n;
+      if (used >= DEMO_MESSAGE_CAP) return res.json({ replies: [{ type: 'text', text: "That's the end of the demo 🙂" }] });
+    }
+    if (!withinLimit(t, 'inbound') || !withinLimit(t, 'ai')) return res.json({ transcript: '', replies: [{ type: 'text', text: 'Sorry, I can\'t listen to voice messages right now – please type your message.' }] });
+    let transcript = '';
+    try { transcript = await transcribe(t.id, req.body, mime); } catch (e) { console.warn('[web voice]', e.message); return res.json({ transcript: '', replies: [{ type: 'text', text: "🎙️ Sorry, I couldn't listen to that – please try again or type your message." }] }); }
+    if (!transcript) return res.json({ transcript: '', replies: [{ type: 'text', text: "🎙️ I couldn't hear anything in that recording – please try again, a little closer to the microphone." }] });
+    const waId = visitorId(sessionId);
+    const page = cleanPage(req.body?.page);
+    logMessage(t.id, waId, 'in', { type: 'text', text: transcript, channel: 'web', voice: true });
+    bumpUsage(t.id, 'inbound');
+    const sink = [];
+    const toVisitor = createSender(t, { sink });
+    const real = createSender(t);
+    await enqueue(`${t.id}:${waId}`, () => handleInbound(t, { waId, kind: 'text', text: transcript, profileName: null, page }, (to, m) => (to === waId ? toVisitor(to, m) : real(to, m))));
+    const lastId = getDb().prepare('SELECT MAX(id) AS id FROM messages WHERE tenant_id = ? AND wa_id = ?').get(t.id, waId).id || 0;
+    res.json({ transcript, replies: sink, lastId });
+  });
+
   // A photo or PDF from the visitor (sent as the raw file): saved, shown in the Inbox, and the team is asked to look.
   r.post('/chat/:tenantId/upload', limiter, express.raw({ type: () => true, limit: MAX_FILE_BYTES }), async (req, res) => {
     const t = getTenant(req.params.tenantId);
@@ -273,9 +303,22 @@ export function webchatRouter() {
     fs.writeFileSync(path.join(dir, file), buf);
     if (Math.random() < 0.05) pruneFiles(dir);
     const fileUrl = `${config.publicUrl}/chat-files/${encodeURIComponent(t.id)}/${file}`;
-    logMessage(t.id, waId, 'in', { type: 'file', text: `📎 [${ext === 'pdf' ? 'PDF' : 'photo'}: ${name}]`, channel: 'web', fileUrl, fileName: name, mime });
+    // a photo: the AI says what it sees (for the team too) – and for a shop, finds matching products
+    let seen = null;
+    if (ext !== 'pdf' && t.settings.ai?.photoSearch !== false && visionConfigured() && withinLimit(t, 'ai')) {
+      seen = await describeForSearch(t.id, buf, mime, { shopAbout: t.settings.ai?.about }).catch((e) => { console.warn('[web photo]', e.message); return null; });
+    }
+    logMessage(t.id, waId, 'in', { type: 'file', text: `📎 [${ext === 'pdf' ? 'PDF' : 'photo'}: ${name}]${seen?.description ? ` – ${seen.description}` : ''}`, channel: 'web', fileUrl, fileName: name, mime });
     bumpUsage(t.id, 'inbound');
-    const sink = [{ type: 'text', text: `📎 Thanks – we've got *${name}*.` }];
+    if (seen?.product && seen.query && t.settings.store?.type !== 'none') {
+      const sink = [{ type: 'text', text: `📷 That looks like *${seen.description || seen.query}*. Let me see what we have…` }];
+      const toVisitor = createSender(t, { sink });
+      const real = createSender(t);
+      await enqueue(`${t.id}:${waId}`, () => handleInbound(t, { waId, kind: 'text', text: `Do you have ${seen.query}?`, profileName: null }, (to, m) => (to === waId ? toVisitor(to, m) : real(to, m))));
+      const lastId = getDb().prepare('SELECT MAX(id) AS id FROM messages WHERE tenant_id = ? AND wa_id = ?').get(t.id, waId).id || 0;
+      return res.json({ replies: sink, lastId });
+    }
+    const sink = [{ type: 'text', text: seen?.description ? `📷 Thanks – I can see ${seen.description.replace(/^(a|an|the)\b/i, (w) => w.toLowerCase())}. I've passed it to the team.` : `📎 Thanks – we've got *${name}*.` }];
     const conv = getDb().prepare('SELECT human_handover FROM conversations WHERE tenant_id = ? AND wa_id = ?').get(t.id, waId);
     if (!conv?.human_handover) {
       // ask the team to take a look (the usual hand-over: Inbox, email and staff WhatsApp alerts)
@@ -336,6 +379,7 @@ export function webchatRouter() {
       upload: W.uploads !== false && !isDemo(t),
       sound: W.sound !== false, // a soft ping when a reply arrives (the visitor can mute it)
       preChat: preChatConfig(t),
+      voice: W.voice !== false && voiceConfigured(),
       team: (() => { const s = teamStatus(t.settings); return s.on ? { open: s.open, next: s.next } : null; })(),
       live: W.liveVisitors === true && !isDemo(t),
       preview: W.typingPreview === true,
@@ -376,11 +420,12 @@ var css='.wc{position:fixed;bottom:20px;'+C.position+':20px;z-index:2147483000;f
 '.wc-pc{background:#fff;border-radius:12px;padding:12px;box-shadow:0 1px 1px rgba(0,0,0,.06);display:flex;flex-direction:column;gap:7px}.wc-pc input{border:1px solid #d6ddd9;border-radius:9px;padding:9px;font:inherit}.wc-pc button{border:0;background:'+C.color+';color:#fff;border-radius:9px;padding:9px;cursor:pointer;font:inherit}.wc-pc .sk{background:none;color:#667;text-decoration:underline;padding:2px}.wc-pc small{color:#667}.wc-pc .er{color:#b42318;font-size:12px}'+
 '.wc-snd{float:right;background:none;border:0;color:#fff;font-size:15px;cursor:pointer;opacity:.85;padding:4px 6px}'+
 '.wc-lf{display:flex;gap:5px;margin-top:8px}.wc-lf input{flex:1;min-width:0;border:1px solid #d6ddd9;border-radius:10px;padding:8px 9px;font:inherit;font-size:13px}.wc-lf button{border:0;background:'+C.color+';color:#fff;border-radius:10px;padding:0 11px;cursor:pointer;font:inherit;font-size:13px}'+
+'.wc-mic.rec{background:#c62828!important;color:#fff!important;animation:wcp 1s infinite}@keyframes wcp{50%{opacity:.6}}'+
 '.wc-f .wc-up{background:#fff;color:'+C.color+';border:1px solid #d6ddd9;padding:0 10px;font-size:18px}'+
 '.wc.wc-in{position:relative;bottom:auto;left:auto;right:auto;z-index:auto;height:100%;min-height:360px}.wc-in .wc-p{position:relative;bottom:auto;left:auto;right:auto;width:100%;height:100%;display:flex;box-shadow:0 2px 12px rgba(0,0,0,.12)}.wc-in .wc-b,.wc-in .wc-x{display:none}';
 var st=d.createElement('style');st.textContent=css;d.head.appendChild(st);
 var w=d.createElement('div');w.className='wc';
-w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button>'+(C.sound?'<button class="wc-snd" aria-label="Sound on" title="Sound on/off">🔔</button>':'')+'<b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f">'+(C.upload?'<button type="button" class="wc-up" aria-label="Send a photo or PDF" title="Send a photo or PDF">📎</button><input type="file" class="wc-fi" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" hidden>':'')+'<input class="wc-in-t" placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.badge?'<div class="wc-w" style="font-size:11px;opacity:.75"><a class="wc-pb" target="_blank" rel="noopener"></a></div>':'')+(C.whatsapp?'<div class="wc-w">📱 <a class="wc-wa" target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Continue on WhatsApp</a> – your chat comes with you</div>':'')+'</div>'+(!EMB&&(C.launcher||C.opener)?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
+w.innerHTML='<div class="wc-p" role="dialog" aria-label="Chat"><div class="wc-h"><button class="wc-x" aria-label="Close">×</button>'+(C.sound?'<button class="wc-snd" aria-label="Sound on" title="Sound on/off">🔔</button>':'')+(window.speechSynthesis?'<button class="wc-snd wc-spk" aria-label="Read replies aloud" title="Read replies aloud">🔈</button>':'')+'<b></b><span></span></div><div class="wc-m" aria-live="polite"></div><form class="wc-f">'+(C.upload?'<button type="button" class="wc-up" aria-label="Send a photo or PDF" title="Send a photo or PDF">📎</button><input type="file" class="wc-fi" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" hidden>':'')+(C.voice?'<button type="button" class="wc-up wc-mic" aria-label="Send a voice message" title="Hold a conversation: tap to talk, tap again to send">🎤</button>':'')+'<input class="wc-in-t" placeholder="Type a message…" aria-label="Message" maxlength="1000"><button>Send</button></form>'+(C.badge?'<div class="wc-w" style="font-size:11px;opacity:.75"><a class="wc-pb" target="_blank" rel="noopener"></a></div>':'')+(C.whatsapp?'<div class="wc-w">📱 <a class="wc-wa" target="_blank" rel="noopener" href="https://wa.me/'+C.whatsapp+'">Continue on WhatsApp</a> – your chat comes with you</div>':'')+'</div>'+(!EMB&&(C.launcher||C.opener)?'<div class="wc-l" role="button" tabindex="0"><button class="wc-lx" aria-label="Hide message">×</button><span></span></div>':'')+'<button class="wc-b" aria-label="Open chat">💬</button>';
 w.querySelector('.wc-h b').textContent=C.title;w.querySelector('.wc-h span').textContent=C.subtitle;
 var P=w.querySelector('.wc-p'),M=w.querySelector('.wc-m'),F=w.querySelector('form'),I=F.querySelector('.wc-in-t');
 function mark(k,v,ss){try{(ss?sessionStorage:localStorage).setItem(k,v)}catch(e){}}
@@ -415,6 +460,8 @@ function esc(s){var e=d.createElement('div');e.textContent=s==null?'':String(s);
 function fmt(s){return esc(s).replace(/\*([^*\n]+)\*/g,'<b>$1</b>').replace(/(^|\s)_([^_\n]+)_/g,'$1<i>$2</i>').replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>')}
 var AC=null,MUTE=got(K+'-mute')==='1';
 function ping(){if(!C.sound||MUTE)return;try{AC=AC||new (window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume();var t=AC.currentTime,o=AC.createOscillator(),g=AC.createGain();o.type='sine';o.frequency.setValueAtTime(880,t);o.frequency.setValueAtTime(1320,t+0.09);g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.12,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+0.3);o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+0.32)}catch(e){}}
+var SPEAK=got(K+'-speak')==='1';
+function say(t){if(!SPEAK||!window.speechSynthesis)return;try{var u=new SpeechSynthesisUtterance(String(t||'').replace(/https?:\/\/\S+/g,'').replace(/[*_~]/g,'').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,'').slice(0,600));u.lang=(navigator.language||'en-GB');speechSynthesis.speak(u)}catch(e){}}
 function add(html,cls){var b=d.createElement('div');b.className='wc-q '+cls;b.innerHTML=html;M.appendChild(b);M.scrollTop=M.scrollHeight;return b}
 function cal(c){var free={};c.days.forEach(function(x){free[x.ymd]=x.free});var keys=Object.keys(free).sort(),h='',p2=function(n){return (n<10?'0':'')+n};
   var f=new Date(keys[0]+'T12:00:00Z'),l=new Date(keys[keys.length-1]+'T12:00:00Z'),cur=new Date(Date.UTC(f.getUTCFullYear(),f.getUTCMonth(),1,12));
@@ -456,7 +503,7 @@ function siteAdd(m){
   }
 }
 function render(m){
-  if(!m)return;var h='',acts=[];
+  if(!m)return;var h='',acts=[];if(m.text||m.caption)say(m.text||m.caption);
   if(m.type==='image')h=(m.url?'<img alt="" src="'+esc(m.url)+'">':'')+fmt(m.caption||'');
   else if(m.type==='buttons'){h=(m.header?'<b>'+esc(m.header)+'</b>\n':'')+fmt(m.text);acts=m.buttons.map(function(b){return '<button data-a="'+esc(b.id)+'" data-l="'+esc(b.title)+'">'+esc(b.title)+'</button>'})}
   else if(m.type==='list'&&m.calendar&&m.calendar.days&&m.calendar.days.length){h=fmt(m.text)+cal(m.calendar)}
@@ -488,7 +535,17 @@ M.addEventListener('click',function(e){var hl=e.target.closest('button[data-hl]'
 F.onsubmit=function(e){e.preventDefault();var v=I.value.trim();if(!v)return;I.value='';send({text:v},v)};
 var lastTyping=0;I.addEventListener('input',function(){var n=Date.now();if(n-lastTyping<(C.preview?1200:3000)||!I.value)return;lastTyping=n;fetch(C.api+'/typing',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,draft:C.preview?I.value:undefined})}).catch(function(){})});
 if(C.live&&!EMB){var beats=0,beat=function(){if(d.hidden||beats++>60)return;fetch(C.api+'/seen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,page:{url:location.origin+location.pathname,title:d.title},ref:beats===1?d.referrer:''})}).then(function(r){return r.json()}).then(function(r){if(r.hello){if(!open){SKIPGREET=1;toggle()}render({type:'text',text:r.hello});ping();poll()}}).catch(function(){})};setTimeout(beat,1500);setInterval(beat,30000)}
-var SND=w.querySelector('.wc-snd');function sndIcon(){if(SND){SND.textContent=MUTE?'🔕':'🔔';SND.setAttribute('aria-label',MUTE?'Sound off':'Sound on')}}sndIcon();
+var SPK=w.querySelector('.wc-spk');function spkIcon(){if(SPK){SPK.textContent=SPEAK?'🔊':'🔈';SPK.setAttribute('aria-label',SPEAK?'Stop reading replies aloud':'Read replies aloud')}}spkIcon();
+if(SPK)SPK.onclick=function(){SPEAK=!SPEAK;mark(K+'-speak',SPEAK?'1':'0');spkIcon();if(!SPEAK&&window.speechSynthesis)speechSynthesis.cancel()};
+var MIC=w.querySelector('.wc-mic'),REC=null,chunks=[],recT=null;
+if(MIC){if(!(navigator.mediaDevices&&window.MediaRecorder))MIC.remove();else MIC.onclick=function(){
+  if(REC&&REC.state==='recording'){REC.stop();return}
+  navigator.mediaDevices.getUserMedia({audio:true}).then(function(st){chunks=[];REC=new MediaRecorder(st);REC.ondataavailable=function(e){if(e.data.size)chunks.push(e.data)};
+    REC.onstop=function(){clearTimeout(recT);MIC.classList.remove('rec');MIC.textContent='🎤';st.getTracks().forEach(function(x){x.stop()});var blob=new Blob(chunks,{type:(REC.mimeType||'audio/webm').split(';')[0]});if(blob.size<800)return;
+      var typing=add('🎙️ Listening…','a wc-t');busy++;
+      fetch(C.api+'/voice?sessionId='+sid,{method:'POST',headers:{'Content-Type':blob.type},body:blob}).then(function(r){return r.json()}).then(function(r){busy--;typing.remove();if(r.transcript)add(esc('🎤 '+r.transcript),'u');if(r.error)add(esc(r.error),'a');(r.replies||[]).forEach(render);if((r.replies||[]).length)ping();if(r.lastId)last=Math.max(last,r.lastId)}).catch(function(){busy--;typing.remove();add('Sorry – the voice message didn\'t send, please try again.','a')})};
+    REC.start();MIC.classList.add('rec');MIC.textContent='⏹';recT=setTimeout(function(){if(REC.state==='recording')REC.stop()},60000)}).catch(function(){add('🎤 Please allow the microphone to send a voice message (or just type).','a')})}}
+var SND=w.querySelector('.wc-snd:not(.wc-spk)');function sndIcon(){if(SND){SND.textContent=MUTE?'🔕':'🔔';SND.setAttribute('aria-label',MUTE?'Sound off':'Sound on')}}sndIcon();
 if(SND)SND.onclick=function(){MUTE=!MUTE;mark(K+'-mute',MUTE?'1':'0');sndIcon();if(!MUTE)ping()};
 window.waChat={ask:function(q){if(!open)toggle();send({text:q},q)}};
 var UP=w.querySelector('.wc-up'),FI=w.querySelector('.wc-fi');

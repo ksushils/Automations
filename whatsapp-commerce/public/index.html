@@ -76,11 +76,18 @@ code{background:var(--bg);padding:2px 6px;border-radius:6px;word-break:break-all
 <header>
   <h1>💬 WhatsApp Commerce <span class="mute" id="who"></span></h1>
   <nav id="nav"></nav>
+  <button class="btn ghost" id="helpbtn" style="display:none" title="Guides and answers">❓ Help</button>
   <button class="btn ghost" id="logout" style="display:none">Sign out</button>
 </header>
 <div id="banner"></div>
 <main id="app"></main>
 <div id="toast"></div>
+<div id="helppanel" style="display:none;position:fixed;right:16px;bottom:16px;width:min(380px,calc(100vw - 32px));max-height:70vh;overflow:auto;background:var(--card,#fff);color:inherit;border:1px solid var(--line,#ddd);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:14px;z-index:50">
+  <div style="display:flex;justify-content:space-between;align-items:center"><b>❓ How can we help?</b><button class="btn ghost" id="helpx" style="padding:2px 8px">×</button></div>
+  <form id="helpf" style="display:flex;gap:6px;margin-top:8px"><input id="helpq" placeholder="e.g. how do I connect WhatsApp?"><button class="btn">Ask</button></form>
+  <div id="helpout" style="margin-top:10px;font-size:14px"></div>
+  <p class="mute" style="font-size:12px;margin-top:10px"><a href="/guides" target="_blank" rel="noopener">All guides ↗</a></p>
+</div>
 <script>
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -120,6 +127,7 @@ async function boot() {
   if (S.super) { try { S.setup = await api('/system/setup'); } catch { S.setup = null; } }
   if (S.tenantId) { const r = await api(T('')); S.tenant = r.tenant; S.role = r.role; S.banner = r.banner; }
   $('#logout').style.display = '';
+  $('#helpbtn').style.display = '';
   render();
 }
 $('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant', null); store.set('wc_tab', null); S.key = null; S.tenant = null; S.tenantId = null; S.setup = null; loginView(); };
@@ -127,6 +135,16 @@ $('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant',
 const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['leads', 'Leads'], ['tickets', 'Tickets'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['help', 'Help centre'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
 const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'leads', 'tickets', 'orders', 'bookings', 'contacts']);
 const MAIN_TABS = new Set(['overview', 'analytics', 'inbox', 'leads', 'orders', 'simulator', 'ai', 'settings']);
+// "❓ Help": answers from our guides (AI when available)
+document.addEventListener('click', (e) => { if (e.target.id === 'helpbtn') { const p = $('#helppanel'); p.style.display = p.style.display === 'none' ? 'block' : 'none'; if (p.style.display === 'block') $('#helpq').focus(); } if (e.target.id === 'helpx') $('#helppanel').style.display = 'none'; });
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'helpf') return;
+  e.preventDefault();
+  const q = $('#helpq').value.trim(); if (!q) return;
+  $('#helpout').innerHTML = '<span class="mute">Looking that up…</span>';
+  try { const r = await api('/platform-help/ask', { method: 'POST', body: { question: q } }); $('#helpout').innerHTML = `<div style="white-space:pre-wrap">${esc(r.answer)}</div>${r.links?.length ? `<p class="mute" style="margin-top:8px">Guides: ${r.links.map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.title)}</a>`).join(' · ')}</p>` : ''}`; } catch (er) { $('#helpout').textContent = er.message; }
+});
+
 // New customer messages: a soft sound, the count in the browser tab, and the Inbox refreshes itself.
 const alerts = { last: null, timer: null, ac: null, title: document.title };
 function alertPing() {
@@ -523,17 +541,18 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
     ${rt && rt.great + rt.ok + rt.bad ? `<p class="mute" style="font-size:13px;margin:0 0 6px" title="Ratings in the last ${rt.days} days (assistant ${rt.ai}, team ${rt.team})">Ratings, ${rt.days} days: 😀 ${rt.great} · 😐 ${rt.ok} · 😞 ${rt.bad}</p>` : ''}
     <label style="display:flex;gap:6px;align-items:center;font-size:13px;margin-bottom:6px"><input type="checkbox" id="isnd" style="width:auto" ${store.get('wc_sound') === '0' ? '' : 'checked'}> 🔔 Sound for new messages</label>
     <select id="ifil" style="margin-bottom:8px">${[['all', 'All chats'], ['human', 'Needs a human'], ['mine', 'Assigned to me'], ['unassigned', 'Unassigned']].map(([k, l]) => `<option value="${k}" ${filter === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
-    ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${rt?.byChat?.[c.wa_id] ? `<span title="${esc(rt.byChat[c.wa_id].comment || 'Customer rating')}">${face(rt.byChat[c.wa_id].score)}</span> ` : ''}${pausedNow(c) ? '<span class="pill warn">⏸ Paused – owner replying</span>' : ''}${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}${c.assigned_to ? ` <span class="pill">👤 ${esc(c.assigned_to)}</span>` : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
+    ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${c.unhappy_at && Date.now() - Date.parse(c.unhappy_at) < 86400000 ? '<span title="Seems unhappy – step in?">😠</span> ' : ''}${rt?.byChat?.[c.wa_id] ? `<span title="${esc(rt.byChat[c.wa_id].comment || 'Customer rating')}">${face(rt.byChat[c.wa_id].score)}</span> ` : ''}${pausedNow(c) ? '<span class="pill warn">⏸ Paused – owner replying</span>' : ''}${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}${c.assigned_to ? ` <span class="pill">👤 ${esc(c.assigned_to)}</span>` : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
     </div><div class="card" id="thread"><p class="mute">Select a chat</p></div></div>`;
   $('#app').querySelectorAll('[data-w]').forEach((el) => (el.onclick = () => inbox(el.dataset.w, filter)));
   $('#ifil').onchange = () => { store.set('wc_inbox', $('#ifil').value); inbox(sel, $('#ifil').value); };
   if (!sel) return;
   const c = conversations.find((x) => x.wa_id === sel);
   const { messages } = await api(T(`/conversations/${sel}/messages`));
-  $('#thread').innerHTML = `<h2>${esc(c?.name || '')} +${esc(sel)} <button class="btn ghost" id="ho">${c?.human_handover ? '🤖 Give back to bot' : '🙋 Take over'}</button>${pausedNow(c) ? ` <span class="pill warn" title="You replied from the WhatsApp Business app, so the AI is quiet in this chat">⏸ Paused – owner replying until ${esc(new Date(c.ai_paused_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span> <button class="btn ghost" id="rsm">▶ Resume AI now</button>` : ''}
+  $('#thread').innerHTML = `<h2>${esc(c?.name || '')} +${esc(sel)} <button class="btn ghost" id="ho">${c?.human_handover ? '🤖 Give back to bot' : '🙋 Take over'}</button> <button class="btn ghost" id="isumb" title="A two-line summary of this chat">📝 Summary</button>${pausedNow(c) ? ` <span class="pill warn" title="You replied from the WhatsApp Business app, so the AI is quiet in this chat">⏸ Paused – owner replying until ${esc(new Date(c.ai_paused_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span> <button class="btn ghost" id="rsm">▶ Resume AI now</button>` : ''}
     <select id="asg" style="width:auto"><option value="">Unassigned</option>${agents.map((a) => `<option ${c?.assigned_to === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></h2>
     ${c?.cart?.length ? `<p class="mute">Cart: ${c.cart.map((i) => esc(i.title) + ' ×' + i.quantity).join(', ')}</p>` : ''}
     <div class="chat" id="tchat">${messages.map((m) => (m.direction === 'in' ? m.body.fileUrl ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<a href="${esc(m.body.fileUrl)}" target="_blank" rel="noopener"><img src="${esc(m.body.fileUrl)}" alt="photo" style="max-width:220px"></a>` : `<a href="${esc(m.body.fileUrl)}" target="_blank" rel="noopener">📎 ${esc(m.body.fileName || 'file')} – open</a>`}</div>` : (m.body.mediaId ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<img data-media="${esc(m.body.mediaId)}" alt="image">` : `<a href="#" data-mediadl="${esc(m.body.mediaId)}">📎 ${esc(m.body.raw || 'file')} – open</a>`}${m.body.text && !/^\[/.test(m.body.text) ? '<br>' + esc(m.body.text) : ''}</div>` : bubble(m.body.text || `[${m.body.raw || m.type}]`, 'in')) : bubble(m.body, 'out'))).join('')}</div>
+    <div id="isum" class="mute" style="font-size:13px"></div>
     <div id="ityping" class="mute" style="font-size:13px;min-height:18px"></div>
     <div style="display:flex;gap:8px;margin-top:4px">${(S.tenant.settings.inbox?.savedReplies || []).length ? `<select id="sr" style="width:auto;max-width:160px"><option value="">💬 Saved replies</option>${S.tenant.settings.inbox.savedReplies.map((r, i) => `<option value="${i}">${esc(r.title)}</option>`).join('')}</select>` : ''}<input id="rep" placeholder="Reply as staff (takes over from bot)"><button class="btn ghost" id="rsug" title="The AI drafts a reply from your own information – you check it and press Send">✨ Suggest</button><button class="btn" id="rs">Send</button></div>
     <div style="margin-top:6px;font-size:13px"><a href="#" id="trin">🌐 Translate their last message</a> <span id="trout" class="mute"></span></div>
@@ -542,6 +561,24 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
       <textarea id="srtxt" style="min-height:110px" ${S.role === 'owner' ? '' : 'readonly'} placeholder="Opening hours | Hi {{name}}, we're open Monday to Saturday, 9am to 5pm.&#10;Call back | Thanks {{name}}! Someone from the team will call you today.">${esc((S.tenant.settings.inbox?.savedReplies || []).map((r) => `${r.title} | ${r.text}`).join('\n'))}</textarea>
       ${S.role === 'owner' ? '<p><button class="btn ghost" id="srsave">Save saved replies</button></p>' : ''}</details>`;
   $('#tchat').scrollTop = 1e9;
+  $('#isumb').onclick = async () => { $('#isum').textContent = '📝 Summarising…'; try { $('#isum').textContent = '📝 ' + (await api(T(`/conversations/${encodeURIComponent(sel)}/summary`), { method: 'POST' })).summary; } catch (e) { $('#isum').textContent = e.message; } };
+  // "Teach the bot": under each team reply, save it as knowledge (the question is the customer's message before it)
+  if (S.role === 'owner') {
+    const bubbles = [...$('#tchat').children];
+    messages.forEach((m, i) => {
+      if (m.direction !== 'out' || !m.body?.staff || !bubbles[i]) return;
+      const q = [...messages.slice(0, i)].reverse().find((x) => x.direction === 'in' && x.body.text && !/^\[/.test(x.body.text));
+      const a = document.createElement('a'); a.href = '#'; a.textContent = '💡 Teach the bot'; a.style.cssText = 'display:block;font-size:12px;margin-top:4px';
+      a.onclick = async (e) => {
+        e.preventDefault();
+        const question = prompt('The customer asked:', q?.body.text || ''); if (question === null) return;
+        const answer = prompt('The answer the assistant should give from now on:', m.body.text || ''); if (answer === null) return;
+        const article = confirm('Also make a help-centre article (draft) from it?');
+        try { await api(T('/teach'), { method: 'POST', body: { question, answer, article } }); toast(article ? 'Saved – the assistant knows this now, and a help article draft is ready' : 'Saved – the assistant knows this now'); } catch (er) { toast(er.message); }
+      };
+      bubbles[i].appendChild(a);
+    });
+  }
   $('#rsug').onclick = async () => { $('#rsug').disabled = true; $('#rsug').textContent = '✨ Writing…'; try { const r = await api(T(`/conversations/${encodeURIComponent(sel)}/suggest`), { method: 'POST' }); $('#rep').value = r.text; $('#rep').focus(); if (r.sources?.length) toast('From: ' + r.sources.join(', ')); } catch (e) { toast(e.message); } $('#rsug').disabled = false; $('#rsug').textContent = '✨ Suggest'; };
   $('#trin').onclick = async (e) => {
     e.preventDefault();
@@ -586,12 +623,12 @@ async function tickets(sel, view = store.get('wc_tview') || 'active', q = '') {
       <p class="mute" style="font-size:13px">🟠 ${st.open} open · 🔵 ${st.pending} waiting · ${st.overdue ? `<b style="color:#b42318">⏰ ${st.overdue} overdue</b> · ` : ''}✅ ${st.solved30} solved in 30 days</p>
       <div style="display:flex;gap:6px;margin-bottom:8px"><select id="tview" style="width:auto">${[['active', 'Open + waiting'], ['open', 'Open'], ['pending', 'Waiting'], ['solved', 'Solved'], ['closed', 'Closed'], ['all', 'All']].map(([k, l]) => `<option value="${k}" ${view === k ? 'selected' : ''}>${l}</option>`).join('')}</select><input id="tq" value="${esc(q)}" placeholder="Search…"></div>
       <p><button class="btn ghost" id="tnew">+ New ticket</button></p>
-      ${d.tickets.map((t) => `<div class="list-item ${String(sel) === String(t.number) ? 'on' : ''}" data-t="${t.number}"><b>#${t.number}</b> ${esc(t.subject)}<div class="mute" style="font-size:12px">${pill[t.status] || t.status} · ${pri[t.priority]}${overdue(t) ? ' · <b style="color:#b42318">⏰ overdue</b>' : ''} · ${esc(t.name || t.email || (t.channel || ''))}${t.assigned_to ? ` · 👤 ${esc(t.assigned_to)}` : ''}</div></div>`).join('') || '<p class="mute">No tickets here.</p>'}
+      ${d.tickets.map((t) => `<div class="list-item ${String(sel) === String(t.number) ? 'on' : ''}" data-tk="${t.number}"><b>#${t.number}</b> ${esc(t.subject)}<div class="mute" style="font-size:12px">${pill[t.status] || t.status} · ${pri[t.priority]}${overdue(t) ? ' · <b style="color:#b42318">⏰ overdue</b>' : ''} · ${esc(t.name || t.email || (t.channel || ''))}${t.assigned_to ? ` · 👤 ${esc(t.assigned_to)}` : ''}</div></div>`).join('') || '<p class="mute">No tickets here.</p>'}
     </div><div class="card" id="tdetail"><p class="mute">Select a ticket</p></div></div>`;
   if ($('#ton')) $('#ton').onclick = async () => { S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { tickets: { enabled: true, replyHours: 8 } } })).tenant; toast('Tickets are on – the assistant will offer one when it can\'t fix a problem'); tickets(); };
   $('#tview').onchange = () => { store.set('wc_tview', $('#tview').value); tickets(null, $('#tview').value, $('#tq').value); };
   $('#tq').onchange = () => tickets(null, view, $('#tq').value);
-  $('#app').querySelectorAll('[data-t]').forEach((el) => (el.onclick = () => tickets(el.dataset.t, view, q)));
+  $('#app').querySelectorAll('[data-tk]').forEach((el) => (el.onclick = () => tickets(el.dataset.tk, view, q)));
   $('#tnew').onclick = () => {
     $('#tdetail').innerHTML = `<h2>New ticket</h2><p class="mute">For problems reported by phone or email.</p>
       <div class="row"><div><label>Name</label><input id="nn"></div><div><label>Email</label><input id="ne" type="email"></div><div><label>Phone</label><input id="np"></div></div>
@@ -1471,7 +1508,7 @@ async function grow() {
 }
 
 // ---------- welcome menu editor (Settings) ----------
-const WM_ACTIONS = [['answer', 'Reply with an answer', 'Type the answer'], ['link', 'Open a web page', 'https://…'], ['ask', 'Ask the AI a question', 'e.g. What are your delivery options? (empty = let them type)'], ['book', 'Start a booking', ''], ['status', 'Track my order', ''], ['browse', 'Browse products', ''], ['cart', 'Show the basket', ''], ['callback', 'Ask for a call back / quote', ''], ['human', 'Talk to a person', '']];
+const WM_ACTIONS = [['answer', 'Reply with an answer', 'Type the answer'], ['link', 'Open a web page', 'https://…'], ['ask', 'Ask the AI a question', 'e.g. What are your delivery options? (empty = let them type)'], ['book', 'Start a booking', ''], ['status', 'Track my order', ''], ['browse', 'Browse products', ''], ['cart', 'Show the basket', ''], ['callback', 'Ask for a call back / quote', ''], ['ticket', 'Open a support ticket', ''], ['human', 'Talk to a person', '']];
 function wmSuggestions(s) {
   if (s.store?.type === 'none') return [{ label: '📅 Book', action: 'book' }, { label: '💷 Prices', action: 'ask', value: 'What are your prices?' }, { label: '📍 Where are you?', action: 'ask', value: 'Where are you based and how do I get there?' }, { label: '🕒 Opening hours', action: 'ask', value: 'What are your opening hours?' }, { label: '🙋 Talk to a person', action: 'human' }];
   return [{ label: '🛍️ Browse products', action: 'browse' }, { label: '📦 Track my order', action: 'status' }, { label: '🚚 Delivery', action: 'ask', value: 'What are your delivery options and costs?' }, { label: '↩️ Returns', action: 'ask', value: 'What is your returns policy?' }, { label: '🙋 Talk to a person', action: 'human' }];

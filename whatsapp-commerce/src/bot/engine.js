@@ -2,7 +2,7 @@ import { getStore } from '../stores/index.js';
 import { LEAD_STATES, leadAction, leadText, leadOffer, leadSettings, topicSummary } from '../leads.js';
 import { reorderOffer, reorder, claimHandoff, forgetMemory, rememberFacts } from '../continuity.js';
 import { siteCartFor, siteCartMessage } from '../siteCart.js';
-import { stockAlertAction, stockEmailText, orderAction, orderAddressText, orderChangeButtons, frustrationOffer } from '../extras.js';
+import { stockAlertAction, stockEmailText, orderAction, orderAddressText, orderChangeButtons, frustrationOffer, FED_UP } from '../extras.js';
 import { isAiPaused } from '../coexistence.js';
 import { difyChat } from '../dify/client.js';
 import { createSessionToken } from '../session.js';
@@ -83,7 +83,7 @@ export function openerFor(S, url) {
 }
 
 // ---------- the shop's own welcome menu (Settings → Welcome menu) ----------
-export const MENU_ACTIONS = ['answer', 'link', 'book', 'status', 'browse', 'ask', 'human', 'cart', 'callback'];
+export const MENU_ACTIONS = ['answer', 'link', 'book', 'status', 'browse', 'ask', 'human', 'cart', 'callback', 'ticket'];
 export function menuOptions(S) {
   const W = S.welcomeMenu;
   if (!W?.enabled) return [];
@@ -616,6 +616,14 @@ async function handleAction(ctx, id) {
     case 'reorder': return reorder(ctx, arg, { checkout: startCheckout });
     case 'say': return arg.trim() ? handleText(ctx, arg.slice(0, 200)) : ctx.reply(mainMenu(ctx)); // a choice the AI offered
     case 'open': { // website chat opened from the pop-up greeting: the greeting, then the menu as quick replies
+      // a returning visitor we know: "Welcome back, Priya!" (and what they last asked about)
+      const prev = getDb().prepare("SELECT MAX(created_at) AS at FROM messages WHERE tenant_id = ? AND wa_id = ? AND direction = 'in' AND created_at < datetime('now', '-1 hour')").get(ctx.tenant.id, ctx.conv.waId)?.at;
+      const first = String(ctx.customer?.name || '').split(' ')[0];
+      if (prev && first && !ctx.conv.data.welcomedBackAt) {
+        ctx.conv.data.welcomedBackAt = new Date().toISOString();
+        const topic = ctx.conv.data.lastTopic && ctx.conv.data.lastTopic !== 'general' ? ` Still thinking about ${String(ctx.conv.data.lastTopic).slice(0, 60)}?` : '';
+        return ctx.reply(mainMenu(ctx, `👋 Welcome back, ${first}!${topic}`));
+      }
       const m = mainMenu(ctx, openerFor(ctx.S, ctx.conv.data.page?.url));
       return ctx.reply(m);
     }
@@ -862,6 +870,12 @@ async function handleText(ctx, raw) {
   if (/^(order status|track( my)? order|where is my order|my orders?)$/.test(t)) return orderStatus(ctx);
 
   // Fed up? Offer a person before another bot answer
+  if (FED_UP.test(String(text || '')) && !String(ctx.conv.waId).startsWith('qa:')) {
+    // an unhappy customer: flag the chat in the Inbox and tell the owner (at most every 6 hours per chat)
+    const last = Date.parse(ctx.conv.data.unhappyAt || '') || 0;
+    ctx.conv.data.unhappyAt = new Date().toISOString();
+    if (Date.now() - last > 6 * 3600000) emailShop(ctx.tenant, '😠 An unhappy customer in the chat', `A customer seems unhappy:\n\n"${String(text).slice(0, 500)}"\n\nOpen the Inbox to see the chat and step in.`, { button: 'Open the Inbox' }).catch(() => {});
+  }
   if (ctx.S.ai?.frustrationHandover !== false && !ctx.conv.humanHandover && frustrationOffer(ctx, text)) return;
 
   // Free text → AI (if configured) or knowledge base + catalogue search

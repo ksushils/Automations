@@ -44,6 +44,7 @@ import { isTyping, typingDraft, liveVisitors, sayHello } from './webchat.js';
 import { teamStatus } from '../hours.js';
 import { suggestReply, translateText } from '../ai/assist.js';
 import { listArticles, getArticle, saveArticle, deleteArticle, draftArticles } from '../help.js';
+import { searchGuides, askGuides } from '../platformHelp.js';
 import { listTickets, getTicket, ticketEvents, createTicket, updateTicket, ticketStats } from '../tickets.js';
 import { googleConfigured, calendarConnected, authUrl, disconnectCalendar, redirectUri } from '../gcal.js';
 import { resumeAi } from '../coexistence.js';
@@ -629,7 +630,7 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/conversations', requireTenant, (req, res) => {
     const rows = getDb()
       .prepare(
-        `SELECT c.wa_id, c.state, c.human_handover, c.ai_paused_until, c.cart, c.updated_at, c.assigned_to, cu.name,
+        `SELECT c.wa_id, c.state, c.human_handover, c.ai_paused_until, c.cart, c.updated_at, c.assigned_to, cu.name, json_extract(c.state_data, '$.unhappyAt') AS unhappy_at,
            (SELECT body FROM messages m WHERE m.tenant_id = c.tenant_id AND m.wa_id = c.wa_id ORDER BY id DESC LIMIT 1) AS last_body,
            (SELECT created_at FROM messages m WHERE m.tenant_id = c.tenant_id AND m.wa_id = c.wa_id AND direction = 'in' ORDER BY id DESC LIMIT 1) AS last_inbound_at
          FROM conversations c LEFT JOIN customers cu ON cu.tenant_id = c.tenant_id AND cu.wa_id = c.wa_id
@@ -678,6 +679,9 @@ export function adminRouter() {
     res.type('text/csv').set('Content-Disposition', `attachment; filename="leads-${new Date().toISOString().slice(0, 10)}.csv"`).send('\ufeff' + [cols.map((c) => c[1]).join(','), ...rows].join('\r\n'));
   });
   r.get('/trades', (req, res) => res.json({ trades: tradeList() }));
+  // our own help for the dashboard's "❓ Help" panel
+  r.get('/platform-help', (req, res) => res.json({ guides: searchGuides(String(req.query.q || ''), 6).map((g) => ({ title: g.title, url: `/guides/${g.slug}` })) }));
+  r.post('/platform-help/ask', wrap(async (req, res) => res.json(await askGuides(req.body?.question))));
   r.post('/tenants/:tenantId/trade', requireTenant, requireOwner, (req, res) => {
     const out = applyTrade(req.tenant.id, String(req.body?.trade || ''), { force: req.body?.force === true });
     if (!out) return res.status(400).json({ error: 'Unknown business type' });
@@ -724,6 +728,25 @@ export function adminRouter() {
     if (!sayHello(req.tenant.id, req.params.sessionId, text)) return res.status(404).json({ error: 'That visitor has left the site' });
     res.json({ ok: true });
   });
+  // "Teach the bot": a team answer becomes knowledge (and optionally a help-centre draft)
+  r.post('/tenants/:tenantId/teach', requireTenant, requireOwner, (req, res) => {
+    const q = String(req.body?.question || '').trim().slice(0, 500), a = String(req.body?.answer || '').trim().slice(0, 4000);
+    if (q.length < 3 || a.length < 2) return res.status(400).json({ error: 'Add the question and the answer' });
+    try {
+      const doc = addTextDoc(req.tenant.id, { name: `Q&A: ${q.slice(0, 80)}`, text: `Question: ${q}\nAnswer: ${a}` });
+      getDb().prepare("UPDATE unanswered SET status = 'answered' WHERE tenant_id = ? AND status = 'open' AND lower(question) = lower(?)").run(req.tenant.id, q);
+      kbChanged(req.tenant.id);
+      let article = null;
+      if (req.body?.article) article = saveArticle(req.tenant.id, { title: q.replace(/^\w/, (c) => c.toUpperCase()).slice(0, 150), category: 'General', body: a, status: 'draft', source: 'team' });
+      res.json({ ok: true, doc, article });
+    } catch (e) { kbErr(res, e); }
+  });
+  r.post('/tenants/:tenantId/conversations/:waId/summary', requireTenant, wrap(async (req, res) => {
+    const { summarizeChat } = await import('../ai/direct.js');
+    const s = await summarizeChat(req.tenant, req.params.waId).catch(() => null);
+    if (!s) return res.status(400).json({ error: 'Not enough chat to summarise yet (or the AI is not set up)' });
+    res.json({ summary: s });
+  }));
   r.post('/tenants/:tenantId/conversations/:waId/suggest', requireTenant, wrap(async (req, res) => res.json(await suggestReply(req.tenant, req.params.waId))));
   r.post('/tenants/:tenantId/translate', requireTenant, wrap(async (req, res) => res.json(await translateText(req.tenant, String(req.body?.text || ''), String(req.body?.to || 'English')))));
   r.get('/tenants/:tenantId/ratings', requireTenant, (req, res) => res.json(ratingSummary(req.tenant.id, Math.min(365, Number(req.query.days) || 30))));

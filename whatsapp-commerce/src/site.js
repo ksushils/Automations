@@ -1,3 +1,4 @@
+import { platformHelpRouter } from './platformHelp.js';
 import express from 'express';
 import { config } from './config.js';
 import { getDb } from './db.js';
@@ -497,6 +498,7 @@ export function siteRouter() {
   const r = express.Router();
   const html = (res, body, status = 200) => res.status(status).type('html').set('Cache-Control', 'public, max-age=300').send(body);
   r.use(instantDemoRouter(layout)); // /try – your assistant in 60 seconds
+  r.use(platformHelpRouter(layout)); // /guides – how to use the product
   r.use(feeCheckerRouter(layout)); // /whatsapp-fee-checker – what your current provider adds on top of Meta
   r.get('/', (req, res) => html(res, home()));
   r.get('/pricing', (req, res) => html(res, pricing()));
