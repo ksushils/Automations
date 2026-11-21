@@ -3,6 +3,7 @@ import { getDb } from './db.js';
 import { getTenant, updateTenantSettings } from './tenants.js';
 import { chatCompletion, directConfigured } from './ai/direct.js';
 import { TRADES, TRADE_KEYS, guessTrade } from './trades.js';
+import { learnedQuestions } from './learn.js';
 
 /*
  * AI auto-setup: once the assistant has read a new shop's website, the AI writes the parts we used to set up by hand –
@@ -38,7 +39,7 @@ export async function draftSetup(tenant) {
   const bookings = !!S.bookings?.enabled;
   const r = await chatCompletion({
     temperature: 0.2, maxTokens: 900,
-    messages: [{ role: 'user', content: `You set up the website chat for a UK small business. Business: "${S.business?.name}". About: ${clip(S.ai?.about, 400) || '(not given)'}.${TRADES[S.trade] ? ` Trade: ${TRADES[S.trade].label}; its customers usually ask: ${TRADES[S.trade].questions.slice(0, 6).join(' / ')}` : ''}${shop ? ' It sells products online.' : ' It takes enquiries and bookings (no online shop in the chat).'}${bookings ? ' Customers can book in the chat.' : ''}
+    messages: [{ role: 'user', content: `You set up the website chat for a UK small business. Business: "${S.business?.name}". About: ${clip(S.ai?.about, 400) || '(not given)'}.${TRADES[S.trade] ? ` Trade: ${TRADES[S.trade].label}; its customers usually ask: ${[...TRADES[S.trade].questions.slice(0, 6), ...learnedQuestions(S.trade).slice(0, 4)].join(' / ')}` : ''}${shop ? ' It sells products online.' : ' It takes enquiries and bookings (no online shop in the chat).'}${bookings ? ' Customers can book in the chat.' : ''}
 
 Pages we read from its website (number. title – path):
 ${pages.map((p, i) => `${i + 1}. ${p.name} – ${p.path}`).join('\n')}

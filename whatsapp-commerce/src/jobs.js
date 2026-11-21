@@ -78,6 +78,8 @@ export function startJobs() {
   const minutely = setInterval(() => {
     runScheduled().catch((e) => console.error('[jobs]', e));
     recoverUnprocessed().then((n) => n && console.log(`[recovery] replayed ${n} unfinished message(s)`), (e) => console.error('[recovery]', e));
+    // leads still waiting for a reply: nudge the team (every 10 minutes)
+    if (Date.now() - (globalThis.__leadNudgeAt || 0) > 600000) { globalThis.__leadNudgeAt = Date.now(); import('./leads.js').then(({ runLeadNudges }) => runLeadNudges()).then((n) => n && console.log(`[leads] ${n} nudge(s)`), (e) => console.error('[lead nudges]', e.message)); }
   }, 30000);
   // also right after start-up (messages interrupted by the previous deploy/crash)
   setTimeout(() => recoverUnprocessed({ olderThanSec: 0 }).catch((e) => console.error('[recovery]', e)), 5000).unref();
@@ -90,6 +92,7 @@ export function startJobs() {
     runAppReminders().then((n) => n && console.log(`[keep your number] reminded ${n} shop(s) to open the Business app`), (e) => console.error('[coexistence]', e));
     try { const n = cleanupDemos(); if (n) console.log(`[instant demo] deleted ${n} expired demo(s)`); } catch (e) { console.error('[instant demo]', e); }
     runMonthlyReports().then((n) => n && console.log(`[value report] emailed ${n} shop(s)`), (e) => console.error('[value report]', e));
+    import('./learn.js').then(({ improveTradeTemplates }) => improveTradeTemplates()).then((n) => n && console.log(`[learn] improved ${n} trade template(s)`), (e) => console.error('[learn]', e.message));
     runWeeklyUnanswered().then((n) => n && console.log(`[unanswered] emailed ${n} shop(s)`), (e) => console.error('[unanswered]', e));
     try { const n = enforceTrials(); if (n) console.log(`[billing] paused ${n} expired trial(s)`); } catch (e) { console.error('[jobs]', e); }
     try { const r = applyRetention(); if (Object.values(r).some(Boolean)) console.log('[retention]', JSON.stringify(r)); } catch (e) { console.error('[jobs]', e); }

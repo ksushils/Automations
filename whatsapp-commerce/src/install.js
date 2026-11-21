@@ -1,3 +1,4 @@
+import { getDb } from './db.js';
 import { config } from './config.js';
 import { safeFetch } from './knowledge.js';
 
@@ -76,4 +77,27 @@ export async function detectPlatform(website) {
   if (/img1\.wsimg\.com|godaddy/.test(h)) return 'godaddy';
   if (/googletagmanager\.com\/gtm\.js/.test(h)) return 'gtm';
   return 'other';
+}
+
+/** "Check my website": open the site now and look for this shop's chat code (no need to wait for a visitor). */
+export async function checkInstall(tenant, url) {
+  const site = String(url || tenant.settings.business?.website || '').trim();
+  if (!site) return { ok: false, reason: 'no_website', message: 'Add your website address first (Settings → Business).' };
+  let r;
+  try { r = await safeFetch(/^https?:\/\//.test(site) ? site : `https://${site}`, { maxBytes: 1500000 }); } catch (e) { return { ok: false, reason: 'unreachable', message: `We couldn't open ${site}: ${e.message}` }; }
+  const html = String(r.body || '');
+  const mine = html.includes(`/chat-widget/${tenant.id}.js`) || html.includes(`/chat-widget/${encodeURIComponent(tenant.id)}.js`);
+  const other = !mine && /\/chat-widget\/[\w-]+\.js/.test(html);
+  const gtm = /googletagmanager\.com\/gtm\.js/.test(html);
+  const wp = /wp-content\/plugins\/ai-chat-assistant/.test(html);
+  let origin = site;
+  try { origin = new URL(r.url).origin; } catch {}
+  if (mine) {
+    getDb().prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(`widget_seen:${tenant.id}`, JSON.stringify({ origin, at: new Date().toISOString() }));
+    return { ok: true, message: `✅ Found it – your chat is on ${origin.replace(/^https?:\/\//, '')}.` };
+  }
+  if (other) return { ok: false, reason: 'other_shop', message: "There's a chat code on your site, but it belongs to a different account. Copy the code from this page again and replace it." };
+  if (wp) return { ok: false, reason: 'plugin_cached', message: 'Our WordPress plugin is installed. If you can\'t see the chat, clear your caching plugin (e.g. WP Rocket, LiteSpeed) and check again.' };
+  if (gtm) return { ok: false, reason: 'gtm', message: "We can't see the code in the page itself, but your site uses Google Tag Manager – if you added it there, check it is Published, then open your site: the chat loads through Tag Manager." };
+  return { ok: false, reason: 'not_found', message: `We can't see the chat code on ${origin.replace(/^https?:\/\//, '')} yet. Did you save and publish the change? Some builders need "Publish" after editing.` };
 }

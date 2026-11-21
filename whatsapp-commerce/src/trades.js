@@ -221,7 +221,7 @@ export function tradeSettings(key, S = {}) {
     quality: { tradeQuestions: T.questions },
   };
   if (storeType !== type) patch.store = { type: storeType };
-  if (T.bookings && !(S.bookings?.services || []).length) patch.bookings = { enabled: false, days: 14, perSlot: 1, autoConfirm: false, reminderHours: 24, ...T.bookings };
+  if (T.bookings && !(S.bookings?.services || []).length) patch.bookings = { enabled: false, days: 14, perSlot: 1, autoConfirm: false, reminderHours: 24, secondReminderHours: 2, ...T.bookings };
   if (T.ordering) patch.ordering = T.ordering;
   if (T.tickets) patch.tickets = { enabled: true, replyHours: S.tickets?.replyHours || 8 };
   if (T.categories && storeType === 'manual' && !(S.store?.manual?.products || []).length) patch.store = { ...(patch.store || {}), manual: { categories: T.categories, products: [] } };

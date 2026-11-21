@@ -64,9 +64,9 @@ test('flow list row → products node; handover node; contains match; welcome tr
   saveFlow(t.id, { name: 'Hours', triggers: { keywords: ['open'], match: 'contains' }, steps: [{ type: 'message', text: 'Open 9-5' }] });
   saveFlow(t.id, { name: 'First', triggers: { keywords: [], welcome: true }, steps: [{ type: 'message', text: 'Welcome newbie!' }] });
   let r = await say(t, '447700900502', 'what time are you open?');
-  assert.match(r[0].text, /automated assistant[\s\S]*\n\nOpen 9-5$/); // first message carries the AI disclosure
+  assert.match(r[0].text, /^Open 9-5\n\n🤖[\s\S]*automated assistant/); // first message carries the AI disclosure
   r = await say(t, '447700900503', 'random first message');
-  assert.match(r[0].text, /Welcome newbie!$/);
+  assert.match(r[0].text, /^Welcome newbie!(\n\n🤖[\s\S]*)?$/);
   r = await say(t, '447700900503', 'random second message');
   assert.notEqual(r[0]?.text, 'Welcome newbie!');
   r = await say(t, '447700900504', 'hi');
@@ -80,7 +80,7 @@ test('delay step schedules a resume that the job runner delivers', async () => {
   const wa = '447700900505';
   const r = await say(t, wa, 'drip');
   assert.equal(r.length, 1);
-  assert.match(r[0].text, /Part 1$/);
+  assert.match(r[0].text, /^Part 1(\n\n🤖[\s\S]*)?$/);
   getDb().prepare("UPDATE scheduled SET run_at = datetime('now', '-1 minute') WHERE tenant_id = ?").run(t.id);
   const sent = [];
   const realFetch = globalThis.fetch;

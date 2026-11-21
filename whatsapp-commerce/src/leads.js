@@ -227,6 +227,46 @@ export function listChatLeads(tenantId, { limit = 200 } = {}) {
 }
 export function setLeadStatus(tenantId, id, status) {
   if (!['new', 'contacted', 'won', 'lost'].includes(status)) throw Object.assign(new Error('bad status'), { status: 400 });
-  getDb().prepare('UPDATE chat_leads SET status = ? WHERE id = ? AND tenant_id = ?').run(status, Number(id), tenantId);
+  getDb().prepare("UPDATE chat_leads SET status = ?, contacted_at = CASE WHEN ? != 'new' AND contacted_at IS NULL THEN datetime('now') ELSE contacted_at END WHERE id = ? AND tenant_id = ?").run(status, status, Number(id), tenantId);
 }
 void config;
+
+/*
+ * Speed to lead (HBR: firms answering within an hour were ~7x likelier to qualify the lead; 23% never answered):
+ *  - the team is nudged when a lead is still "new" after 30 minutes, and again after 4 hours;
+ *  - the customer gets one friendly follow-up email after 24 hours if nobody has been in touch (they asked to be
+ *    contacted, so this is a reply to their request, not marketing).
+ */
+export async function runLeadNudges(now = Date.now()) {
+  const d = getDb();
+  const once = (key) => { if (d.prepare('SELECT 1 FROM kv WHERE key = ?').get(key)) return false; d.prepare("INSERT INTO kv (key, value) VALUES (?, '1')").run(key); return true; };
+  const rows = d.prepare("SELECT l.*, t.id AS tid FROM chat_leads l JOIN tenants t ON t.id = l.tenant_id WHERE l.status = 'new' AND l.created_at > datetime('now', '-3 days') LIMIT 500").all();
+  let n = 0;
+  const { getTenant } = await import('./tenants.js');
+  for (const l of rows) {
+    const age = (now - Date.parse(`${l.created_at.replace(' ', 'T')}Z`)) / 60000;
+    const tenant = getTenant(l.tenant_id);
+    if (!tenant?.active || tenant.settings.leads?.nudges === false) continue;
+    const who = [l.name, l.phone, l.email].filter(Boolean).join(' · ');
+    for (const [mins, label] of [[30, '30 minutes'], [240, '4 hours']]) {
+      if (age >= mins && age < mins + 600 && once(`lead_nudge:${l.id}:${mins}`)) {
+        emailShop(tenant, `⏰ A lead has waited ${label}: ${l.name || l.phone || 'new lead'}`, `This lead is still marked "new" after ${label}:\n\n${l.kind === 'call' ? '📞 Wants a call back' : '📩 Wants details'}${l.topic && l.topic !== 'general' ? ` about ${l.topic}` : ''}\n${who}${l.call_time ? `\nBest time: ${l.call_time}` : ''}${l.message ? `\n\n"${l.message}"` : ''}\n\nReplying within the hour makes people several times more likely to buy. Mark it "Contacted" on the Leads tab once you've been in touch.`, { button: 'Open Leads' }).catch(() => {});
+        for (const s of tenant.settings.notifications?.staffWaIds || []) notify(tenant, String(s).replace(/\D/g, ''), { type: 'text', text: `⏰ Lead waiting ${label}: ${who}` }, null).catch(() => {});
+        n++;
+      }
+    }
+    if (age >= 1440 && l.email && once(`lead_followup:${l.id}`)) {
+      const biz = tenant.settings.business.name;
+      sendEmail({ to: l.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Following up from ${biz}`, text: `Hi${l.name ? ` ${String(l.name).split(' ')[0]}` : ''},\n\nThanks for getting in touch with ${biz}${l.topic && l.topic !== 'general' ? ` about ${l.topic}` : ''}. Did you get everything you needed? Just reply to this email and we'll help.\n\n${biz}` }).catch(() => {});
+      n++;
+    }
+  }
+  return n;
+}
+
+/** Average minutes from a lead arriving to being marked contacted (last 30 days). */
+export function leadSpeed(tenantId) {
+  const r = getDb().prepare("SELECT AVG((julianday(contacted_at) - julianday(created_at)) * 1440) AS avg, COUNT(*) AS n FROM chat_leads WHERE tenant_id = ? AND contacted_at IS NOT NULL AND created_at > datetime('now', '-30 days')").get(tenantId);
+  const waiting = getDb().prepare("SELECT COUNT(*) AS n FROM chat_leads WHERE tenant_id = ? AND status = 'new'").get(tenantId).n;
+  return { avgMinutes: r.n ? Math.round(r.avg) : null, contacted: r.n, waiting };
+}

@@ -915,6 +915,7 @@ export async function handleInbound(tenant, event, send) {
   const ctx = buildCtx(tenant, conv, customer, send, replies);
   ctx.event = event;
   if (event.utm && !conv.data.utm) conv.data.utm = event.utm; // first touch
+  if (event.ab && !conv.data.ab && /^[ABH]$/.test(event.ab)) conv.data.ab = event.ab; // which pop-up greeting they saw (A/B test)
   if (event.page?.url) conv.data.page = { url: String(event.page.url).slice(0, 300), title: String(event.page.title || '').slice(0, 150), ...(event.page.product ? { product: event.page.product } : {}), ...(event.page.cart ? { cart: event.page.cart } : {}), ...(event.page.sections ? { sections: event.page.sections } : {}), ...(event.page.form ? { form: true } : {}), at: new Date().toISOString() };
 
   // Click-to-WhatsApp ad attribution (first touch wins)
@@ -1012,9 +1013,10 @@ export async function handleInbound(tenant, event, send) {
   if (isFirstMessage && tenant.settings.ai?.disclosure !== false && replies.length) {
     const name = tenant.settings.ai?.assistantName || `${tenant.settings.business.name} assistant`;
     const note = `🤖 _I'm ${name}, an automated assistant${aiAvailable(ctx) ? ' (AI)' : ''}. Type *human* any time to talk to a person._`;
-    // put it on top of the first reply (one message, not two – every message is billed by Meta)
+    // one message, not two (every message is billed by Meta), and AFTER the useful part: being helpful first and
+    // saying it's an AI right after keeps people engaged (Luo et al., Marketing Science 2019) – still disclosed
     const first = replies.find((m) => ['text', 'buttons', 'list', 'cta', 'flow'].includes(m.type));
-    if (first) first.text = `${note}\n\n${first.text}`;
+    if (first) first.text = `${first.text}\n\n${note}`;
     else replies.unshift({ type: 'text', text: note });
   }
   saveConversation(conv);
@@ -1149,6 +1151,13 @@ async function askDirect(ctx, text) {
   if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(H(productList(ctx, shown, say || 'Here are some products you might like:'))); }
   else if (choices.length) ctx.reply(H(choiceButtons(say || 'Which is closest?', choices, leadTopic(ctx, text))));
   else ctx.reply(H({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." }));
+  // no dead ends: after two answers in a row it wasn't sure about, offer a person (Gartner: 87% want one available)
+  ctx.conv.data.unsureRun = isUnsure(say) ? (ctx.conv.data.unsureRun || 0) + 1 : 0;
+  if (ctx.conv.data.unsureRun >= 2 && !ctx.conv.humanHandover) {
+    ctx.conv.data.unsureRun = 0;
+    const topic = leadTopic(ctx, text);
+    ctx.reply({ type: 'buttons', text: "I'm sorry I couldn't answer that properly. Would you like help from a person?", buttons: [{ id: 'human', title: '🙋 Talk to a person' }, { id: `lead:call:${topic}`, title: '📞 Call me back' }, ticketsOn(ctx.S) ? { id: 'ticket', title: '🎫 Open a ticket' } : { id: `lead:email:${topic}`, title: '📩 Email me' }] });
+  }
 }
 
 /** Tell the shop owner (once a day per kind) that a plan limit was reached. */

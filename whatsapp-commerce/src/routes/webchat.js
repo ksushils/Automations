@@ -126,7 +126,8 @@ export function openerConfig(t) {
   const host = (u) => { try { return new URL(/^https?:\/\//.test(u) ? u : `https://${u}`).host.toLowerCase().replace(/^www\./, ''); } catch { return ''; } };
   const hosts = [S.store?.shopify?.domain, S.store?.shopify?.origin, S.store?.woocommerce?.url, S.business?.website, ...(S.store?.siteDomains || [])].map((x) => host(x || '')).filter(Boolean);
   const freeDelivery = Number(S.webchat?.freeDeliveryOver ?? S.ordering?.freeDeliveryOver) || 0;
-  return { text: String(O.text || DEFAULT_OPENER).slice(0, 200), rules, chips: O.chips === false ? [] : chips, delay: n(O.delaySeconds, 10, 120), mobileDelay: n(O.mobileDelaySeconds, 15, 180), exit: O.exitIntent !== false,
+  const ab = O.textB && O.abStarted ? { b: String(O.textB).slice(0, 200), holdout: Math.max(0, Math.min(50, Number(O.holdout ?? 10))) / 100 } : null;
+  return { ab, text: String(O.text || DEFAULT_OPENER).slice(0, 200), rules, chips: O.chips === false ? [] : chips, delay: n(O.delaySeconds, 10, 120), mobileDelay: n(O.mobileDelaySeconds, 15, 180), exit: O.exitIntent !== false,
     site: platform && hosts.length && S.ordering?.siteCart !== false ? { platform, hosts: [...new Set(hosts)] } : null, freeDelivery, sym: S.business?.currencySymbol || '£' };
 }
 export { openerFor };
@@ -158,9 +159,10 @@ export function webchatRouter() {
     }
     if (!withinLimit(t, 'inbound')) return res.json({ replies: [{ type: 'text', text: `Thanks for your message! The ${t.settings.business.name} team will get back to you soon.` }] });
     const waId = visitorId(sessionId);
+    const ab = /^[ABH]$/.test(String(req.body?.ab || '')) ? req.body.ab : undefined;
     const ev = actionId
-      ? { waId, kind: 'action', id: String(actionId).slice(0, 200), text: '', page, utm }
-      : { waId, kind: 'text', text: String(text).slice(0, 2000), profileName: null, page, utm };
+      ? { waId, kind: 'action', id: String(actionId).slice(0, 200), text: '', page, utm, ab }
+      : { waId, kind: 'text', text: String(text).slice(0, 2000), profileName: null, page, utm, ab };
     logMessage(t.id, waId, 'in', { type: ev.kind, text: ev.kind === 'text' ? ev.text : `[${ev.id}]`, channel: 'web' });
     bumpUsage(t.id, 'inbound');
     const sink = [];
@@ -196,6 +198,15 @@ export function webchatRouter() {
     const code = createHandoff(t.id, visitorId(sessionId));
     const text = `Hi! I'd like to continue my chat from your website (ref ${code})`;
     res.json({ code, url: `https://wa.me/${num}?text=${encodeURIComponent(text)}` });
+  });
+
+  // A/B test of the pop-up greeting: count visits per variant (A, B, or H = held out, no greeting)
+  r.post('/chat/:tenantId/ab', limiter, (req, res) => {
+    const t = getTenant(req.params.tenantId);
+    const v = String(req.body?.variant || '');
+    if (!t?.active || !/^[ABH]$/.test(v)) return res.sendStatus(204);
+    getDb().prepare("INSERT INTO kv (key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1").run(`ab:${t.id}:${t.settings.webchat?.opener?.abStarted || 'x'}:${v}`);
+    res.sendStatus(204);
   });
 
   r.post('/chat/:tenantId/typing', limiter, (req, res) => {
@@ -524,7 +535,7 @@ function send(body,label){
   if(body.text){sentN++;clearTimeout(rateT)}if(body.actionId&&/^rate:/.test(body.actionId))mark(K+'-rated','1',1);
   var typing=add('…','a wc-t');busy++;
   if(body.text||(body.actionId&&body.actionId!=='open'))mark(K+'-chatted','1',1);
-  fetch(C.api+'/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({sessionId:sid,page:pg(),utm:UTM||undefined},body))})
+  fetch(C.api+'/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({sessionId:sid,page:pg(),utm:UTM||undefined,ab:AB||undefined},body))})
   .then(function(r){return r.json()}).then(function(r){busy--;typing.remove();(r.replies||[]).forEach(render);if((r.replies||[]).length)ping();if(r.lastId)last=Math.max(last,r.lastId);rateLater()})
   .catch(function(){busy--;typing.remove();add('Sorry – connection problem, please try again.','a')});
 }
@@ -555,7 +566,8 @@ if(UP&&FI){UP.onclick=function(){FI.click()};FI.onchange=function(){var f=FI.fil
   fetch(C.api+'/upload?sessionId='+sid+'&name='+encodeURIComponent(f.name.slice(0,80)),{method:'POST',headers:{'Content-Type':f.type||'application/octet-stream'},body:f})
   .then(function(r){return r.json()}).then(function(r){busy--;typing.remove();if(r.error)add(esc(r.error),'a');(r.replies||[]).forEach(render);if(r.lastId)last=Math.max(last,r.lastId)})
   .catch(function(){busy--;typing.remove();add('Sorry – the file didn\'t send, please try again.','a')})}}
-var O=C.opener;
+var O=C.opener,AB='';
+if(O&&O.ab){AB=got(K+'-ab',1);if(!/^[ABH]$/.test(AB||'')){var rr=Math.random();AB=rr<O.ab.holdout?'H':rr<O.ab.holdout+(1-O.ab.holdout)/2?'A':'B';mark(K+'-ab',AB,1);fetch(C.api+'/ab',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,variant:AB})}).catch(function(){})}if(AB==='B')O.text=O.ab.b}
 function preChat(go){var Q=C.preChat,b=d.createElement('div');b.className='wc-pc';
   b.innerHTML='<b></b>'+'<input class="n" placeholder="Your name" autocomplete="name" maxlength="80">'+(Q.email?'<input class="e" type="email" placeholder="Email" autocomplete="email" maxlength="200">':'')+(Q.phone?'<input class="p" type="tel" placeholder="Phone" autocomplete="tel" maxlength="30">':'')+'<span class="er"></span><button class="go">Start chat</button>'+(Q.required?'':'<button class="sk">Skip</button>')+'<small>We only use these to reply to you.</small>';
   b.querySelector('b').textContent=Q.intro;M.appendChild(b);
@@ -584,7 +596,7 @@ if(L&&O){
     L.querySelector('span').innerHTML='<b>'+esc(C.title)+'</b>'+esc(textFor())+(O.chips.length?'<div class="wc-lc">'+O.chips.slice(0,mobile?2:3).map(function(c){return '<button data-a="'+esc(c.id)+'" data-l="'+esc(c.label)+'">'+esc(c.label)+'</button>'}).join('')+'</div>':'')+'<form class="wc-lf"><input placeholder="Type your question…" aria-label="Type your question" maxlength="500"><button type="submit">Send</button></form>';
     var LF=L.querySelector('.wc-lf');LF.onsubmit=function(e){e.preventDefault();e.stopPropagation();var v=LF.querySelector('input').value.trim();if(!v)return;toggle({text:v},v)};LF.onclick=function(e){e.stopPropagation()};
     L.style.display='';};
-  if(got(K+'-chatted',1)||got(K+'-closed',1)||got(K+'-shown',1)){L.remove();L=null}
+  if(AB==='H'||got(K+'-chatted',1)||got(K+'-closed',1)||got(K+'-shown',1)){L.remove();L=null}
   else{setTimeout(show,(mobile?O.mobileDelay:O.delay)*1000);
     if(O.exit&&!mobile){var t0=Date.now();d.addEventListener('mouseout',function(e){if(!e.relatedTarget&&e.clientY<=0&&Date.now()-t0>5000)show()})}}
 }else if(L){

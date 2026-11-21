@@ -689,9 +689,10 @@ async function help(editId) {
 
 // ---------- leads (details / call-back requests from the chat) ----------
 async function leads() {
-  const { leads: rows } = await api(T('/leads'));
+  const { leads: rows, speed } = await api(T('/leads'));
   const st = { new: '🆕 New', contacted: '📞 Contacted', won: '✅ Won', lost: '✖ Lost' };
   $('#app').innerHTML = `<div class="card"><h2>📇 Leads from the chat (${rows.length})</h2>
+    ${speed ? `<p style="font-size:14px">⏱️ ${speed.avgMinutes != null ? `Average time to get back to a lead: <b>${speed.avgMinutes < 60 ? `${speed.avgMinutes} min` : `${Math.round(speed.avgMinutes / 60 * 10) / 10} hours`}</b> (last 30 days)` : 'Mark leads "Contacted" to see how fast you get back to people.'}${speed.waiting ? ` · <b>${speed.waiting}</b> waiting` : ''} <span class="mute">– answering within an hour makes people several times more likely to buy. We remind you at 30 minutes and 4 hours.</span></p>` : ''}
     <p class="mute">People who asked for details or a call back in your website chat or on WhatsApp. You get an email${S.tenant.settings.notifications?.staffWaIds?.length ? ' and a WhatsApp' : ''} the moment one arrives – calling back quickly makes the biggest difference. Only contact people for offers if "Offers by email" says yes.</p>
     ${rows.length ? `<div class="tablewrap"><table><tr><th>When</th><th>Wants</th><th>Who</th><th>To discuss</th><th>From page</th><th>Offers by email</th><th>Status</th></tr>${rows.map((l) => `<tr>
       <td>${esc(l.created_at)}<div class="mute">${l.channel === 'web' ? '🌐 website' : '📱 WhatsApp'}</div></td>
@@ -1218,7 +1219,7 @@ async function shopGuide(t) {
       toast('Downloaded – now upload it in WordPress → Plugins → Add New → Upload Plugin');
     } catch (err) { toast(err.message); }
   }));
-  on('g-recheck', async () => { res('Checking…'); const g2 = await api(T('/onboarding')); const w = g2.steps.find((x) => x.key === 'website'); if (w.data.seenOn || w.done) return reload(true); res('Not yet. Open your website in a new tab after saving the change there, then press Check now again.'); });
+  on('g-recheck', async () => { res('Checking your website…'); const ck = await api(T('/install/check'), { method: 'POST' }).catch(() => null); if (ck?.ok) return reload(true); if (ck && ck.reason !== 'not_found') return res(ck.message); const g2 = await api(T('/onboarding')); const w = g2.steps.find((x) => x.key === 'website'); if (w.data.seenOn || w.done) return reload(true); res('Not yet. Open your website in a new tab after saving the change there, then press Check now again.'); });
   on('g-skgo', async () => {
     res('Connecting to Stripe…');
     const r = await api(T('/payments/stripe-connect'), { method: 'POST', body: { secretKey: $('#g-sk').value } });
@@ -1457,7 +1458,10 @@ async function grow() {
       <div><label>Brand colour</label><input id="scolor" type="color" value="${esc(s.storefront?.brandColor || '#128c4a')}"></div></div></div>
     <div class="card"><h2>🤖 Website AI chat</h2><p class="mute">Your AI assistant on your own website – answers from your knowledge base, shows products and hands the basket to checkout. Works without the WhatsApp API, so you can start today. Staff can reply from the Inbox.</p>
       <code style="display:block;padding:10px">${esc(`<script src="${origin}/chat-widget/${t.id}.js" async><\/script>`)}</code>
+      <p style="margin-top:8px"><button class="btn ghost" id="wcchk">✅ Check my website now</button> <a class="btn ghost" id="wcbm" href="javascript:(function(){var s=document.createElement('script');s.src='${origin}/chat-widget/${encodeURIComponent(t.id)}.js';document.body.appendChild(s)})()" title="Drag me to your bookmarks bar, open your website, then click the bookmark">👀 Preview on my site</a> <span id="wcchkres" class="mute"></span></p>
+      <p class="mute" style="font-size:13px">Preview without installing: drag <b>👀 Preview on my site</b> to your browser's bookmarks bar, open your website and click it – the chat appears just for you.</p>
       <details style="margin-top:8px"><summary><b>Chat page link</b> and <b>chat inside a page</b> (no pop-up)</summary>
+        <div id="wcqr" style="background:#fff;padding:8px;border-radius:8px;width:150px;height:150px;margin:8px 0" title="QR code for your chat page – print it on flyers, menus and the counter"></div>
         <p class="mute">A full-page chat with its own link: put it in emails, Instagram and Facebook bios, QR codes and ads.</p>
         <p><a href="${origin}/c/${encodeURIComponent(t.id)}" target="_blank" rel="noopener">${origin}/c/${esc(t.id)}</a></p>
         <p class="mute">Or show the chat inside a page (a contact or booking page) instead of the pop-up button: paste this where it should appear.</p>
@@ -1482,6 +1486,12 @@ async function grow() {
       <div style="flex:2"><label>Greeting</label><input id="wptext" value="${esc(s.webchat?.opener?.text || '')}" placeholder="👋 Hello! What brings you here today? Anything in particular you're looking for?" maxlength="200"></div>
       <div><label>Show after (seconds)</label><input id="wpdelay" type="number" min="0" max="120" value="${esc(s.webchat?.opener?.delaySeconds ?? 10)}"></div>
       <div><label>On phones, after (seconds)</label><input id="wpmdelay" type="number" min="0" max="180" value="${esc(s.webchat?.opener?.mobileDelaySeconds ?? 15)}"></div></div>
+      <div style="background:var(--bg,#f6f8f7);border-radius:10px;padding:10px 12px;margin:10px 0"><b>🧪 Test a second greeting (A/B test)</b>
+        <p class="mute" style="font-size:13px;margin:4px 0">Half your visitors see greeting A, half see B, and a small group sees none – so you see which brings more chats, leads and orders, and how much the greeting really adds.</p>
+        <div class="row"><div style="flex:2"><label>Greeting B</label><input id="wptextb" value="${esc(s.webchat?.opener?.textB || '')}" placeholder="🎁 Looking for something special? I can help you choose."></div>
+        <div><label>No greeting for</label><select id="wphold">${[0, 5, 10, 20].map((n) => `<option value="${n}" ${Number(s.webchat?.opener?.holdout ?? 10) === n ? 'selected' : ''}>${n}% of visitors</option>`).join('')}</select></div></div>
+        <p><button class="btn ghost" id="wpab">${s.webchat?.opener?.abStarted ? '⏹ Stop the test' : '▶ Start the test'}</button> <span class="mute" style="font-size:13px">${s.webchat?.opener?.abStarted ? `Running since ${esc(String(s.webchat.opener.abStarted).slice(0, 10))}` : ''}</span></p>
+        <div id="wpabres"></div></div>
       <label>Greetings for particular pages (one per line: part of the page address = greeting)</label>
       <textarea id="wppages" rows="3" placeholder="/tours = 🌍 Planning a trip? Tell me where you'd like to go.&#10;/gift = 🎁 Looking for a gift? Who's it for?">${esc((s.webchat?.opener?.pages || []).map((p) => `${p.match} = ${p.text}`).join('\n'))}</textarea>
       <p class="mute" style="font-size:13px">Built in: product pages, the basket and booking or pricing pages get their own greeting unless you set one here.</p>
@@ -1499,6 +1509,21 @@ async function grow() {
   $('#gmsg').oninput = update; update();
   $('#gcopy').onclick = () => { navigator.clipboard?.writeText($('#glink').value); toast('Link copied'); };
   $('#gdl').onclick = () => { const c = $('#gqr canvas'); if (!c) return; const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = 'whatsapp-qr.png'; a.click(); };
+  if ($('#wpab')) $('#wpab').onclick = async () => {
+    const on = !S.tenant.settings.webchat?.opener?.abStarted;
+    if (on && !$('#wptextb').value.trim()) return toast('Write greeting B first');
+    try { S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { webchat: { opener: { textB: $('#wptextb').value.trim(), holdout: Number($('#wphold').value), abStarted: on ? new Date().toISOString() : null } } } })).tenant; toast(on ? 'Test started – results appear here as visitors come in' : 'Test stopped'); grow(); } catch (e) { toast(e.message); }
+  };
+  if ($('#wpabres') && S.tenant.settings.webchat?.opener?.abStarted) api(T('/ab')).then((r) => {
+    if (!r.running) return;
+    const rate = (a, b) => (b ? `${Math.round((a / b) * 1000) / 10}%` : '–');
+    const row = (k, label) => { const v = r.variants[k]; return `<tr><td>${label}</td><td>${v.visits}</td><td>${v.chats} <span class="mute">(${rate(v.chats, v.visits)})</span></td><td>${v.leads} <span class="mute">(${rate(v.leads, v.visits)})</span></td><td>${v.orders}${v.revenue ? ` · £${v.revenue}` : ''}</td></tr>`; };
+    const total = r.variants.A.visits + r.variants.B.visits;
+    $('#wpabres').innerHTML = `<div class="tablewrap"><table><tr><th></th><th>Visits</th><th>Chats</th><th>Leads</th><th>Orders</th></tr>${row('A', 'A: ' + esc(r.a.slice(0, 40)))}${row('B', 'B: ' + esc(r.b.slice(0, 40)))}${r.holdout ? row('H', 'No greeting') : ''}</table></div><p class="mute" style="font-size:12px">${total < 200 ? 'Give it at least a few hundred visits before deciding – small numbers jump around.' : 'Pick the winner: copy it into the Greeting box above and stop the test.'}</p>`;
+  }).catch(() => {});
+  if ($('#wcchk')) $('#wcchk').onclick = async () => { $('#wcchkres').textContent = 'Checking your website…'; try { const r = await api(T('/install/check'), { method: 'POST' }); $('#wcchkres').textContent = r.message; } catch (e) { $('#wcchkres').textContent = e.message; } };
+  if ($('#wcbm')) $('#wcbm').onclick = (e) => { e.preventDefault(); toast('Drag this button to your bookmarks bar, then click it while on your website'); };
+  loadQr().then(() => { const q = $('#wcqr'); if (q) { q.innerHTML = ''; new QRCode(q, { text: `${location.origin}/c/${encodeURIComponent(S.tenantId)}`, width: 134, height: 134, correctLevel: QRCode.CorrectLevel.M }); } }).catch(() => {});
   $('#gsave').onclick = async () => {
     try {
       S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { teamHours: { enabled: !!$('#wcth').value.trim(), text: $('#wcth').value.trim() }, webchat: { liveVisitors: $('#wclv').value === 'true', typingPreview: $('#wctp').value === 'true', hideOnMobile: $('#wchm').value === 'true', hidePaths: $('#wchp').value.split('\n').map((x) => x.trim()).filter((x) => x.startsWith('/')).slice(0, 30), enabled: $('#wcen').value === 'true', uploads: $('#wcup').value === 'true', sound: $('#wcsnd').value === 'true', rating: $('#wcrt').value === 'true', preChat: { enabled: $('#wcpc').value !== 'off', required: $('#wcpc').value === 'required' }, title: $('#wct').value, subtitle: $('#wcs').value, color: $('#wcc').value, opener: { enabled: $('#wpon').value === 'true', text: $('#wptext').value.trim() || null, delaySeconds: Number($('#wpdelay').value) || 0, mobileDelaySeconds: Number($('#wpmdelay').value) || 0, pages: $('#wppages').value.split('\n').map((l) => l.split(/\s=\s|=/)).filter((p) => p.length >= 2 && p[0].trim() && p.slice(1).join('=').trim()).map((p) => ({ match: p[0].trim().slice(0, 100), text: p.slice(1).join('=').trim().slice(0, 200) })).slice(0, 20) } }, storefront: { mode: $('#smode').value, brandColor: $('#scolor').value }, widget: { color: $('#wcolor').value, position: $('#wpos').value, greeting: $('#wgreet').value, prefill: $('#wpre').value } } })).tenant;
@@ -1526,7 +1551,7 @@ function welcomeMenuEditor() {
       <p class="mute">A ready-made start for your trade: the menu and greeting your customers expect, the right question for call-backs, safety rules for the AI (a dentist's assistant never diagnoses; a takeaway's never promises allergen-free) and the questions we check its answers on. Your prices, hours and policies still come from your own website.</p>
       <div id="trgrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px"><span class="mute">Loading…</span></div>
       <p id="trres" class="mute"></p></div>
-      <div class="card"><h2>📋 Welcome menu</h2>
+      <div class="card"><h2>📋 Welcome menu</h2><div id="wmsug2"></div>
       <p class="mute">The options customers see when they say hi or type <b>menu</b> – on WhatsApp and on your website chat. 1–3 options show as buttons, 4–10 as a list.</p>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="wmon" style="width:auto" ${W.enabled ? 'checked' : ''}> Use my own menu (off = the standard menu)</label>
       <div class="row" style="align-items:start"><div style="flex:2;min-width:300px">
@@ -1554,6 +1579,12 @@ function welcomeMenuEditor() {
     box.querySelectorAll('[data-wu]').forEach((el) => (el.onclick = () => { sync(); const i = Number(el.dataset.wu); [W.options[i - 1], W.options[i]] = [W.options[i], W.options[i - 1]]; draw(); }));
     box.querySelectorAll('[data-wl],#wmintro').forEach((el) => (el.onchange = () => { sync(); draw(); }));
     if ($('#wmadd')) $('#wmadd').onclick = () => { sync(); W.options.push({ label: '', action: 'answer', value: '' }); draw(); };
+    api(T('/menu-suggestions')).then(({ suggestions }) => {
+      const b = $('#wmsug2'); if (!b || !suggestions.length) return;
+      b.innerHTML = `<div style="background:#fff7d6;color:#3b3216;border-radius:10px;padding:10px 12px;margin:8px 0"><b>💡 Your customers often ask:</b>${suggestions.map((x, i) => `<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span style="flex:1">“${esc(x.question)}” <span class="mute">(${x.asked}×)</span></span><button class="btn ghost" data-sadd="${i}" style="padding:3px 8px">+ Add “${esc(x.label)}”</button><button class="btn ghost" data-sx="${esc(x.key)}" style="padding:3px 8px" title="Not useful">✕</button></div>`).join('')}</div>`;
+      b.querySelectorAll('[data-sadd]').forEach((el) => (el.onclick = () => { const x = suggestions[el.dataset.sadd]; W.enabled = true; W.options.splice(Math.max(0, W.options.length - (W.options.at(-1)?.action === 'human' ? 1 : 0)), 0, { label: x.label, action: 'ask', value: x.question }); draw(); toast('Added – press Save menu'); }));
+      b.querySelectorAll('[data-sx]').forEach((el) => (el.onclick = async () => { await api(T('/menu-suggestions/dismiss'), { method: 'POST', body: { key: el.dataset.sx } }); el.parentElement.remove(); }));
+    }).catch(() => {});
     api('/trades').then(({ trades }) => {
       const g = $('#trgrid'); if (!g) return;
       g.innerHTML = trades.map((t) => `<button class="btn ${s.trade === t.key ? '' : 'ghost'}" data-trade="${t.key}" style="text-align:left;white-space:normal;height:auto;padding:10px"><b>${t.emoji} ${esc(t.label)}</b>${s.trade === t.key ? ' ✓' : ''}<div style="font-size:12px;opacity:.8;font-weight:400">${esc(t.blurb)}</div></button>`).join('');

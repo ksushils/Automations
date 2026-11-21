@@ -36,7 +36,7 @@ import { audit, listAudit, exportPerson, erasePerson, isSuppressed, rotateEncryp
 import { currentKeyId } from '../crypto.js';
 import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
-import { listChatLeads, setLeadStatus } from '../leads.js';
+import { listChatLeads, setLeadStatus, leadSpeed } from '../leads.js';
 import { sendHook, SHEETS_SCRIPT } from '../hooks.js';
 import { TRADES, tradeList, applyTrade } from '../trades.js';
 import { ratingSummary, ratingAsk, ratingsOn } from '../ratings.js';
@@ -45,6 +45,7 @@ import { teamStatus } from '../hours.js';
 import { suggestReply, translateText } from '../ai/assist.js';
 import { listArticles, getArticle, saveArticle, deleteArticle, draftArticles } from '../help.js';
 import { searchGuides, askGuides } from '../platformHelp.js';
+import { menuSuggestions, dismissSuggestion } from '../learn.js';
 import { listTickets, getTicket, ticketEvents, createTicket, updateTicket, ticketStats } from '../tickets.js';
 import { googleConfigured, calendarConnected, authUrl, disconnectCalendar, redirectUri } from '../gcal.js';
 import { resumeAi } from '../coexistence.js';
@@ -494,6 +495,9 @@ export function adminRouter() {
   r.get('/tenants/:tenantId/install/wordpress-plugin.zip', requireTenant, (req, res) => {
     res.set('Content-Disposition', 'attachment; filename="ai-chat-assistant.zip"').type('application/zip').send(wordpressPlugin(req.tenant));
   });
+  r.post('/tenants/:tenantId/install/check', requireTenant, wrap(async (req, res) => { const { checkInstall } = await import('../install.js'); res.json(await checkInstall(req.tenant, req.body?.url)); }));
+  r.get('/tenants/:tenantId/menu-suggestions', requireTenant, (req, res) => res.json({ suggestions: menuSuggestions(req.tenant) }));
+  r.post('/tenants/:tenantId/menu-suggestions/dismiss', requireTenant, requireOwner, (req, res) => { dismissSuggestion(req.tenant.id, String(req.body?.key || '')); res.json({ ok: true }); });
   r.get('/tenants/:tenantId/install/detect', requireTenant, wrap(async (req, res) => {
     const key = `platform:${req.tenant.id}`;
     const cached = getDb().prepare('SELECT value FROM kv WHERE key = ?').get(key)?.value;
@@ -671,7 +675,22 @@ export function adminRouter() {
     const out = await autoSetup(req.tenant.id, { force: req.body?.force === true });
     res.json({ ...out, tenant: (await import('../tenants.js')).getTenant(req.tenant.id) });
   }));
-  r.get('/tenants/:tenantId/leads', requireTenant, (req, res) => res.json({ leads: listChatLeads(req.tenant.id) }));
+  r.get('/tenants/:tenantId/leads', requireTenant, (req, res) => res.json({ leads: listChatLeads(req.tenant.id), speed: leadSpeed(req.tenant.id) }));
+  // A/B test of the pop-up greeting: visits, chats, leads and orders per variant (H = 10% who saw no greeting)
+  r.get('/tenants/:tenantId/ab', requireTenant, (req, res) => {
+    const O = req.tenant.settings.webchat?.opener || {};
+    if (!O.abStarted) return res.json({ running: false });
+    const d = getDb(), since = String(O.abStarted).replace('T', ' ').slice(0, 19);
+    const out = {};
+    for (const v of ['A', 'B', 'H']) {
+      const visits = Number(d.prepare('SELECT value FROM kv WHERE key = ?').get(`ab:${req.tenant.id}:${O.abStarted}:${v}`)?.value || 0);
+      const chats = d.prepare("SELECT COUNT(*) AS n FROM conversations WHERE tenant_id = ? AND json_extract(state_data, '$.ab') = ? AND updated_at >= ?").get(req.tenant.id, v, since).n;
+      const leads = d.prepare("SELECT COUNT(*) AS n FROM chat_leads l JOIN conversations c ON c.tenant_id = l.tenant_id AND c.wa_id = l.wa_id WHERE l.tenant_id = ? AND json_extract(c.state_data, '$.ab') = ? AND l.created_at >= ?").get(req.tenant.id, v, since).n;
+      const orders = d.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(o.subtotal), 0) AS rev FROM orders o JOIN conversations c ON c.tenant_id = o.tenant_id AND c.wa_id = o.wa_id WHERE o.tenant_id = ? AND json_extract(c.state_data, '$.ab') = ? AND o.created_at >= ?").get(req.tenant.id, v, since);
+      out[v] = { visits, chats, leads, orders: orders.n, revenue: Math.round(orders.rev * 100) / 100 };
+    }
+    res.json({ running: true, since: O.abStarted, a: O.text || '', b: O.textB || '', holdout: Number(O.holdout ?? 10), variants: out });
+  });
   r.get('/tenants/:tenantId/export/leads.csv', requireTenant, (req, res) => {
     const cell = (v) => { const s = String(v ?? '').replace(/^[=+\-@\t\r]/, "'$&"); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const cols = [['created_at', 'Date'], ['kind', 'Wants'], ['topic', 'Topic'], ['name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['call_time', 'Best time'], ['message', 'Message'], ['summary', 'Chat summary'], ['page', 'Page'], ['channel', 'Channel'], ['marketing_opt_in', 'Offers by email'], ['status', 'Status']];
