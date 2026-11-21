@@ -108,6 +108,7 @@ function layout(path, body, { ld = [], title, description, noindex = false, extr
 <div><ul><li><a href="/legal/privacy">Privacy</a></li><li><a href="/legal/terms">Terms</a></li><li><a href="/legal/dpa">Data processing agreement</a></li>${config.supportEmail ? `<li><a href="mailto:${esc(config.supportEmail)}">${esc(config.supportEmail)}</a></li>` : ''}${config.contactPhone ? `<li><a href="tel:${esc(config.contactPhone.replace(/[^\d+]/g, ''))}">${esc(config.contactPhone)}</a></li>` : ''}</ul></div>
 <div>${l.company ? `<p>${esc(l.company)}${l.number ? `<br>Registered in England and Wales, company no. ${esc(l.number)}` : ''}${l.address ? `<br>${esc(l.address)}` : ''}</p>` : ''}</div>
 </div></footer>${chat}
+<script>try{var rf=new URLSearchParams(location.search).get('ref');if(rf&&/^[A-Za-z0-9_-]{3,60}$/.test(rf))localStorage.setItem('wa_ref',JSON.stringify({c:rf,t:Date.now()}))}catch(e){}</script>
 </body></html>`;
 }
 

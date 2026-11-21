@@ -3,6 +3,7 @@ import { getTenant, listTenants } from './tenants.js';
 import { createSender, notify } from './whatsapp/cloudApi.js';
 import { emailShop } from './email.js';
 import { sendHook } from './hooks.js';
+import { pushTeam } from './push.js';
 import { createCheckoutSession } from './payments/stripe.js';
 import { config } from './config.js';
 import { createHmac } from 'node:crypto';
@@ -343,6 +344,7 @@ async function customerCancel(ctx, id) {
 function alertTeam(tenant, b, what) {
   const text = `📅 Booking ${what}\n${b.service ? `${b.service}\n` : ''}${whenText(b)}\n${b.name || ''} (${String(b.wa_id).startsWith('web:') ? `website chat${b.notes ? `, ${b.notes}` : ''}` : `+${b.wa_id}`})${b.deposit ? `\nDeposit: ${money(b.deposit, sym(tenant.settings))}` : ''}`;
   emailShop(tenant, `Booking ${what.toLowerCase()}: ${whenText(b)}`, text, { button: 'Open Bookings' }).catch(() => {});
+  pushTeam(tenant, { title: `📅 Booking ${what}`, body: `${b.service ? `${b.service} – ` : ''}${whenText(b)}${b.name ? ` – ${b.name}` : ''}`, url: '/admin/#bookings', tag: `booking-${b.id}` }).catch(() => {});
   const ev = /cancel/i.test(what) ? 'booking.cancelled' : /^confirmed –/.test(what) ? 'booking.confirmed' : 'booking.new';
   sendHook(tenant, ev, { id: b.id, service: b.service || '', when: whenText(b), day: b.day, time: b.time, name: b.name || '', phone: String(b.wa_id).startsWith('web:') ? String(b.notes || '').match(/Phone: (\S+)/)?.[1] || '' : `+${b.wa_id}`, notes: [what, b.notes].filter(Boolean).join(' – '), status: b.status }).catch(() => {});
   const send = createSender(tenant);

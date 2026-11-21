@@ -70,7 +70,7 @@ document.getElementById('f').onsubmit = async (e) => {
   const fd = Object.fromEntries(new FormData(e.target));
   const err = document.getElementById('err');
   err.textContent = '';
-  const res = await fetch('/api/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...fd, acceptTerms: !!fd.acceptTerms, plan, demo: demoToken || undefined }) });
+  const res = await fetch('/api/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...fd, acceptTerms: !!fd.acceptTerms, plan, demo: demoToken || undefined, ref: QS.get('ref') || (() => { try { const r = JSON.parse(localStorage.getItem('wa_ref') || 'null'); return r && Date.now() - r.t < 30 * 86400000 ? r.c : undefined; } catch { return undefined; } })() }) });
   const r = await res.json().catch(() => ({}));
   if (!res.ok) { err.textContent = r.error || 'Something went wrong'; return; }
   try { localStorage.setItem('wc_key', r.adminKey); localStorage.setItem('wc_tenant', r.tenantId); } catch {}

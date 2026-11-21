@@ -85,6 +85,7 @@ Object.assign(config, {
   aiProviderOrder: (env.AI_PROVIDER_ORDER || '').split(',').map((s) => s.trim()).filter(Boolean),
   aiZeroRetention: env.AI_ZERO_RETENTION !== 'false',
   // Voice notes: a model that accepts audio (WhatsApp sends OGG/Opus). Empty AI_AUDIO_MODEL = voice notes off.
+  referralPercent: Number(env.REFERRAL_PERCENT ?? 20), // partners and referring businesses earn this % of each referred plan
   aiAudioModel: env.AI_AUDIO_MODEL ?? 'google/gemini-2.5-flash',
   aiAudioProviders: (env.AI_AUDIO_PROVIDERS || '').split(',').map((s) => s.trim()).filter(Boolean),
   aiRequireZdr: env.AI_REQUIRE_ZDR === 'true', // only zero-data-retention endpoints (check your model + providers support it first)

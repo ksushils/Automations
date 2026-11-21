@@ -93,6 +93,8 @@ export function startJobs() {
     try { const n = cleanupDemos(); if (n) console.log(`[instant demo] deleted ${n} expired demo(s)`); } catch (e) { console.error('[instant demo]', e); }
     runMonthlyReports().then((n) => n && console.log(`[value report] emailed ${n} shop(s)`), (e) => console.error('[value report]', e));
     import('./learn.js').then(({ improveTradeTemplates }) => improveTradeTemplates()).then((n) => n && console.log(`[learn] improved ${n} trade template(s)`), (e) => console.error('[learn]', e.message));
+    import('./insights.js').then(({ runWeeklyDigests }) => runWeeklyDigests()).then((n) => n && console.log(`[digest] sent ${n}`), (e) => console.error('[digest]', e.message));
+    import('./quotes.js').then(({ runQuoteFollowUps }) => runQuoteFollowUps()).then((n) => n && console.log(`[quotes] followed up ${n}`), (e) => console.error('[quotes]', e.message));
     runWeeklyUnanswered().then((n) => n && console.log(`[unanswered] emailed ${n} shop(s)`), (e) => console.error('[unanswered]', e));
     try { const n = enforceTrials(); if (n) console.log(`[billing] paused ${n} expired trial(s)`); } catch (e) { console.error('[jobs]', e); }
     try { const r = applyRetention(); if (Object.values(r).some(Boolean)) console.log('[retention]', JSON.stringify(r)); } catch (e) { console.error('[jobs]', e); }

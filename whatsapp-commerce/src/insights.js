@@ -19,6 +19,10 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const HOURLY = { GBP: 12.71, EUR: 13, USD: 15, AED: 40, INR: 200 };
 
 function range(month) {
+  if (month === 'week') {
+    const sql = (d) => d.toISOString().replace('T', ' ').slice(0, 19);
+    return { month: 'week', start: sql(new Date(Date.now() - 7 * 86400000)), end: sql(new Date(Date.now() + 60000)) };
+  }
   const m = /^(\d{4})-(\d{2})$/.exec(String(month || '')) ? String(month) : monthKey();
   const [y, mo] = m.split('-').map(Number);
   const start = `${m}-01 00:00:00`;
@@ -83,6 +87,11 @@ export function valueReport(tenantId, month) {
   const checkouts = d.prepare(`SELECT data FROM store_events WHERE ${win} AND kind = 'checkout' AND status = 'recovered'`).all(tenantId, start, end);
   const checkoutValue = checkouts.reduce((s, r) => s + (Number(json(r.data, {}).total) || 0), 0);
   const unanswered = d.prepare(`SELECT COUNT(*) AS n FROM unanswered WHERE ${win}`).get(tenantId, start, end).n;
+  // leads, bookings, tickets and ratings – what turned into business
+  const leads = d.prepare(`SELECT COUNT(*) AS n, SUM(kind = 'call') AS calls FROM chat_leads WHERE ${win}`).get(tenantId, start, end);
+  const bookings = d.prepare(`SELECT COUNT(*) AS n FROM bookings WHERE ${win} AND status != 'cancelled'`).get(tenantId, start, end).n;
+  const tickets = d.prepare("SELECT COUNT(*) AS n FROM tickets WHERE tenant_id = ? AND solved_at >= ? AND solved_at < ?").get(tenantId, start, end).n;
+  const rated = d.prepare(`SELECT SUM(score = 3) AS great, SUM(score = 2) AS ok, SUM(score = 1) AS bad FROM chat_ratings WHERE ${win}`).get(tenantId, start, end);
   const reviews = d.prepare("SELECT COUNT(*) AS n FROM orders WHERE tenant_id = ? AND review_status = 'sent' AND review_sent_at >= ? AND review_sent_at < ?").get(tenantId, start, end).n;
 
   const hoursSaved = round2((botReplies * minutesPerReply) / 60);
@@ -95,7 +104,7 @@ export function valueReport(tenantId, month) {
 
   return {
     month: m,
-    partial: m === monthKey(),
+    partial: m === monthKey() || m === 'week',
     currency, sym,
     chats: chatIds.size,
     webChats,
@@ -118,13 +127,17 @@ export function valueReport(tenantId, month) {
     roi,
     unanswered,
     reviewRequests: reviews,
+    leads: { count: leads.n || 0, callbacks: leads.calls || 0 },
+    bookings,
+    ticketsSolved: tickets,
+    ratings: { great: rated.great || 0, ok: rated.ok || 0, bad: rated.bad || 0 },
     links: clickStats(tenantId, start, end),
     assumptions: { minutesPerReply, hourlyRate, hours: `${R.openHour ?? 9}:00–${R.closeHour ?? 17}:00 Mon–Fri` },
   };
 }
 
 const money = (n, sym) => `${sym}${Number(n || 0).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-const monthName = (m) => new Date(`${m}-01T12:00:00Z`).toLocaleString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const monthName = (m) => (m === 'week' ? 'the last 7 days' : new Date(`${m}-01T12:00:00Z`).toLocaleString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }));
 
 export function reportText(r, shopName) {
   const s = r.sym;
@@ -136,12 +149,16 @@ export function reportText(r, shopName) {
     `🌙 ${r.afterHoursChats} customers helped outside working hours (${r.assumptions.hours})`,
     `⏱️ About ${r.hoursSaved} hours of replies saved ≈ ${money(r.staffValue, s)} of staff time`,
   ];
+  if (r.leads?.count) lines.push(`📇 ${r.leads.count} leads (${r.leads.callbacks} call-back requests)`);
+  if (r.bookings) lines.push(`📅 ${r.bookings} bookings made in the chat`);
   if (r.orders.count) lines.push(`🛒 ${r.orders.count} orders taken in chat: ${money(r.orders.value, s)}`);
+  if (r.ticketsSolved) lines.push(`🎫 ${r.ticketsSolved} support tickets solved`);
+  if (r.ratings && r.ratings.great + r.ratings.ok + r.ratings.bad) lines.push(`😀 ${r.ratings.great} · 😐 ${r.ratings.ok} · 😞 ${r.ratings.bad} chat ratings`);
   if (r.websiteSales?.orders) lines.push(`🌐 ${r.websiteSales.orders} website orders after chatting with the assistant: ${money(r.websiteSales.value, s)}`);
   if (r.links?.linksClicked) lines.push(`🔗 ${r.links.linksClicked} shop links opened from the chat${r.links.checkoutsStarted ? `, ${r.links.checkoutsStarted} checkouts started` : ''}`);
   if (r.recovered) lines.push(`💷 ${money(r.recovered, s)} recovered from abandoned carts and payment reminders`);
   if (r.reviewRequests) lines.push(`⭐ ${r.reviewRequests} review requests sent`);
-  if (r.roi) lines.push('', `Your ${r.plan.label} plan costs £${r.plan.priceGbp}/month. This month the assistant returned about *${r.roi}×* that.`);
+  if (r.roi && r.month !== 'week') lines.push('', `Your ${r.plan.label} plan costs £${r.plan.priceGbp}/month. This month the assistant returned about *${r.roi}×* that.`);
   if (r.unanswered) lines.push('', `❓ ${r.unanswered} questions it couldn't answer – add the answers on the Knowledge base tab and it will know next time.`);
   lines.push('', `(Staff time counts ${r.assumptions.minutesPerReply} minutes per reply at ${s}${r.assumptions.hourlyRate}/hour – change these in Settings.)`);
   return lines.join('\n');
@@ -249,4 +266,64 @@ export async function runReviewRequests(now = Date.now()) {
     }
   }
   return sent;
+}
+
+/** Monday morning: last week in a few lines, by email and to the team's WhatsApp (settings.report.weeklyDigest). */
+export async function runWeeklyDigests(now = new Date()) {
+  if (now.getUTCDay() !== 1 || now.getUTCHours() < 7) return 0;
+  const week = `${now.getUTCFullYear()}-${Math.ceil((now - new Date(Date.UTC(now.getUTCFullYear(), 0, 1))) / 604800000)}`;
+  let sent = 0;
+  for (const { id } of listTenants()) {
+    const t = getTenant(id);
+    if (!t?.active || t.settings.demo || t.settings.report?.weeklyDigest === false) continue;
+    const d = getDb();
+    if (d.prepare('SELECT 1 FROM kv WHERE key = ?').get(`digest:${id}:${week}`)) continue;
+    d.prepare("INSERT INTO kv (key, value) VALUES (?, '1')").run(`digest:${id}:${week}`);
+    const r = valueReport(id, 'week');
+    if (!r || !r.chats) continue;
+    const text = reportText(r, t.settings.business?.name || t.name);
+    emailShop(t, `Your assistant last week: ${r.chats} chats, ${r.leads.count} leads${r.orders.count ? `, ${r.orders.count} orders` : ''}`, text, { button: 'See the details' }).catch(() => {});
+    const short = `📊 Last week: ${r.chats} chats, ${r.handledByBot} handled by the assistant, ${r.leads.count} leads, ${r.bookings} bookings${r.orders.count ? `, ${r.orders.count} orders (${money(r.orders.value, r.sym)})` : ''}. ${r.afterHoursChats} out of hours.`;
+    for (const s of t.settings.notifications?.staffWaIds || []) notify(t, String(s).replace(/\D/g, ''), { type: 'text', text: short }, null).catch(() => {});
+    sent++;
+  }
+  return sent;
+}
+
+/**
+ * Revenue by advert / campaign: where each chat came from (a Click-to-WhatsApp ad, or the campaign tags on the page
+ * they landed on) and what it turned into – chats, leads, bookings, orders and money.
+ */
+export function adReport(tenantId, days = 30) {
+  const d = getDb();
+  const since = `-${Math.max(1, Math.min(365, Number(days) || 30))} days`;
+  const chats = d.prepare(`SELECT DISTINCT m.wa_id, cu.source AS csrc, c.state_data AS sd FROM messages m
+    LEFT JOIN customers cu ON cu.tenant_id = m.tenant_id AND cu.wa_id = m.wa_id
+    LEFT JOIN conversations c ON c.tenant_id = m.tenant_id AND c.wa_id = m.wa_id
+    WHERE m.tenant_id = ? AND m.direction = 'in' AND m.wa_id NOT LIKE 'qa:%' AND m.created_at > datetime('now', ?)`).all(tenantId, since);
+  const groups = new Map();
+  for (const row of chats) {
+    const src = json(row.csrc, null), utm = json(row.sd, {})?.utm;
+    let key, label, kind;
+    if (src?.source_id || src?.headline || src?.source_url) { kind = 'ad'; key = `ad:${src.source_id || src.headline || src.source_url}`; label = src.headline || src.source_url || `Ad ${src.source_id}`; }
+    else if (utm?.utm_campaign || utm?.utm_source || utm?.gclid || utm?.fbclid) { kind = 'campaign'; label = utm.utm_campaign ? `${utm.utm_source || 'campaign'} · ${utm.utm_campaign}` : utm.gclid ? 'Google Ads' : utm.fbclid ? 'Facebook / Instagram' : utm.utm_source; key = `utm:${label}`; }
+    else { kind = 'direct'; key = 'direct'; label = 'No advert (direct, search or social)'; }
+    const g = groups.get(key) || { key, kind, label: String(label).slice(0, 120), chats: 0, leads: 0, bookings: 0, orders: 0, revenue: 0, waIds: [] };
+    g.chats++; g.waIds.push(row.wa_id);
+    groups.set(key, g);
+  }
+  const count = (sql, ids) => (ids.length ? d.prepare(sql.replace('(?)', `(${ids.map(() => '?').join(',')})`)).get(tenantId, ...ids, since) : { n: 0, v: 0 });
+  const out = [];
+  for (const g of groups.values()) {
+    for (let i = 0; i < g.waIds.length; i += 400) {
+      const ids = g.waIds.slice(i, i + 400);
+      g.leads += count("SELECT COUNT(*) AS n FROM chat_leads WHERE tenant_id = ? AND wa_id IN (?) AND created_at > datetime('now', ?)", ids).n;
+      g.bookings += count("SELECT COUNT(*) AS n FROM bookings WHERE tenant_id = ? AND wa_id IN (?) AND status != 'cancelled' AND created_at > datetime('now', ?)", ids).n;
+      const o = count("SELECT COUNT(*) AS n, COALESCE(SUM(subtotal), 0) AS v FROM orders WHERE tenant_id = ? AND wa_id IN (?) AND status != 'cancelled' AND created_at > datetime('now', ?)", ids);
+      g.orders += o.n; g.revenue += o.v || 0;
+    }
+    const { waIds, ...rest } = g;
+    out.push({ ...rest, revenue: round2(rest.revenue) });
+  }
+  return out.sort((a, b) => (a.kind === 'direct') - (b.kind === 'direct') || b.revenue - a.revenue || b.leads - a.leads || b.chats - a.chats);
 }

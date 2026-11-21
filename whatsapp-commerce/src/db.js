@@ -246,6 +246,31 @@ CREATE TABLE IF NOT EXISTS ticket_events (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ticket_events ON ticket_events(ticket_id, id);
+CREATE TABLE IF NOT EXISTS quotes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  wa_id TEXT, name TEXT, email TEXT, phone TEXT,
+  request TEXT,
+  items TEXT NOT NULL DEFAULT '[]',
+  total REAL NOT NULL DEFAULT 0,
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'draft', -- draft | sent | accepted | declined | expired
+  valid_until TEXT,
+  sent_at TEXT, accepted_at TEXT, followed_up_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(tenant_id, number)
+);
+CREATE TABLE IF NOT EXISTS push_subs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  who TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS chat_ratings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id TEXT NOT NULL,
@@ -360,7 +385,7 @@ const MIGRATIONS = {
   conversations: { assigned_to: 'TEXT', ai_paused_until: 'TEXT' }, // ai_paused_until: owner replied from the phone (coexistence)
   messages: { processed: 'INTEGER NOT NULL DEFAULT 1', attempts: 'INTEGER NOT NULL DEFAULT 0', source: 'TEXT' }, // source: phone_app | history (coexistence)
   usage: { ai_tokens: 'INTEGER NOT NULL DEFAULT 0', ai_cost_micro: 'INTEGER NOT NULL DEFAULT 0', site_cart_adds: 'INTEGER NOT NULL DEFAULT 0' }, // micro-USD; site_cart_adds: items the chat put in the shop's own basket
-  tenants: { owner_email: 'TEXT', stripe_customer_id: 'TEXT', subscription_id: 'TEXT', subscription_status: 'TEXT', trial_ends_at: 'TEXT' },
+  tenants: { referred_by: 'TEXT', referral_code: 'TEXT', owner_email: 'TEXT', stripe_customer_id: 'TEXT', subscription_id: 'TEXT', subscription_status: 'TEXT', trial_ends_at: 'TEXT' },
 };
 
 export function initDb(file = config.databasePath) {

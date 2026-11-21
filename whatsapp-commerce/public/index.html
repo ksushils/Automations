@@ -71,6 +71,7 @@ code{background:var(--bg);padding:2px 6px;border-radius:6px;word-break:break-all
 .axis{display:flex;justify-content:space-between;font-size:12px;color:var(--mute);margin-top:4px}
 </style>
 <script src="flow-builder.js"></script>
+<link rel="manifest" href="/admin/manifest.json"><meta name="theme-color" content="#128c4a"><link rel="apple-touch-icon" href="/admin/icon.svg"><meta name="apple-mobile-web-app-capable" content="yes">
 </head>
 <body>
 <header>
@@ -132,9 +133,23 @@ async function boot() {
 }
 $('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant', null); store.set('wc_tab', null); S.key = null; S.tenant = null; S.tenantId = null; S.setup = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['leads', 'Leads'], ['tickets', 'Tickets'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['help', 'Help centre'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
-const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'leads', 'tickets', 'orders', 'bookings', 'contacts']);
+const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['leads', 'Leads'], ['quotes', 'Quotes'], ['tickets', 'Tickets'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['help', 'Help centre'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
+const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'leads', 'quotes', 'tickets', 'orders', 'bookings', 'contacts']);
 const MAIN_TABS = new Set(['overview', 'analytics', 'inbox', 'leads', 'orders', 'simulator', 'ai', 'settings']);
+// The dashboard as an app: service worker for phone notifications
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' }).catch(() => {});
+async function enablePush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return toast('This browser can\'t do notifications. On iPhone: Share → Add to Home Screen first, then open it from there.');
+  if (await Notification.requestPermission() !== 'granted') return toast('Notifications are blocked – allow them in your browser settings');
+  const reg = await navigator.serviceWorker.ready;
+  const { publicKey } = await api('/push/key');
+  const key = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((publicKey.length + 3) % 4)), (c) => c.charCodeAt(0));
+  const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }));
+  await api(T('/push/subscribe'), { method: 'POST', body: { subscription: sub.toJSON() } });
+  await api(T('/push/test'), { method: 'POST' }).catch(() => {});
+  toast('📱 Notifications on – you should get a test one now');
+}
+
 // "❓ Help": answers from our guides (AI when available)
 document.addEventListener('click', (e) => { if (e.target.id === 'helpbtn') { const p = $('#helppanel'); p.style.display = p.style.display === 'none' ? 'block' : 'none'; if (p.style.display === 'block') $('#helpq').focus(); } if (e.target.id === 'helpx') $('#helppanel').style.display = 'none'; });
 document.addEventListener('submit', async (e) => {
@@ -204,7 +219,7 @@ function render() {
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('') + (hasMore ? `<button id="moretabs">${showAll ? '‹ Fewer' : 'More ›'}</button>` : '');
   $('#nav').querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => { S.fromGuide = false; S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
   if ($('#moretabs')) $('#moretabs').onclick = () => { store.set('wc_alltabs', showAll ? null : '1'); if (showAll && !MAIN_TABS.has(S.tab)) S.tab = 'overview'; render(); };
-  ({ setup, tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, leads, tickets, help, orders, bookings, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ setup, tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, leads, quotes, tickets, help, orders, bookings, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin: guided platform setup ----------
@@ -336,6 +351,14 @@ async function setup() {
 // ---------- super admin ----------
 async function tenants() {
   const { tenants } = await api('/tenants');
+  setTimeout(async () => {
+    let box = document.getElementById('partnersbox'); if (!box) { box = document.createElement('div'); box.className = 'card'; box.id = 'partnersbox'; $('#app').appendChild(box); }
+    const r = await api('/system/referrals').catch(() => null); if (!r) return;
+    box.innerHTML = `<h2>🤝 Partners and referrals</h2><p class="mute">Agencies and businesses that send you customers earn ${r.percent}% of each referred plan while it pays (set REFERRAL_PERCENT on the server). You pay them – this keeps the numbers.</p>
+      <div class="row"><div><label>Partner name</label><input id="pn" placeholder="Bright Web Design"></div><div><label>Email</label><input id="pe"></div><div><label>Code (optional)</label><input id="pc" placeholder="BRIGHTWEB"></div></div><p><button class="btn ghost" id="padd">Add partner</button></p>
+      <div class="tablewrap"><table><tr><th>Who</th><th>Link</th><th>Sign-ups</th><th>Paying</th><th>Owed / month</th></tr>${[...r.partners.map((p) => ({ who: `🤝 ${p.name}`, link: p.link, ...p })), ...r.businesses.map((b) => ({ who: `🏪 ${b.referrer}`, link: '', ...b }))].map((x) => `<tr><td>${esc(x.who)}</td><td style="font-size:12px">${esc(x.link)}</td><td>${x.signups}</td><td>${x.paying}</td><td>£${x.monthlyEarnings}</td></tr>`).join('') || '<tr><td colspan="5" class="mute">None yet</td></tr>'}</table></div>`;
+    document.getElementById('padd').onclick = async () => { try { const p = await api('/system/partners', { method: 'POST', body: { name: $('#pn').value, email: $('#pe').value, code: $('#pc').value } }); toast(`Partner link: ${p.link}`); tenants(); } catch (e) { toast(e.message); } };
+  }, 0);
   const { plans } = await api('/plans');
   const st = S.setup;
   $('#app').innerHTML = `${st && st.done < st.total ? `<div class="card" style="border-color:var(--warn)">⚙️ Platform setup: ${st.done} of ${st.total} steps done. <a href="#" id="gosetup">Continue setup →</a></div>` : ''}<div class="card"><h2>New client</h2><div class="row">
@@ -534,11 +557,13 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
   const face = (n) => ({ 3: '😀', 2: '😐', 1: '😞' })[n] || '';
   const conversations = all.filter((c) => filter === 'all' || (filter === 'mine' && c.assigned_to === me) || (filter === 'human' && c.human_handover) || (filter === 'unassigned' && !c.assigned_to));
   setTimeout(liveBox, 0);
+  setTimeout(() => { const pb = document.getElementById('ipush'); if (pb) pb.onclick = () => enablePush().catch((e) => toast(e.message)); }, 0);
   setTimeout(() => { const cb = document.getElementById('isnd'); if (cb) cb.onchange = () => { store.set('wc_sound', cb.checked ? '1' : '0'); if (cb.checked) alertPing(); }; }, 0);
   const preview = (c) => { const b = c.last || {}; return esc((b.text || b.caption || b.type || '').slice(0, 60)); };
   $('#app').innerHTML = `<div class="split"><div class="card" style="max-height:600px;overflow:auto"><h2>Chats</h2>
     <div id="livebox"></div>
     ${rt && rt.great + rt.ok + rt.bad ? `<p class="mute" style="font-size:13px;margin:0 0 6px" title="Ratings in the last ${rt.days} days (assistant ${rt.ai}, team ${rt.team})">Ratings, ${rt.days} days: 😀 ${rt.great} · 😐 ${rt.ok} · 😞 ${rt.bad}</p>` : ''}
+    <p style="margin:0 0 6px"><button class="btn ghost" id="ipush" style="padding:4px 10px;font-size:13px" title="Get a buzz on your phone or computer for new leads, tickets, bookings and customers asking for a person">📱 Phone notifications</button></p>
     <label style="display:flex;gap:6px;align-items:center;font-size:13px;margin-bottom:6px"><input type="checkbox" id="isnd" style="width:auto" ${store.get('wc_sound') === '0' ? '' : 'checked'}> 🔔 Sound for new messages</label>
     <select id="ifil" style="margin-bottom:8px">${[['all', 'All chats'], ['human', 'Needs a human'], ['mine', 'Assigned to me'], ['unassigned', 'Unassigned']].map(([k, l]) => `<option value="${k}" ${filter === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
     ${conversations.map((c) => `<div class="list-item ${sel === c.wa_id ? 'on' : ''}" data-w="${esc(c.wa_id)}"><b>${esc(c.name || '+' + c.wa_id)}</b> ${c.unhappy_at && Date.now() - Date.parse(c.unhappy_at) < 86400000 ? '<span title="Seems unhappy – step in?">😠</span> ' : ''}${rt?.byChat?.[c.wa_id] ? `<span title="${esc(rt.byChat[c.wa_id].comment || 'Customer rating')}">${face(rt.byChat[c.wa_id].score)}</span> ` : ''}${pausedNow(c) ? '<span class="pill warn">⏸ Paused – owner replying</span>' : ''}${c.human_handover ? '<span class="pill warn">needs human</span>' : ''}${c.assigned_to ? ` <span class="pill">👤 ${esc(c.assigned_to)}</span>` : ''}<div class="mute">${preview(c)}</div></div>`).join('') || '<p class="mute">No conversations yet.</p>'}
@@ -552,6 +577,7 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
     <select id="asg" style="width:auto"><option value="">Unassigned</option>${agents.map((a) => `<option ${c?.assigned_to === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></h2>
     ${c?.cart?.length ? `<p class="mute">Cart: ${c.cart.map((i) => esc(i.title) + ' ×' + i.quantity).join(', ')}</p>` : ''}
     <div class="chat" id="tchat">${messages.map((m) => (m.direction === 'in' ? m.body.fileUrl ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<a href="${esc(m.body.fileUrl)}" target="_blank" rel="noopener"><img src="${esc(m.body.fileUrl)}" alt="photo" style="max-width:220px"></a>` : `<a href="${esc(m.body.fileUrl)}" target="_blank" rel="noopener">📎 ${esc(m.body.fileName || 'file')} – open</a>`}</div>` : (m.body.mediaId ? `<div class="b in">${/^image\//.test(m.body.mime || '') ? `<img data-media="${esc(m.body.mediaId)}" alt="image">` : `<a href="#" data-mediadl="${esc(m.body.mediaId)}">📎 ${esc(m.body.raw || 'file')} – open</a>`}${m.body.text && !/^\[/.test(m.body.text) ? '<br>' + esc(m.body.text) : ''}</div>` : bubble(m.body.text || `[${m.body.raw || m.type}]`, 'in')) : bubble(m.body, 'out'))).join('')}</div>
+    <details id="iprof" style="margin:6px 0"><summary style="font-size:13px"><b>👤 Customer</b> <span id="iprofsum" class="mute"></span></summary><div id="iprofbody" style="font-size:13px;margin-top:6px"></div></details>
     <div id="isum" class="mute" style="font-size:13px"></div>
     <div id="ityping" class="mute" style="font-size:13px;min-height:18px"></div>
     <div style="display:flex;gap:8px;margin-top:4px">${(S.tenant.settings.inbox?.savedReplies || []).length ? `<select id="sr" style="width:auto;max-width:160px"><option value="">💬 Saved replies</option>${S.tenant.settings.inbox.savedReplies.map((r, i) => `<option value="${i}">${esc(r.title)}</option>`).join('')}</select>` : ''}<input id="rep" placeholder="Reply as staff (takes over from bot)"><button class="btn ghost" id="rsug" title="The AI drafts a reply from your own information – you check it and press Send">✨ Suggest</button><button class="btn" id="rs">Send</button></div>
@@ -561,6 +587,23 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
       <textarea id="srtxt" style="min-height:110px" ${S.role === 'owner' ? '' : 'readonly'} placeholder="Opening hours | Hi {{name}}, we're open Monday to Saturday, 9am to 5pm.&#10;Call back | Thanks {{name}}! Someone from the team will call you today.">${esc((S.tenant.settings.inbox?.savedReplies || []).map((r) => `${r.title} | ${r.text}`).join('\n'))}</textarea>
       ${S.role === 'owner' ? '<p><button class="btn ghost" id="srsave">Save saved replies</button></p>' : ''}</details>`;
   $('#tchat').scrollTop = 1e9;
+  api(T(`/customers/${encodeURIComponent(sel)}/profile`)).then(({ profile: p }) => {
+    if (!$('#iprofbody')) return;
+    const M = (n) => '£' + Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: 0 });
+    $('#iprofsum').textContent = [p.totals.orders ? `${p.totals.orders} orders · ${M(p.totals.spent)}` : '', p.totals.bookings ? `${p.totals.bookings} bookings` : '', p.totals.leads ? `${p.totals.leads} leads` : '', p.totals.tickets ? `${p.totals.tickets} tickets` : ''].filter(Boolean).join(' · ') || (p.firstSeen ? `first seen ${p.firstSeen.slice(0, 10)}` : '');
+    const list = (title, rows, fn) => rows.length ? `<p style="margin:8px 0 2px"><b>${title}</b></p>${rows.map(fn).join('<br>')}` : '';
+    $('#iprofbody').innerHTML = `<div>${esc(p.name || 'Name unknown')}${p.phone ? ` · <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : ''}${p.email ? ` · <a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : ''} · ${p.channel === 'website' ? '🌐 website' : '📱 WhatsApp'}${p.marketing ? ' · ✅ offers OK' : ''}</div>
+      <div class="mute">${p.firstSeen ? `First seen ${esc(p.firstSeen.slice(0, 10))} · ` : ''}${p.messages} messages${p.source ? ` · came from ${esc(p.source)}` : ''}</div>
+      ${list('Orders', p.orders, (o) => `${esc(o.store_order_name || '#' + o.id)} · ${M(o.subtotal)} · ${esc(o.status)} · ${esc(o.created_at.slice(0, 10))}`)}
+      ${list('Bookings', p.bookings, (b) => `${esc(b.service || 'Booking')} · ${esc(b.day)} ${esc(b.time)} · ${esc(b.status)}`)}
+      ${list('Leads', p.leads, (l) => `${l.kind === 'call' ? '📞' : '📩'} ${esc(l.topic || '')} · ${esc(l.status)} · ${esc(l.created_at.slice(0, 10))}`)}
+      ${list('Tickets', p.tickets, (t) => `#${t.number} ${esc(t.subject)} · ${esc(t.status)}`)}
+      ${list('Ratings', p.ratings, (r) => `${({ 3: '😀', 2: '😐', 1: '😞' })[r.score]} ${esc(r.comment || '')} · ${esc(r.created_at.slice(0, 10))}`)}
+      <label style="margin-top:8px">Tags (comma separated)</label><input id="iptags" value="${esc(p.tags.join(', '))}" placeholder="VIP, trade customer">
+      <label>Private notes (only your team sees these)</label><textarea id="ipnotes" style="min-height:60px">${esc(p.notes)}</textarea>
+      <p><button class="btn ghost" id="ipsave">Save notes</button></p>`;
+    $('#ipsave').onclick = async () => { try { await api(T(`/customers/${encodeURIComponent(sel)}/profile`), { method: 'PATCH', body: { notes: $('#ipnotes').value, tags: $('#iptags').value.split(',') } }); toast('Saved'); } catch (e) { toast(e.message); } };
+  }).catch(() => {});
   $('#isumb').onclick = async () => { $('#isum').textContent = '📝 Summarising…'; try { $('#isum').textContent = '📝 ' + (await api(T(`/conversations/${encodeURIComponent(sel)}/summary`), { method: 'POST' })).summary; } catch (e) { $('#isum').textContent = e.message; } };
   // "Teach the bot": under each team reply, save it as knowledge (the question is the customer's message before it)
   if (S.role === 'owner') {
@@ -608,6 +651,35 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
   $('#ho').onclick = async () => { const r = await api(T(`/conversations/${sel}/handover`), { method: 'POST', body: { on: !c?.human_handover } }); if (r.ratingAsked) toast('Back to the bot – the customer was asked to rate the chat'); inbox(sel, filter); };
   if ($('#rsm')) $('#rsm').onclick = async () => { await api(T(`/conversations/${sel}/resume`), { method: 'POST' }); toast('The AI is answering this chat again'); inbox(sel, filter); };
   $('#rs').onclick = async () => { const r = await api(T(`/conversations/${sel}/reply`), { method: 'POST', body: { text: $('#rep').value } }); if (!r.ok) toast(r.error + ' ' + (r.hint || '')); inbox(sel); };
+}
+
+// ---------- quotes (the AI drafts from your price list; you check and send) ----------
+async function quotes(sel) {
+  const d = await api(T('/quotes'));
+  const sym = S.tenant.settings.business?.currencySymbol || '£';
+  const M = (n) => sym + Number(n || 0).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pill = { draft: '📝 To check', sent: '📤 Sent', accepted: '✅ Accepted', declined: '✖ Declined', expired: '⌛ Expired' };
+  $('#app').innerHTML = `<div class="card"><h2>📝 Instant quotes</h2><p class="mute">Customers say what they need in the chat; the AI drafts a quote from your price list (anything it can't price is marked "to confirm" – it never guesses). You check it here and press Send – or let fully priced quotes go out automatically. The customer gets a quote page with a PDF and an "Accept" button, and a friendly follow-up after 2 days.</p>
+    ${S.role === 'owner' ? `<div class="row"><div><label>Quotes in the chat</label><select id="qon"><option value="false">Off</option><option value="true" ${d.enabled ? 'selected' : ''}>On</option></select></div><div><label>Send automatically when every line has a price</label><select id="qauto"><option value="false">No – I check every quote</option><option value="true" ${d.autoSend ? 'selected' : ''}>Yes</option></select></div></div><p><button class="btn ghost" id="qsave">Save</button></p>` : ''}</div>
+    <div class="split"><div class="card" style="max-height:640px;overflow:auto"><h2>Quotes (${d.quotes.length})</h2>
+      ${d.quotes.map((q) => `<div class="list-item ${String(sel) === String(q.number) ? 'on' : ''}" data-qn="${q.number}"><b>Q-${q.number}</b> ${esc((q.request || '').slice(0, 60))}<div class="mute" style="font-size:12px">${pill[q.status] || q.status} · ${M(q.total)} · ${esc(q.name || q.email || '')} · ${esc(q.created_at.slice(0, 10))}</div></div>`).join('') || '<p class="mute">No quotes yet. Add "Get a quote" to your welcome menu, or the assistant offers one when someone asks for a price.</p>'}
+    </div><div class="card" id="qdetail"><p class="mute">Select a quote</p></div></div>`;
+  if ($('#qsave')) $('#qsave').onclick = async () => { S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { quotes: { enabled: $('#qon').value === 'true', autoSend: $('#qauto').value === 'true' } } })).tenant; toast('Saved'); quotes(sel); };
+  $('#app').querySelectorAll('[data-qn]').forEach((el) => (el.onclick = () => quotes(el.dataset.qn)));
+  if (!sel) return;
+  const { quote: q, url } = await api(T(`/quotes/${sel}`));
+  $('#qdetail').innerHTML = `<h2>Q-${q.number} <span class="mute" style="font-size:14px">${pill[q.status]}</span></h2>
+    <p class="mute">${esc([q.name, q.email, q.phone].filter(Boolean).join(' · ') || 'No contact details')} · valid until ${esc(q.valid_until || '')}${q.status !== 'draft' ? ` · <a href="${esc(url)}" target="_blank" rel="noopener">Customer's page ↗</a>` : ''}</p>
+    <p><b>They asked for:</b> ${esc(q.request || '')}</p>
+    <label>Lines (one per line: item | quantity | price each – leave the price empty for "to confirm")</label>
+    <textarea id="qlines" style="min-height:140px">${esc(q.items.map((i) => `${i.item} | ${i.qty} | ${i.price ?? ''}`).join('\n'))}</textarea>
+    <label>Notes for the customer</label><input id="qnotes" value="${esc(q.notes || '')}">
+    <p><button class="btn" id="qsend">${q.status === 'draft' ? 'Send to the customer' : 'Save and send again'}</button> <button class="btn ghost" id="qsv">Save</button> <select id="qst" style="width:auto">${Object.entries(pill).map(([k, l]) => `<option value="${k}" ${q.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></p>`;
+  const lines = () => $('#qlines').value.split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((p) => p[0]).map((p) => ({ item: p[0], qty: Number(p[1]) || 1, price: p[2] === '' || p[2] === undefined ? null : Number(String(p[2]).replace(/[^\d.]/g, '')) }));
+  const save = (extra = {}) => api(T(`/quotes/${q.number}`), { method: 'PATCH', body: { items: lines(), notes: $('#qnotes').value, ...extra } });
+  $('#qsv').onclick = async () => { try { await save(); toast('Saved'); quotes(q.number); } catch (e) { toast(e.message); } };
+  $('#qst').onchange = async () => { await save({ status: $('#qst').value }); quotes(q.number); };
+  $('#qsend').onclick = async () => { try { await save(); const r = await api(T(`/quotes/${q.number}/send`), { method: 'POST' }); toast(`Sent${r.delivered ? ` (${[r.delivered.chat && 'chat', r.delivered.email && 'email'].filter(Boolean).join(' + ') || 'saved – share the customer page link'})` : ''}`); quotes(q.number); } catch (e) { toast(e.message); } };
 }
 
 // ---------- tickets (support requests the assistant couldn't solve) ----------
@@ -860,7 +932,7 @@ const FIELDS = [
   ['Leads from the chat', [['leads.enabled', 'Offer "Email me details" and "Call me back" in the chat (after menu topics, and when the AI sees real interest)', 'bool'], ['leads.brochureUrl', 'Brochure link (PDF or page) – sent to people who ask for details'], ['leads.requirementPrompt', 'Question to ask about their requirements (default: anything in particular to discuss – what, dates, how many people)'], ['leads.callbackPromise', 'What you promise after they leave details (default: Our team will be in touch within one working day.)'], ['leads.privacyUrl', 'Your privacy policy link (shown when asking for email or phone)']]],
   ['Keep your number (WhatsApp Business app)', [['coexistence.takeoverMinutes', 'When you reply from the WhatsApp Business app on your phone, the AI stays quiet in that chat for this many minutes (default 30)', 'number']]],
   ['Morning briefing (WhatsApp)', [['briefing.enabled', 'Send me a morning briefing: yesterday in numbers and what needs me (to the staff WhatsApp numbers above)', 'bool'], ['briefing.hour', 'Hour to send it (0–23, shop time, default 8)', 'number'], ['briefing.email', 'Also email it to me', 'bool']]],
-  ['Monthly report', [['report.monthlyEmail', 'Email me the monthly "what your assistant did" report', 'bool'], ['report.unansweredEmail', 'Email me questions the assistant could not answer (Mondays)', 'bool'], ['report.minutesPerReply', 'Minutes a person would spend per reply (default 1.5)', 'number'], ['report.hourlyRate', 'Staff cost per hour (default £12.71)', 'number'], ['report.openHour', 'Working hours start (0–23, default 9)', 'number'], ['report.closeHour', 'Working hours end (0–23, default 17)', 'number']]],
+  ['Monthly report', [['report.monthlyEmail', 'Email me the monthly "what your assistant did" report', 'bool'], ['report.weeklyDigest', 'Send me a weekly summary on Mondays (email + team WhatsApp)', 'bool'], ['report.unansweredEmail', 'Email me questions the assistant could not answer (Mondays)', 'bool'], ['report.minutesPerReply', 'Minutes a person would spend per reply (default 1.5)', 'number'], ['report.hourlyRate', 'Staff cost per hour (default £12.71)', 'number'], ['report.openHour', 'Working hours start (0–23, default 9)', 'number'], ['report.closeHour', 'Working hours end (0–23, default 17)', 'number']]],
   ['Messages outside the 24-hour window (approved templates)', [['notifications.templates.backInStock', 'Back-in-stock template (vars: product) – e.g. back_in_stock'], ['notifications.templates.orderUpdate', 'Order update template (vars: name, order, status) – e.g. order_update'], ['notifications.templates.paymentReminder', 'Payment reminder template (vars: name, order, total, link)'], ['notifications.templates.staffAlert', 'Staff alert template (var: alert text) – e.g. staff_alert']]],
   ['Website order notifications (Shopify / WooCommerce)', [['notifications.storeTemplates.orderConfirmation.enabled', 'Send order confirmation on WhatsApp', 'bool'], ['notifications.storeTemplates.orderConfirmation.template', 'Confirmation template (vars: name, order, shop, total)'], ['notifications.storeTemplates.shipping.enabled', 'Send shipping update', 'bool'], ['notifications.storeTemplates.shipping.template', 'Shipping template (vars: name, order, tracking link)'], ['notifications.storeTemplates.abandonedCheckout.enabled', 'Recover abandoned Shopify checkouts', 'bool'], ['notifications.storeTemplates.abandonedCheckout.template', 'Abandoned checkout template (vars: name, shop, checkout link)'], ['notifications.storeTemplates.abandonedCheckout.afterMinutes', 'Send after minutes', 'number'], ['notifications.storeTemplates.abandonedCheckout.requireMarketingConsent', 'Only customers who accepted marketing', 'bool'], ['store.shopify.webhookSecret', 'Shopify webhook signing secret (optional)', 'secret'], ['store.woocommerce.webhookSecret', 'WooCommerce webhook secret (optional)', 'secret']]],
 ];
@@ -874,7 +946,7 @@ async function settings() {
     if (type === 'textarea') input = `<textarea data-f="${p}">${esc(v)}</textarea>`;
     else if (type === 'json') input = `<textarea data-f="${p}" data-type="json" style="font-family:monospace;min-height:110px">${esc(JSON.stringify(v ?? [], null, 2))}</textarea>`;
     else if (type === 'select') input = `<select data-f="${p}">${opts.map((o) => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
-    else if (type === 'bool') input = `<select data-f="${p}" data-type="bool"><option value="true" ${v ? 'selected' : ''}>Yes</option><option value="false" ${!v ? 'selected' : ''}>No</option></select>`;
+    else if (type === 'bool') { const on = v ?? ['report.weeklyDigest', 'report.monthlyEmail', 'report.unansweredEmail'].includes(p); input = `<select data-f="${p}" data-type="bool"><option value="true" ${on ? 'selected' : ''}>Yes</option><option value="false" ${!on ? 'selected' : ''}>No</option></select>`; }
     else input = `<input data-f="${p}" data-type="${type || ''}" ${type === 'secret' ? 'type="password" placeholder="(unchanged)"' : ''} value="${esc(type === 'csv' || type === 'csvnum' ? (v || []).join(',') : type === 'secret' ? '' : v)}">`;
     return `<div><label>${l}</label>${input}</div>`;
   }).join('')}</div></div>`).join('') + '<p><button class="btn" id="saveset">Save settings</button></p>';
@@ -1423,9 +1495,15 @@ async function embeddedSignupButton(s) {
 // ---------- billing ----------
 async function billing() {
   const { billing: b, plans } = await api(T('/billing'));
+  const rf = S.role === 'owner' ? await api(T('/referrals')).catch(() => null) : null;
+  setTimeout(() => { const c = document.getElementById('refcopy'); if (c) c.onclick = () => navigator.clipboard.writeText($('#reflink').value).then(() => toast('Link copied'), () => $('#reflink').select()); }, 0);
   const status = b.subscription_status || 'none';
   const trial = b.trial_ends_at ? new Date(b.trial_ends_at + 'Z') : null;
-  $('#app').innerHTML = `<div class="card"><h2>Your plan</h2>
+  const refCard = rf ? `<div class="card"><h2>🎁 Refer a business</h2><p>Know a business that would like an assistant like yours? Share your link: you earn <b>${rf.percent}%</b> of their monthly plan for as long as they stay.</p>
+      <div style="display:flex;gap:6px"><input readonly value="${esc(rf.link)}" id="reflink"><button class="btn" id="refcopy" style="width:auto">Copy</button></div>
+      <p class="mute" style="margin-top:8px">${rf.signups} signed up · ${rf.paying} paying · <b>£${rf.monthlyEarnings}/month</b> earned${rf.referred.length ? '' : ' so far'}. Free plan chats show a "Powered by" link that counts for you too.</p>
+      ${rf.referred.length ? `<div class="tablewrap"><table><tr><th>Business</th><th>Plan</th><th>Status</th><th>Since</th></tr>${rf.referred.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.plan)}</td><td>${esc(r.status)}</td><td>${esc(r.since)}</td></tr>`).join('')}</table></div>` : ''}</div>` : '';
+  $('#app').innerHTML = refCard + `<div class="card"><h2>Your plan</h2>
       <p><b>${esc(plans[b.plan]?.label || b.plan)}</b> · status <span class="pill ${['active', 'trialing'].includes(status) ? '' : 'warn'}">${esc(status)}</span>${trial && status === 'trialing' ? ` · trial ends ${trial.toLocaleDateString('en-GB')}` : ''}</p>
       ${b.configured ? `<p>${b.stripe_customer_id ? '<button class="btn ghost" id="portal">Manage billing, invoices & card</button>' : ''}</p>` : '<p class="mute">Online billing is not set up on this server (PLATFORM_STRIPE_SECRET_KEY). Your provider will invoice you directly.</p>'}</div>
     ${b.configured ? `<div class="row">${Object.entries(plans).filter(([, p]) => p.priceGbp > 0).map(([k, p]) => `<div class="card"><h2>${esc(p.label)}</h2><div class="stat">£${p.priceGbp}<span class="mute" style="font-size:13px">/month</span></div>
@@ -1533,7 +1611,7 @@ async function grow() {
 }
 
 // ---------- welcome menu editor (Settings) ----------
-const WM_ACTIONS = [['answer', 'Reply with an answer', 'Type the answer'], ['link', 'Open a web page', 'https://…'], ['ask', 'Ask the AI a question', 'e.g. What are your delivery options? (empty = let them type)'], ['book', 'Start a booking', ''], ['status', 'Track my order', ''], ['browse', 'Browse products', ''], ['cart', 'Show the basket', ''], ['callback', 'Ask for a call back / quote', ''], ['ticket', 'Open a support ticket', ''], ['human', 'Talk to a person', '']];
+const WM_ACTIONS = [['answer', 'Reply with an answer', 'Type the answer'], ['link', 'Open a web page', 'https://…'], ['ask', 'Ask the AI a question', 'e.g. What are your delivery options? (empty = let them type)'], ['book', 'Start a booking', ''], ['status', 'Track my order', ''], ['browse', 'Browse products', ''], ['cart', 'Show the basket', ''], ['callback', 'Ask for a call back / quote', ''], ['ticket', 'Open a support ticket', ''], ['quote', 'Get a quote', ''], ['quiz', 'Help me choose (quiz)', ''], ['human', 'Talk to a person', '']];
 function wmSuggestions(s) {
   if (s.store?.type === 'none') return [{ label: '📅 Book', action: 'book' }, { label: '💷 Prices', action: 'ask', value: 'What are your prices?' }, { label: '📍 Where are you?', action: 'ask', value: 'Where are you based and how do I get there?' }, { label: '🕒 Opening hours', action: 'ask', value: 'What are your opening hours?' }, { label: '🙋 Talk to a person', action: 'human' }];
   return [{ label: '🛍️ Browse products', action: 'browse' }, { label: '📦 Track my order', action: 'status' }, { label: '🚚 Delivery', action: 'ask', value: 'What are your delivery options and costs?' }, { label: '↩️ Returns', action: 'ask', value: 'What is your returns policy?' }, { label: '🙋 Talk to a person', action: 'human' }];
@@ -1551,6 +1629,12 @@ function welcomeMenuEditor() {
       <p class="mute">A ready-made start for your trade: the menu and greeting your customers expect, the right question for call-backs, safety rules for the AI (a dentist's assistant never diagnoses; a takeaway's never promises allergen-free) and the questions we check its answers on. Your prices, hours and policies still come from your own website.</p>
       <div id="trgrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px"><span class="mute">Loading…</span></div>
       <p id="trres" class="mute"></p></div>
+      <div class="card"><h2>🧭 Help me choose (product finder)</h2>
+        <p class="mute">A few quick questions with tap answers, then the assistant recommends the right products or service. Add "Help me choose" to your welcome menu below.</p>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="qzon" style="width:auto" ${s.quiz?.enabled ? 'checked' : ''}> Turn on the quiz</label>
+        <label>Questions (one per line: question = answer | answer | answer)</label>
+        <textarea id="qztxt" style="min-height:90px" placeholder="Who is it for? = Me | A gift | My child&#10;What's your budget? = Under £25 | £25–£50 | £50+&#10;What will you use it for? = Everyday | Special occasion">${esc((s.quiz?.questions || []).map((x) => `${x.q} = ${(x.options || []).join(' | ')}`).join('\n'))}</textarea>
+        <p><button class="btn" id="qzsave">Save quiz</button> <button class="btn ghost" id="qzai">✨ Write it from my products</button> <button class="btn ghost" id="qzmenu">+ Add "Help me choose" to the menu</button> <span id="qzres" class="mute"></span></p></div>
       <div class="card"><h2>📋 Welcome menu</h2><div id="wmsug2"></div>
       <p class="mute">The options customers see when they say hi or type <b>menu</b> – on WhatsApp and on your website chat. 1–3 options show as buttons, 4–10 as a list.</p>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="wmon" style="width:auto" ${W.enabled ? 'checked' : ''}> Use my own menu (off = the standard menu)</label>
@@ -1579,6 +1663,10 @@ function welcomeMenuEditor() {
     box.querySelectorAll('[data-wu]').forEach((el) => (el.onclick = () => { sync(); const i = Number(el.dataset.wu); [W.options[i - 1], W.options[i]] = [W.options[i], W.options[i - 1]]; draw(); }));
     box.querySelectorAll('[data-wl],#wmintro').forEach((el) => (el.onchange = () => { sync(); draw(); }));
     if ($('#wmadd')) $('#wmadd').onclick = () => { sync(); W.options.push({ label: '', action: 'answer', value: '' }); draw(); };
+    const qparse = (t) => t.split('\n').map((l) => l.split('=')).filter((p) => p.length >= 2 && p[0].trim()).map((p) => ({ q: p[0].trim(), options: p.slice(1).join('=').split('|').map((o) => o.trim()).filter(Boolean) }));
+    $('#qzsave').onclick = async () => { try { S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { quiz: { enabled: $('#qzon').checked, questions: qparse($('#qztxt').value) } } })).tenant; toast('Quiz saved'); } catch (e) { toast(e.message); } };
+    $('#qzai').onclick = async () => { $('#qzres').textContent = '✨ Writing…'; try { const r = await api(T('/quiz/draft'), { method: 'POST' }); $('#qztxt').value = r.questions.map((x) => `${x.q} = ${x.options.join(' | ')}`).join('\n'); $('#qzon').checked = true; $('#qzres').textContent = 'Check it, then press Save quiz'; } catch (e) { $('#qzres').textContent = e.message; } };
+    $('#qzmenu').onclick = () => { if (W.options.some((o) => o.action === 'quiz')) return toast('Already on the menu'); W.enabled = true; W.options.splice(0, 0, { label: '🧭 Help me choose', action: 'quiz' }); draw(); toast('Added – press Save menu'); };
     api(T('/menu-suggestions')).then(({ suggestions }) => {
       const b = $('#wmsug2'); if (!b || !suggestions.length) return;
       b.innerHTML = `<div style="background:#fff7d6;color:#3b3216;border-radius:10px;padding:10px 12px;margin:8px 0"><b>💡 Your customers often ask:</b>${suggestions.map((x, i) => `<div style="display:flex;gap:8px;align-items:center;margin-top:6px"><span style="flex:1">“${esc(x.question)}” <span class="mute">(${x.asked}×)</span></span><button class="btn ghost" data-sadd="${i}" style="padding:3px 8px">+ Add “${esc(x.label)}”</button><button class="btn ghost" data-sx="${esc(x.key)}" style="padding:3px 8px" title="Not useful">✕</button></div>`).join('')}</div>`;
@@ -1630,24 +1718,32 @@ async function analytics(days = Number(store.get('wc_days')) || 30) {
   const fmtDay = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   const vm = store.get('wc_vmonth') || 'this';
   const now = new Date(); const ym = (d) => d.toISOString().slice(0, 7);
-  const month = vm === 'last' ? ym(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))) : ym(now);
+  const month = vm === 'week' ? 'week' : vm === 'last' ? ym(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))) : ym(now);
   const v = (await api(T(`/value-report?month=${month}`)).catch(() => ({}))).report;
   const M0 = (n) => sym + Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: 0 });
   const valueCard = v ? `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><h2 style="margin:0">💷 What your assistant did for you</h2>
-      <div>${[['this', 'This month'], ['last', 'Last month']].map(([k, l]) => `<button class="btn ${k === vm ? '' : 'ghost'}" data-vm="${k}">${l}</button>`).join(' ')}</div></div>
+      <div>${[['week', 'Last 7 days'], ['this', 'This month'], ['last', 'Last month']].map(([k, l]) => `<button class="btn ${k === vm ? '' : 'ghost'}" data-vm="${k}">${l}</button>`).join(' ')}</div></div>
     ${v.roi ? `<p style="font-size:1.15em;margin:12px 0">About <b>${v.roi}×</b> what your ${esc(v.plan.label)} plan costs (£${v.plan.priceGbp}/month)${v.partial ? ' so far this month' : ''}.</p>` : ''}
     <div class="row">
       <div><div class="mute">Conversations</div><div class="stat">${v.chats}</div><div class="mute">${v.whatsappChats} WhatsApp · ${v.webChats} website</div></div>
       <div><div class="mute">Handled without your team</div><div class="stat">${v.handledByBot}</div><div class="mute">${v.botReplies} replies written for you</div></div>
       <div><div class="mute">Helped out of hours</div><div class="stat">${v.afterHoursChats}</div><div class="mute">${esc(v.assumptions.hours)}</div></div>
       <div><div class="mute">Staff time saved</div><div class="stat">${v.hoursSaved} h</div><div class="mute">≈ ${M0(v.staffValue)}</div></div>
+      <div><div class="mute">Leads</div><div class="stat">${v.leads?.count || 0}</div><div class="mute">${v.leads?.callbacks || 0} call-back requests</div></div>
+      <div><div class="mute">Bookings</div><div class="stat">${v.bookings || 0}</div><div class="mute">made in the chat</div></div>
       <div><div class="mute">Orders in chat</div><div class="stat">${v.orders.count}</div><div class="mute">${M0(v.orders.value)}</div></div>
+      ${v.ticketsSolved ? `<div><div class="mute">Tickets solved</div><div class="stat">${v.ticketsSolved}</div></div>` : ''}
+      ${v.ratings && v.ratings.great + v.ratings.ok + v.ratings.bad ? `<div><div class="mute">Chat ratings</div><div class="stat">😀 ${v.ratings.great}</div><div class="mute">😐 ${v.ratings.ok} · 😞 ${v.ratings.bad}</div></div>` : ''}
       ${v.websiteSales ? `<div><div class="mute">Website sales from the chat</div><div class="stat">${M0(v.websiteSales.value)}</div><div class="mute">${v.websiteSales.orders} orders (Shopify)</div></div>` : ''}
       ${v.links?.linksSent ? `<div><div class="mute">Shop links opened</div><div class="stat">${v.links.linksClicked}</div><div class="mute">${v.links.checkoutsStarted} checkouts started</div></div>` : ''}
       <div><div class="mute">Recovered sales</div><div class="stat">${M0(v.recovered)}</div><div class="mute">${v.recoveredCarts.count + v.recoveredCheckouts.count} carts · ${v.paidAfterReminder.count} chased payments</div></div></div>
     ${v.unanswered ? `<p class="mute">❓ ${v.unanswered} question${v.unanswered > 1 ? 's' : ''} it couldn't answer – add the answers on the <a href="#" data-goto="knowledge">Knowledge base</a> tab.</p>` : ''}
     <p class="mute" style="font-size:12px">Staff time counts ${v.assumptions.minutesPerReply} min per reply at ${sym}${v.assumptions.hourlyRate}/hour (change in Settings → Monthly report). This report is emailed to you on the 1st of each month.</p></div>` : '';
-  $('#app').innerHTML = valueCard + `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Period</b>${[7, 30, 90].map((d) => `<button class="btn ${d === days ? '' : 'ghost'}" data-days="${d}">Last ${d} days</button>`).join('')}</div>
+  const ads = (await api(T(`/ad-report?days=${days}`)).catch(() => ({ sources: [] }))).sources;
+  const adCard = ads.length ? `<div class="card"><h2>📣 Where your chats came from (last ${days} days)</h2><p class="mute">Click-to-WhatsApp ads, Google and Facebook ad clicks and campaign links (utm tags), and what each turned into.</p>
+    <div class="tablewrap"><table><tr><th>Source</th><th>Chats</th><th>Leads</th><th>Bookings</th><th>Orders</th><th>Revenue</th></tr>${ads.map((g) => `<tr><td>${g.kind === 'ad' ? '📣 ' : g.kind === 'campaign' ? '🔗 ' : ''}${esc(g.label)}</td><td>${g.chats}</td><td>${g.leads}</td><td>${g.bookings}</td><td>${g.orders}</td><td>${M0(g.revenue)}</td></tr>`).join('')}</table></div>
+    <p class="mute" style="font-size:12px">Tip: add <code>?utm_source=facebook&amp;utm_campaign=spring-offer</code> to the links in your ads and posts to see each campaign here.</p></div>` : '';
+  $('#app').innerHTML = valueCard + adCard + `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Period</b>${[7, 30, 90].map((d) => `<button class="btn ${d === days ? '' : 'ghost'}" data-days="${d}">Last ${d} days</button>`).join('')}</div>
     <div class="row">
       <div class="card"><div class="mute">Revenue (after discounts)</div><div class="stat">${m(a.revenue)}</div><div class="mute">${m(a.paid_revenue)} paid</div></div>
       <div class="card"><div class="mute">Orders</div><div class="stat">${a.orders}</div><div class="mute">avg ${m(a.aov)}</div></div>

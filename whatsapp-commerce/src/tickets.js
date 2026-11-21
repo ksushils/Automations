@@ -2,6 +2,7 @@ import { getDb, json } from './db.js';
 import { emailShop, sendEmail } from './email.js';
 import { createSender, notify } from './whatsapp/cloudApi.js';
 import { sendHook } from './hooks.js';
+import { pushTeam } from './push.js';
 
 /*
  * Support tickets: when the assistant can't fix something, it opens a ticket with a number (#1042), tells the
@@ -51,6 +52,7 @@ export function createTicket(tenant, { waId = null, name, email, phone, subject,
   const text = `🎫 New ticket #${number}: ${subj}\n${who}\n\n${desc}`;
   emailShop(tenant, `New ticket #${number}: ${subj}`, `${text}\n\nOpen the Tickets tab to reply.`, { button: 'Open Tickets' }).catch(() => {});
   for (const s of tenant.settings.notifications?.staffWaIds || []) notify(tenant, String(s).replace(/\D/g, ''), { type: 'text', text }, null).catch(() => {});
+  pushTeam(tenant, { title: `🎫 Ticket #${number}`, body: `${subj} – ${who}`, url: '/admin/#tickets', tag: `ticket-${number}` }).catch(() => {});
   sendHook(tenant, 'ticket.new', { number, subject: subj, description: desc, name, email, phone, priority, channel }).catch(() => {});
   return { ...getTicket(tenant.id, number), hours };
 }

@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { emailShop, sendEmail } from './email.js';
 import { notify } from './whatsapp/cloudApi.js';
 import { sendHook } from './hooks.js';
+import { pushTeam } from './push.js';
 
 /*
  * Chat leads: the assistant turns interest into a lead the team can act on.
@@ -196,6 +197,7 @@ async function finishLead(ctx) {
   import('./ai/direct.js').then(({ summarizeChat }) => summarizeChat(ctx.tenant, ctx.conv.waId)).then((s) => s && getDb().prepare('UPDATE chat_leads SET summary = ? WHERE id = ?').run(s, id)).catch(() => {});
   // tell the team straight away – speed matters most for a call back
   emailShop(ctx.tenant, `New lead: ${lead.kind === 'call' ? 'call back' : 'details'}${lead.topic && lead.topic !== 'general' ? ` – ${lead.topic}` : ''}`, `${summary}\n\nIt's in the Leads list in your dashboard.`, { button: 'Open your dashboard' }).catch(() => {});
+  pushTeam(ctx.tenant, { title: `📇 New lead: ${lead.kind === 'call' ? 'call back' : 'details'}`, body: summary.replace(/\n+/g, ' · '), url: '/admin/#leads', tag: `lead-${id}` }).catch(() => {});
   sendHook(ctx.tenant, 'lead.new', { id, kind: lead.kind, topic: lead.topic, name: lead.name || ctx.customer?.name || '', email: lead.email || '', phone: lead.phone || '', callTime: lead.callTime || '', message: lead.message || '', page: ctx.conv.data.page?.url || '', channel: isWeb(ctx) ? 'website' : 'whatsapp' }).catch(() => {});
   for (const s of ctx.S.notifications?.staffWaIds || []) notify(ctx.tenant, String(s).replace(/\D/g, ''), { type: 'text', text: `🔔 New lead\n${summary}` }, ctx.S.notifications?.templates?.staffAlert ? { name: ctx.S.notifications.templates.staffAlert, params: [summary.replace(/\n/g, ' · ').slice(0, 900)] } : null, ctx.rawSend).catch(() => {});
   // the brochure: link now, and by email when email is set up

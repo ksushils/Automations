@@ -21,7 +21,7 @@ import { listOrders, updateOrder, orderUpdateMessage, sendOrderUpdate } from '..
 import { createStaff, listStaff, deleteStaff, authenticateStaff, ROLES } from '../staff.js';
 import { toCsv, productsFromCsv } from '../csv.js';
 import { analytics } from '../analytics.js';
-import { valueReport, reportText, listUnanswered, getUnanswered, setUnanswered, assistantSales } from '../insights.js';
+import { valueReport, reportText, listUnanswered, getUnanswered, setUnanswered, assistantSales, adReport } from '../insights.js';
 import { runQualityCheck, lastQuality, qualityRunning } from '../quality.js';
 import { listBookings, setBookingStatus } from '../bookings.js';
 import { claimDemo, isDemo } from '../instantDemo.js';
@@ -46,6 +46,11 @@ import { suggestReply, translateText } from '../ai/assist.js';
 import { listArticles, getArticle, saveArticle, deleteArticle, draftArticles } from '../help.js';
 import { searchGuides, askGuides } from '../platformHelp.js';
 import { menuSuggestions, dismissSuggestion } from '../learn.js';
+import { customerProfile, saveCustomerNotes } from '../profile.js';
+import { vapidKeys, saveSubscription, removeSubscription, pushTeam, subscriptionCount } from '../push.js';
+import { draftQuiz } from '../quiz.js';
+import { listQuotes, getQuote, updateQuote, sendQuote } from '../quotes.js';
+import { tenantReferrals, creditSignup, createPartner, allReferrals } from '../referrals.js';
 import { listTickets, getTicket, ticketEvents, createTicket, updateTicket, ticketStats } from '../tickets.js';
 import { googleConfigured, calendarConnected, authUrl, disconnectCalendar, redirectUri } from '../gcal.js';
 import { resumeAi } from '../coexistence.js';
@@ -141,6 +146,7 @@ export function adminRouter() {
     const markFree = (id) => getDb().prepare("UPDATE tenants SET trial_ends_at = NULL, subscription_status = 'free' WHERE id = ?").run(id);
     if (claimed) {
       updateTenantMeta(claimed.tenant.id, { plan });
+      if (req.body?.ref) creditSignup(claimed.tenant.id, String(req.body.ref));
       if (TRADES[req.body?.trade]) applyTrade(claimed.tenant.id, req.body.trade); // keeps the menu the demo already wrote
       if (free) markFree(claimed.tenant.id);
       const website = claimed.tenant.settings.business?.website;
@@ -150,6 +156,7 @@ export function adminRouter() {
       return res.status(201).json({ tenantId: claimed.tenant.id, adminKey: claimed.adminKey, checkoutUrl, trialDays: free ? 0 : config.trialDays, plan, fromDemo: true });
     }
     const { tenant, adminKey } = createTenant({ name, plan });
+    if (req.body?.ref) creditSignup(tenant.id, String(req.body.ref));
     if (TRADES[req.body?.trade]) applyTrade(tenant.id, req.body.trade);
     getDb().prepare("UPDATE tenants SET owner_email = ?, trial_ends_at = datetime('now', ?), subscription_status = 'trialing' WHERE id = ?").run(email, `+${config.trialDays} days`, tenant.id);
     if (free) markFree(tenant.id);
@@ -465,9 +472,10 @@ export function adminRouter() {
   // "What your assistant did for you" – the monthly money-made report (also emailed on the 1st)
   r.get('/tenants/:tenantId/value-report', requireTenant, wrap(async (req, res) => {
     const rep = valueReport(req.tenant.id, req.query.month);
-    rep.websiteSales = await assistantSales(req.tenant, rep.month);
+    rep.websiteSales = rep.month === 'week' ? null : await assistantSales(req.tenant, rep.month);
     res.json({ report: rep, text: reportText(rep, req.tenant.settings.business?.name || req.tenant.name) });
   }));
+  r.get('/tenants/:tenantId/ad-report', requireTenant, (req, res) => res.json({ sources: adReport(req.tenant.id, req.query.days) }));
   // Automatic answer check (replays real questions, marks the answers)
   r.get('/tenants/:tenantId/quality', requireTenant, (req, res) => res.json({ last: lastQuality(req.tenant.id), running: qualityRunning(req.tenant.id) }));
   r.post('/tenants/:tenantId/quality/run', requireTenant, requireOwner, (req, res) => {
@@ -748,6 +756,26 @@ export function adminRouter() {
     res.json({ ok: true });
   });
   // "Teach the bot": a team answer becomes knowledge (and optionally a help-centre draft)
+  // phone notifications (the installable dashboard app)
+  r.get('/tenants/:tenantId/referrals', requireTenant, requireOwner, (req, res) => res.json(tenantReferrals(req.tenant.id)));
+  r.get('/system/referrals', requireSuper, (req, res) => res.json(allReferrals()));
+  r.post('/system/partners', requireSuper, (req, res) => { try { res.json(createPartner(req.body || {})); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
+  r.get('/tenants/:tenantId/quotes', requireTenant, (req, res) => res.json({ quotes: listQuotes(req.tenant.id, { status: req.query.status || undefined }), enabled: req.tenant.settings.quotes?.enabled === true, autoSend: req.tenant.settings.quotes?.autoSend === true }));
+  r.get('/tenants/:tenantId/quotes/:number', requireTenant, (req, res) => { const q = getQuote(req.tenant.id, req.params.number); return q ? res.json({ quote: q, url: `${config.publicUrl}/q/${q.token}` }) : res.status(404).json({ error: 'not found' }); });
+  r.patch('/tenants/:tenantId/quotes/:number', requireTenant, wrap(async (req, res) => res.json({ quote: await updateQuote(req.tenant, req.params.number, req.body || {}) })));
+  r.post('/tenants/:tenantId/quotes/:number/send', requireTenant, wrap(async (req, res) => res.json(await sendQuote(req.tenant, req.params.number, { by: req.staff?.name || 'Team' }))));
+  r.post('/tenants/:tenantId/quiz/draft', requireTenant, requireOwner, wrap(async (req, res) => {
+    const store = (await import('../stores/index.js')).getStore(req.tenant);
+    const products = await store.searchProducts('', { limit: 40 }).catch(() => []);
+    const cats = (req.tenant.settings.store?.manual?.categories || []).map((c) => c.title);
+    res.json({ questions: await draftQuiz(req.tenant, { products: products.map((p) => p.title), categories: cats }) });
+  }));
+  r.get('/push/key', (req, res) => res.json({ publicKey: vapidKeys().publicKey }));
+  r.post('/tenants/:tenantId/push/subscribe', requireTenant, (req, res) => { try { saveSubscription(req.tenant.id, req.body?.subscription, req.staff?.name || (req.isSuper ? 'Support' : 'Owner')); res.json({ ok: true, devices: subscriptionCount(req.tenant.id) }); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
+  r.post('/tenants/:tenantId/push/unsubscribe', requireTenant, (req, res) => res.json({ ok: removeSubscription(req.body?.endpoint) }));
+  r.post('/tenants/:tenantId/push/test', requireTenant, wrap(async (req, res) => res.json({ sent: await pushTeam(req.tenant, { title: '🔔 Notifications are on', body: "You'll get a buzz for new leads, tickets, bookings and customers asking for a person.", tag: 'test' }) })));
+  r.get('/tenants/:tenantId/customers/:waId/profile', requireTenant, (req, res) => res.json({ profile: customerProfile(req.tenant.id, req.params.waId) }));
+  r.patch('/tenants/:tenantId/customers/:waId/profile', requireTenant, (req, res) => res.json({ profile: saveCustomerNotes(req.tenant.id, req.params.waId, { notes: req.body?.notes, tags: req.body?.tags }) }));
   r.post('/tenants/:tenantId/teach', requireTenant, requireOwner, (req, res) => {
     const q = String(req.body?.question || '').trim().slice(0, 500), a = String(req.body?.answer || '').trim().slice(0, 4000);
     if (q.length < 3 || a.length < 2) return res.status(400).json({ error: 'Add the question and the answer' });

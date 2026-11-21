@@ -25,6 +25,9 @@ import { voiceConfigured, transcribe } from '../ai/voice.js';
 import { bookingsEnabled, bookingAction, bookingText, bookingFromText } from '../bookings.js';
 import { saveRating, addRatingComment } from '../ratings.js';
 import { teamStatus } from '../hours.js';
+import { pushTeam } from '../push.js';
+import { quizConfig } from '../quiz.js';
+import { quotesOn, createQuote } from '../quotes.js';
 import { ticketsOn, createTicket, ticketStatusText, getTicket } from '../tickets.js';
 import { ownerCommand } from '../briefing.js';
 import { visionConfigured, describeForSearch } from '../ai/vision.js';
@@ -83,7 +86,7 @@ export function openerFor(S, url) {
 }
 
 // ---------- the shop's own welcome menu (Settings → Welcome menu) ----------
-export const MENU_ACTIONS = ['answer', 'link', 'book', 'status', 'browse', 'ask', 'human', 'cart', 'callback', 'ticket'];
+export const MENU_ACTIONS = ['answer', 'link', 'book', 'status', 'browse', 'ask', 'human', 'cart', 'callback', 'ticket', 'quiz', 'quote'];
 export function menuOptions(S) {
   const W = S.welcomeMenu;
   if (!W?.enabled) return [];
@@ -402,6 +405,24 @@ function setAddress(ctx, text) {
 export const FAKE_BOOKING = /\b(you('| a)re (all )?(booked|confirmed|scheduled)|(appointment|booking|reservation|slot|table)\b[^.\n]{0,70}\b(is|has been|now|are)\s+(all\s+)?(set|booked|confirmed|reserved|scheduled)|i('ve| have) (booked|reserved|scheduled|confirmed)|(would you like|shall i|do you want me) to (confirm|book|reserve) (this|that|it|the|your))\b/i;
 /** Someone asks to book while bookings aren't switched on: take their details for the team instead of pretending. */
 export const WANTS_BOOKING = /(^|\b(i'?d like to|i would like to|i want to|can i|could i|please|let me|i need to|want to)\s+)(book|make an? (appointment|booking)|get an appointment|reserve)\b/;
+async function makeQuote(ctx) {
+  const Qd = ctx.conv.data.quote || {};
+  ctx.conv.state = 'idle';
+  ctx.conv.data.quote = null;
+  const phone = Qd.phone || json(ctx.customer?.attributes, {})?.phone || (String(ctx.conv.waId).startsWith('web:') ? null : `+${ctx.conv.waId}`);
+  const { quote, auto, message } = await createQuote(ctx.tenant, { waId: ctx.conv.waId, name: ctx.customer?.name, email: Qd.email || ctx.customer?.email, phone, request: Qd.request }, { fromChat: true });
+  if (auto) return ctx.reply({ type: 'text', text: message }); // fully priced and the shop allows it: the quote now
+  const hours = Math.max(1, Number(ctx.S.quotes?.replyHours) || 24);
+  return ctx.reply({ type: 'text', text: `📝 Thanks! Your quote request *Q-${quote.number}* is in. We'll send your quote within ${hours} hours${quote.email ? ', here and by email' : ' here'}.` });
+}
+
+function askQuiz(ctx, Q, i, intro) {
+  const q = Q.questions[i];
+  const text = `${intro ? `🧭 ${intro}\n\n` : ''}*${i + 1}/${Q.questions.length}* ${q.q}`;
+  if (q.options.length <= 3) return ctx.reply({ type: 'buttons', text, buttons: q.options.map((o, j) => ({ id: `qz:${i}:${j}`, title: o.slice(0, 20) })) });
+  return ctx.reply({ type: 'list', text, button: 'Choose', sections: [{ title: 'Answers', rows: q.options.map((o, j) => ({ id: `qz:${i}:${j}`, title: o.slice(0, 24) })) }] });
+}
+
 function openTicket(ctx) {
   const T = ctx.conv.data.ticket || {};
   ctx.conv.state = 'idle';
@@ -507,7 +528,7 @@ export function extractChoices(answer) {
   return { text: String(answer).slice(0, m.index).trim(), choices };
 }
 const choiceButtons = (text, choices, topic = 'general') => ({ type: 'buttons', text, buttons: choices.map((c) => ({
-  id: /\b(open|raise|log|create|submit)\s+(a\s+)?(support\s+)?ticket\b/i.test(c) ? 'ticket' : /call\s*(me)?\s*back|callback|phone me|ring me/i.test(c) ? `lead:call:${topic}` : /e-?mail me|brochure|send (me )?(the )?details/i.test(c) ? `lead:email:${topic}` : `say:${c.slice(0, 200)}`,
+  id: /\b(open|raise|log|create|submit)\s+(a\s+)?(support\s+)?ticket\b/i.test(c) ? 'ticket' : /\b(get|send me|request)\s+(a\s+)?(free\s+)?quote\b/i.test(c) ? 'quote' : /call\s*(me)?\s*back|callback|phone me|ring me/i.test(c) ? `lead:call:${topic}` : /e-?mail me|brochure|send (me )?(the )?details/i.test(c) ? `lead:email:${topic}` : `say:${c.slice(0, 200)}`,
   title: c.slice(0, 20),
 })) });
 const leadTopic = (ctx, text) => String(ctx.conv.data.lastTopic || text || 'general').replace(/[\r\n]+/g, ' ').slice(0, 60);
@@ -598,6 +619,7 @@ function handover(ctx, text) {
   const staff = ctx.S.notifications?.staffWaIds || [];
   for (const s of staff) staffAlert(ctx.tenant, String(s).replace(/\D/g, ''), `🙋 Customer +${ctx.conv.waId} (${ctx.customer.name || 'unknown'}) asked to talk to a person. Reply from the dashboard.`, ctx.rawSend);
   const who = String(ctx.conv.waId).startsWith('web:') ? 'A website visitor' : `Customer +${ctx.conv.waId}`;
+  pushTeam(ctx.tenant, { title: '🙋 A customer wants a person', body: `${ctx.customer.name || who} is waiting in the chat`, url: '/admin/#inbox', tag: `human-${ctx.conv.waId}` }).catch(() => {});
   emailShop(ctx.tenant, 'A customer wants to talk to a person', `🙋 ${who} (${ctx.customer.name || 'name unknown'}) asked to talk to a person.\nReply from the Inbox in your dashboard.`, { button: 'Open the Inbox' }).catch(() => {});
 }
 
@@ -634,6 +656,29 @@ async function handleAction(ctx, id) {
       if (!bookingsEnabled(ctx.S) && !['bcxl', 'bmine', 'bcal'].includes(cmd)) return bookInfo(ctx);
       return bookingAction(ctx, cmd, arg);
     case 'ask': return ctx.reply({ type: 'text', text: 'Sure, type your question and I\'ll answer from our information. 🙂' });
+    case 'quote': {
+      if (!quotesOn(ctx.S)) return leadAction(ctx, 'call:Quote');
+      ctx.conv.state = 'quote_req';
+      return ctx.reply({ type: 'buttons', text: "📝 Happy to quote! Tell me what you need in one message – what it is, sizes or quantities, and when you'd like it.", buttons: [{ id: 'menu', title: 'Cancel' }] });
+    }
+    case 'quote_skip': return ctx.conv.state === 'quote_contact' ? makeQuote(ctx) : ctx.reply(mainMenu(ctx));
+    case 'quiz': { // "Help me choose"
+      const Q = quizConfig(ctx.S);
+      if (!Q) return handleAction(ctx, 'ask');
+      ctx.conv.data.quiz = { answers: [] };
+      return askQuiz(ctx, Q, 0, Q.intro);
+    }
+    case 'qz': {
+      const Q = quizConfig(ctx.S);
+      const [qi, oi] = arg.split(':').map(Number);
+      if (!Q || !Q.questions[qi] || !ctx.conv.data.quiz) return ctx.reply(mainMenu(ctx));
+      ctx.conv.data.quiz.answers[qi] = { q: Q.questions[qi].q, a: Q.questions[qi].options[oi] || '' };
+      if (qi + 1 < Q.questions.length) return askQuiz(ctx, Q, qi + 1);
+      const said = ctx.conv.data.quiz.answers.filter(Boolean).map((x) => `${x.q.replace(/\?$/, '')}: ${x.a}`).join('; ');
+      ctx.conv.data.quiz = null;
+      ctx.conv.data.lastTopic = 'Help me choose';
+      return handleText(ctx, `Please recommend what would suit me best. ${said}.`);
+    }
     case 'ticket_skip': return ctx.conv.state === 'ticket_contact' ? openTicket(ctx) : ctx.reply(mainMenu(ctx));
     case 'ticket': {
       if (!ticketsOn(ctx.S)) return handover(ctx);
@@ -747,6 +792,22 @@ async function handleText(ctx, raw) {
   if (['stock_email', 'order_addr'].includes(ctx.conv.state)) {
     if (GREETING.test(t) || COMMANDS.has(t)) ctx.conv.state = 'idle';
     else { const r = ctx.conv.state === 'stock_email' ? await stockEmailText(ctx, text) : await orderAddressText(ctx, text); if (r !== false) return r; }
+  }
+  // ---------- quotes ----------
+  if (ctx.conv.state === 'quote_req' && !GREETING.test(t) && !COMMANDS.has(t)) {
+    ctx.conv.data.quote = { request: String(text).slice(0, 2000) };
+    if (String(ctx.conv.waId).startsWith('web:') && !ctx.customer?.email) {
+      ctx.conv.state = 'quote_contact';
+      return ctx.reply({ type: 'buttons', text: "📧 What's your email address, so we can send you the quote? (Or a phone number.)", buttons: [{ id: 'quote_skip', title: 'Skip' }] });
+    }
+    return makeQuote(ctx);
+  }
+  if (ctx.conv.state === 'quote_contact' && !GREETING.test(t) && !COMMANDS.has(t)) {
+    const em = String(text).match(/[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]{2,}/)?.[0];
+    const ph = !em && String(text).replace(/[^\d+]/g, '').length >= 7 ? String(text).replace(/[^\d+]/g, '') : null;
+    if (!em && !ph) return ctx.reply({ type: 'buttons', text: "That doesn't look like an email address or phone number – try again, or tap Skip.", buttons: [{ id: 'quote_skip', title: 'Skip' }] });
+    Object.assign(ctx.conv.data.quote || (ctx.conv.data.quote = {}), em ? { email: em.toLowerCase() } : { phone: ph });
+    return makeQuote(ctx);
   }
   // ---------- support tickets ----------
   if (ctx.conv.state === 'ticket_desc' && !GREETING.test(t) && !COMMANDS.has(t)) {
@@ -874,6 +935,7 @@ async function handleText(ctx, raw) {
     // an unhappy customer: flag the chat in the Inbox and tell the owner (at most every 6 hours per chat)
     const last = Date.parse(ctx.conv.data.unhappyAt || '') || 0;
     ctx.conv.data.unhappyAt = new Date().toISOString();
+    if (Date.now() - last > 6 * 3600000) pushTeam(ctx.tenant, { title: '😠 An unhappy customer', body: String(text).slice(0, 120), url: '/admin/#inbox', tag: `unhappy-${ctx.conv.waId}` }).catch(() => {});
     if (Date.now() - last > 6 * 3600000) emailShop(ctx.tenant, '😠 An unhappy customer in the chat', `A customer seems unhappy:\n\n"${String(text).slice(0, 500)}"\n\nOpen the Inbox to see the chat and step in.`, { button: 'Open the Inbox' }).catch(() => {});
   }
   if (ctx.S.ai?.frustrationHandover !== false && !ctx.conv.humanHandover && frustrationOffer(ctx, text)) return;

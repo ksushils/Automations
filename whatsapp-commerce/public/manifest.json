@@ -1,0 +1,12 @@
+{
+  "name": "Chat assistant dashboard",
+  "short_name": "Assistant",
+  "start_url": "/admin/",
+  "scope": "/admin/",
+  "display": "standalone",
+  "background_color": "#f6f8f7",
+  "theme_color": "#128c4a",
+  "icons": [
+    { "src": "/admin/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
