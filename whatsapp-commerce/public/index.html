@@ -124,8 +124,8 @@ async function boot() {
 }
 $('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant', null); store.set('wc_tab', null); S.key = null; S.tenant = null; S.tenantId = null; S.setup = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['leads', 'Leads'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
-const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'leads', 'orders', 'bookings', 'contacts']);
+const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['leads', 'Leads'], ['tickets', 'Tickets'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['help', 'Help centre'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
+const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'leads', 'tickets', 'orders', 'bookings', 'contacts']);
 const MAIN_TABS = new Set(['overview', 'analytics', 'inbox', 'leads', 'orders', 'simulator', 'ai', 'settings']);
 // New customer messages: a soft sound, the count in the browser tab, and the Inbox refreshes itself.
 const alerts = { last: null, timer: null, ac: null, title: document.title };
@@ -186,7 +186,7 @@ function render() {
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('') + (hasMore ? `<button id="moretabs">${showAll ? '‹ Fewer' : 'More ›'}</button>` : '');
   $('#nav').querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => { S.fromGuide = false; S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
   if ($('#moretabs')) $('#moretabs').onclick = () => { store.set('wc_alltabs', showAll ? null : '1'); if (showAll && !MAIN_TABS.has(S.tab)) S.tab = 'overview'; render(); };
-  ({ setup, tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, leads, orders, bookings, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ setup, tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, leads, tickets, help, orders, bookings, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin: guided platform setup ----------
@@ -571,6 +571,83 @@ async function inbox(sel, filter = store.get('wc_inbox') || 'all') {
   $('#ho').onclick = async () => { const r = await api(T(`/conversations/${sel}/handover`), { method: 'POST', body: { on: !c?.human_handover } }); if (r.ratingAsked) toast('Back to the bot – the customer was asked to rate the chat'); inbox(sel, filter); };
   if ($('#rsm')) $('#rsm').onclick = async () => { await api(T(`/conversations/${sel}/resume`), { method: 'POST' }); toast('The AI is answering this chat again'); inbox(sel, filter); };
   $('#rs').onclick = async () => { const r = await api(T(`/conversations/${sel}/reply`), { method: 'POST', body: { text: $('#rep').value } }); if (!r.ok) toast(r.error + ' ' + (r.hint || '')); inbox(sel); };
+}
+
+// ---------- tickets (support requests the assistant couldn't solve) ----------
+async function tickets(sel, view = store.get('wc_tview') || 'active', q = '') {
+  const d = await api(T(`/tickets?status=${view}&q=${encodeURIComponent(q)}`));
+  const st = d.stats;
+  const pill = { open: '🟠 Open', pending: '🔵 Waiting for customer', solved: '✅ Solved', closed: '⚪ Closed' };
+  const pri = { urgent: '🔴 Urgent', high: '🟠 High', normal: 'Normal', low: 'Low' };
+  const overdue = (t) => t.status === 'open' && !t.first_reply_at && t.due_at && Date.parse(t.due_at.replace(' ', 'T') + 'Z') < Date.now();
+  $('#app').innerHTML = `${d.enabled ? '' : `<div class="card"><h2>🎫 Support tickets</h2><p>When the assistant can't fix a problem, it opens a ticket with a number (#1042), promises a reply time, and you work it here. Replies reach the customer in the chat and by email. Customers can ask "ticket 1042" for an update.</p>
+      ${S.role === 'owner' ? '<p><button class="btn" id="ton">Turn on tickets</button></p>' : '<p class="mute">The owner can turn this on.</p>'}</div>`}
+    <div class="split"><div class="card" style="max-height:640px;overflow:auto"><h2>Tickets</h2>
+      <p class="mute" style="font-size:13px">🟠 ${st.open} open · 🔵 ${st.pending} waiting · ${st.overdue ? `<b style="color:#b42318">⏰ ${st.overdue} overdue</b> · ` : ''}✅ ${st.solved30} solved in 30 days</p>
+      <div style="display:flex;gap:6px;margin-bottom:8px"><select id="tview" style="width:auto">${[['active', 'Open + waiting'], ['open', 'Open'], ['pending', 'Waiting'], ['solved', 'Solved'], ['closed', 'Closed'], ['all', 'All']].map(([k, l]) => `<option value="${k}" ${view === k ? 'selected' : ''}>${l}</option>`).join('')}</select><input id="tq" value="${esc(q)}" placeholder="Search…"></div>
+      <p><button class="btn ghost" id="tnew">+ New ticket</button></p>
+      ${d.tickets.map((t) => `<div class="list-item ${String(sel) === String(t.number) ? 'on' : ''}" data-t="${t.number}"><b>#${t.number}</b> ${esc(t.subject)}<div class="mute" style="font-size:12px">${pill[t.status] || t.status} · ${pri[t.priority]}${overdue(t) ? ' · <b style="color:#b42318">⏰ overdue</b>' : ''} · ${esc(t.name || t.email || (t.channel || ''))}${t.assigned_to ? ` · 👤 ${esc(t.assigned_to)}` : ''}</div></div>`).join('') || '<p class="mute">No tickets here.</p>'}
+    </div><div class="card" id="tdetail"><p class="mute">Select a ticket</p></div></div>`;
+  if ($('#ton')) $('#ton').onclick = async () => { S.tenant = (await api(T('/settings'), { method: 'PATCH', body: { tickets: { enabled: true, replyHours: 8 } } })).tenant; toast('Tickets are on – the assistant will offer one when it can\'t fix a problem'); tickets(); };
+  $('#tview').onchange = () => { store.set('wc_tview', $('#tview').value); tickets(null, $('#tview').value, $('#tq').value); };
+  $('#tq').onchange = () => tickets(null, view, $('#tq').value);
+  $('#app').querySelectorAll('[data-t]').forEach((el) => (el.onclick = () => tickets(el.dataset.t, view, q)));
+  $('#tnew').onclick = () => {
+    $('#tdetail').innerHTML = `<h2>New ticket</h2><p class="mute">For problems reported by phone or email.</p>
+      <div class="row"><div><label>Name</label><input id="nn"></div><div><label>Email</label><input id="ne" type="email"></div><div><label>Phone</label><input id="np"></div></div>
+      <label>Subject</label><input id="ns"><label>What's the problem?</label><textarea id="nd"></textarea>
+      <label>Priority</label><select id="npr" style="width:auto">${Object.entries(pri).map(([k, l]) => `<option value="${k}" ${k === 'normal' ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <p><button class="btn" id="ncreate">Create ticket</button></p>`;
+    $('#ncreate').onclick = async () => { try { const r = await api(T('/tickets'), { method: 'POST', body: { name: $('#nn').value, email: $('#ne').value, phone: $('#np').value, subject: $('#ns').value, description: $('#nd').value, priority: $('#npr').value } }); toast(`Ticket #${r.ticket.number} created`); tickets(r.ticket.number, view); } catch (e) { toast(e.message); } };
+  };
+  if (!sel) return;
+  const { ticket: t, events } = await api(T(`/tickets/${sel}`));
+  const { agents = [] } = await api(T('/agents')).catch(() => ({}));
+  const kindLabel = { created: '🎫 Opened', reply: '💬 Team reply', customer: '🙋 Customer', note: '🔒 Private note', status: '🔁 Status', priority: '⚑ Priority', assigned: '👤 Assigned' };
+  $('#tdetail').innerHTML = `<h2>#${t.number} ${esc(t.subject)}</h2>
+    <p class="mute">${esc([t.name, t.email, t.phone].filter(Boolean).join(' · ') || 'No contact details')} · via ${esc(t.channel || 'chat')} · opened ${esc(t.created_at)}${t.wa_id ? ` · <a href="#" id="tchatlink">Open the chat</a>` : ''}</p>
+    ${t.summary ? `<p class="mute">🤖 ${esc(t.summary)}</p>` : ''}
+    <div class="row"><div><label>Status</label><select id="tst">${Object.entries(pill).map(([k, l]) => `<option value="${k}" ${t.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label>Priority</label><select id="tpr">${Object.entries(pri).map(([k, l]) => `<option value="${k}" ${t.priority === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div><label>Owner</label><select id="tas"><option value="">Nobody</option>${agents.map((a) => `<option ${t.assigned_to === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></div></div>
+    <div class="chat" style="max-height:340px;overflow:auto;margin-top:10px">${events.map((e) => `<div class="b ${e.kind === 'customer' || e.kind === 'created' ? 'in' : 'out'}" style="${e.public ? '' : 'background:#fff7d6'}"><div class="mute" style="font-size:12px">${kindLabel[e.kind] || e.kind} · ${esc(e.by || '')} · ${esc(e.created_at)}</div>${esc(e.text || '')}</div>`).join('')}</div>
+    <label style="margin-top:10px">Reply to the customer (chat${t.email ? ' + email' : ''})</label><textarea id="trep" placeholder="Hi${t.name ? ' ' + esc(t.name.split(' ')[0]) : ''}, …"></textarea>
+    <p><button class="btn" id="tsend">Send reply</button> <button class="btn ghost" id="tsolve">Send and mark solved</button> <button class="btn ghost" id="tnote">Add private note</button></p>`;
+  const patch = async (body, msg) => { try { const r = await api(T(`/tickets/${t.number}`), { method: 'PATCH', body }); if (msg) toast(msg + (r.delivered ? ` (${[r.delivered.chat && 'chat', r.delivered.email && 'email'].filter(Boolean).join(' + ') || 'saved – the customer could not be reached'})` : '')); tickets(t.number, view, q); } catch (e) { toast(e.message); } };
+  $('#tst').onchange = () => patch({ status: $('#tst').value }, 'Status saved');
+  $('#tpr').onchange = () => patch({ priority: $('#tpr').value });
+  $('#tas').onchange = () => patch({ assignedTo: $('#tas').value || null });
+  $('#tsend').onclick = () => $('#trep').value.trim() && patch({ reply: $('#trep').value }, 'Reply sent');
+  $('#tsolve').onclick = () => patch({ reply: $('#trep').value.trim() || undefined, status: 'solved' }, 'Marked solved');
+  $('#tnote').onclick = () => $('#trep').value.trim() && patch({ note: $('#trep').value }, 'Note added');
+  if ($('#tchatlink')) $('#tchatlink').onclick = (e) => { e.preventDefault(); S.tab = 'inbox'; render(); setTimeout(() => inbox(t.wa_id), 50); };
+}
+
+// ---------- help centre (public help articles; published ones also teach the assistant) ----------
+async function help(editId) {
+  const d = await api(T('/help'));
+  const cats = [...new Set(d.articles.map((a) => a.category))];
+  $('#app').innerHTML = `<div class="card"><h2>📚 Help centre</h2>
+    <p>Your public help site: <a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.url)}</a> – articles, a search box and your assistant. Link it from your website footer and emails. Published articles also teach the assistant, so the chat and the help centre always agree.</p>
+    ${S.role === 'owner' ? `<p><button class="btn" id="hdraft">✨ Write articles for me</button> <button class="btn ghost" id="hnew">+ New article</button> <span id="hres" class="mute"></span></p><p class="mute" style="font-size:13px">The AI writes drafts from the questions your customers ask and your own website. Nothing is public until you publish it.</p>` : ''}</div>
+    <div class="split"><div class="card" style="max-height:640px;overflow:auto"><h2>Articles (${d.articles.length})</h2>
+      ${cats.map((c) => `<p style="margin:10px 0 4px"><b>${esc(c)}</b></p>${d.articles.filter((a) => a.category === c).map((a) => `<div class="list-item ${String(editId) === String(a.id) ? 'on' : ''}" data-a="${a.id}">${a.status === 'published' ? '🟢' : '📝'} ${esc(a.title)}<div class="mute" style="font-size:12px">${a.status === 'published' ? `${a.views} views · 👍 ${a.helpful_yes} · 👎 ${a.helpful_no}` : 'Draft'}${a.source === 'ai' ? ' · ✨ AI draft' : a.source === 'team' ? ' · from a team answer' : ''}</div></div>`).join('')}`).join('') || '<p class="mute">No articles yet. Press "Write articles for me".</p>'}
+    </div><div class="card" id="hedit"><p class="mute">Select an article to edit it.</p></div></div>`;
+  $('#app').querySelectorAll('[data-a]').forEach((el) => (el.onclick = () => help(el.dataset.a)));
+  if ($('#hdraft')) $('#hdraft').onclick = async () => { $('#hres').textContent = '✨ Reading your questions and website… (about 20 seconds)'; try { const r = await api(T('/help-draft'), { method: 'POST', body: { max: 6 } }); toast(r.articles.length ? `${r.articles.length} drafts written – check and publish them` : 'Nothing new to write about yet'); help(); } catch (e) { $('#hres').textContent = e.message; } };
+  const editor = (a = { title: '', category: 'General', body: '', status: 'draft' }) => {
+    $('#hedit').innerHTML = `<h2>${a.id ? 'Edit article' : 'New article'}</h2>
+      <label>Title (the question customers ask)</label><input id="ht" value="${esc(a.title)}" placeholder="How do I book an appointment?">
+      <label>Category</label><input id="hc" value="${esc(a.category)}" list="hcats"><datalist id="hcats">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+      <label>Article</label><textarea id="hb" style="min-height:260px" placeholder="Short paragraphs. Start a line with - for bullet points. **bold**">${esc(a.body)}</textarea>
+      ${S.role === 'owner' ? `<p><button class="btn" id="hpub">${a.status === 'published' ? 'Save' : 'Publish'}</button> <button class="btn ghost" id="hsave">${a.status === 'published' ? 'Unpublish (back to draft)' : 'Save draft'}</button> ${a.id ? '<button class="btn ghost" id="hdel">Delete</button>' : ''} ${a.status === 'published' && a.slug ? `<a href="${esc(d.url)}/${esc(a.slug)}" target="_blank" rel="noopener">View ↗</a>` : ''}</p>` : ''}`;
+    const save = async (status) => { try { const body = { title: $('#ht').value, category: $('#hc').value, body: $('#hb').value, status }; const r = a.id ? await api(T(`/help/${a.id}`), { method: 'PUT', body }) : await api(T('/help'), { method: 'POST', body }); toast(status === 'published' ? 'Published – the assistant knows this now' : 'Saved as a draft'); help(r.article.id); } catch (e) { toast(e.message); } };
+    if ($('#hpub')) $('#hpub').onclick = () => save('published');
+    if ($('#hsave')) $('#hsave').onclick = () => save('draft');
+    if ($('#hdel')) $('#hdel').onclick = async () => { if (!confirm('Delete this article?')) return; await api(T(`/help/${a.id}`), { method: 'DELETE' }); toast('Deleted'); help(); };
+  };
+  if ($('#hnew')) $('#hnew').onclick = () => editor();
+  if (editId) { const { article } = await api(T(`/help/${editId}`)); editor(article); }
 }
 
 // ---------- leads (details / call-back requests from the chat) ----------

@@ -199,6 +199,53 @@ CREATE TABLE IF NOT EXISTS quality_runs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_quality_runs ON quality_runs(tenant_id, id);
+CREATE TABLE IF NOT EXISTS help_articles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'General',
+  body TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',
+  doc_id INTEGER,
+  views INTEGER NOT NULL DEFAULT 0,
+  helpful_yes INTEGER NOT NULL DEFAULT 0,
+  helpful_no INTEGER NOT NULL DEFAULT 0,
+  source TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(tenant_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_help_articles ON help_articles(tenant_id, status);
+CREATE TABLE IF NOT EXISTS tickets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  wa_id TEXT,
+  name TEXT, email TEXT, phone TEXT,
+  subject TEXT NOT NULL,
+  description TEXT NOT NULL,
+  summary TEXT,
+  status TEXT NOT NULL DEFAULT 'open',      -- open | pending | solved | closed
+  priority TEXT NOT NULL DEFAULT 'normal',  -- low | normal | high | urgent
+  assigned_to TEXT,
+  channel TEXT,
+  due_at TEXT, first_reply_at TEXT, solved_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(tenant_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_tickets ON tickets(tenant_id, status, id);
+CREATE TABLE IF NOT EXISTS ticket_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,      -- created | reply | customer | note | status | priority | assigned
+  text TEXT,
+  by_name TEXT,
+  public INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_events ON ticket_events(ticket_id, id);
 CREATE TABLE IF NOT EXISTS chat_ratings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id TEXT NOT NULL,

@@ -43,6 +43,8 @@ import { ratingSummary, ratingAsk, ratingsOn } from '../ratings.js';
 import { isTyping, typingDraft, liveVisitors, sayHello } from './webchat.js';
 import { teamStatus } from '../hours.js';
 import { suggestReply, translateText } from '../ai/assist.js';
+import { listArticles, getArticle, saveArticle, deleteArticle, draftArticles } from '../help.js';
+import { listTickets, getTicket, ticketEvents, createTicket, updateTicket, ticketStats } from '../tickets.js';
 import { googleConfigured, calendarConnected, authUrl, disconnectCalendar, redirectUri } from '../gcal.js';
 import { resumeAi } from '../coexistence.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
@@ -703,6 +705,18 @@ export function adminRouter() {
     res.json({ ok: true, humanHandover: c.humanHandover, ratingAsked: asked });
   }));
   r.get('/tenants/:tenantId/conversations/:waId/typing', requireTenant, (req, res) => res.json({ typing: isTyping(req.tenant.id, req.params.waId), draft: typingDraft(req.tenant.id, req.params.waId) }));
+  // ----- Help centre -----
+  r.get('/tenants/:tenantId/help', requireTenant, (req, res) => res.json({ articles: listArticles(req.tenant.id), url: `${config.publicUrl}/help/${encodeURIComponent(req.tenant.id)}`, enabled: req.tenant.settings.help?.enabled !== false }));
+  r.get('/tenants/:tenantId/help/:id', requireTenant, (req, res) => { const a = getArticle(req.tenant.id, req.params.id); return a ? res.json({ article: a }) : res.status(404).json({ error: 'not found' }); });
+  r.post('/tenants/:tenantId/help', requireTenant, requireOwner, (req, res) => { try { res.json({ article: saveArticle(req.tenant.id, req.body || {}) }); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
+  r.put('/tenants/:tenantId/help/:id', requireTenant, requireOwner, (req, res) => { try { res.json({ article: saveArticle(req.tenant.id, { ...(req.body || {}), id: req.params.id }) }); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
+  r.delete('/tenants/:tenantId/help/:id', requireTenant, requireOwner, (req, res) => res.json({ ok: deleteArticle(req.tenant.id, req.params.id) }));
+  r.post('/tenants/:tenantId/help-draft', requireTenant, requireOwner, wrap(async (req, res) => res.json({ articles: await draftArticles(req.tenant, { max: Math.min(10, Number(req.body?.max) || 6) }) })));
+  // ----- Tickets -----
+  r.get('/tenants/:tenantId/tickets', requireTenant, (req, res) => res.json({ tickets: listTickets(req.tenant.id, { status: String(req.query.status || 'active'), q: String(req.query.q || '').slice(0, 80) }), stats: ticketStats(req.tenant.id), enabled: req.tenant.settings.tickets?.enabled === true }));
+  r.get('/tenants/:tenantId/tickets/:number', requireTenant, (req, res) => { const t = getTicket(req.tenant.id, req.params.number); return t ? res.json({ ticket: t, events: ticketEvents(t.id) }) : res.status(404).json({ error: 'not found' }); });
+  r.post('/tenants/:tenantId/tickets', requireTenant, (req, res) => { try { const b = req.body || {}; res.status(201).json({ ticket: createTicket(req.tenant, { name: b.name, email: b.email, phone: b.phone, subject: b.subject, description: b.description, priority: b.priority, channel: 'dashboard' }) }); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
+  r.patch('/tenants/:tenantId/tickets/:number', requireTenant, wrap(async (req, res) => { const b = req.body || {}; res.json(await updateTicket(req.tenant, req.params.number, { status: b.status, priority: b.priority, assignedTo: b.assignedTo, reply: b.reply, note: b.note, by: req.staff?.name || (req.isSuper ? 'Support' : 'Owner') })); }));
   r.get('/tenants/:tenantId/visitors', requireTenant, (req, res) => res.json({ enabled: req.tenant.settings.webchat?.liveVisitors === true, visitors: liveVisitors(req.tenant.id), team: teamStatus(req.tenant.settings) }));
   r.post('/tenants/:tenantId/visitors/:sessionId/hello', requireTenant, (req, res) => {
     const text = String(req.body?.text || '').trim();

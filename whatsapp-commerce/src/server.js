@@ -17,6 +17,7 @@ import { getDb } from './db.js';
 import { loadPlatformSetup } from './platformSetup.js';
 import { trackingRouter } from './tracking.js';
 import { siteRouter } from './site.js';
+import { helpRouter } from './help.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +34,7 @@ export function createApp() {
   });
   app.use(customDomainMiddleware());
   app.use(trackingRouter()); // /go/:code – counted links to the shop's own website
+  app.use(helpRouter()); // /help/<shop> – each business's public help centre
   app.use(siteRouter()); // public website: /, /pricing, /takeaways, /whatsapp-cost-calculator, /demo, sitemap, robots
   app.use(publicRouter());
   app.use(webRouter());

@@ -13,7 +13,7 @@ import { placeOrder, listOrders, paymentLabel, STATUS_TEXT, findOrderByReceipt, 
 import { quote, validatePromo, findPromo, upcomingSlots } from './pricing.js';
 import { findTriggeredFlow, startFlow, handleFlowButton, handleFlowAnswer, handleFlowForm, runFlow, getFlow, schedule } from './flows.js';
 import { notify, fetchMedia } from '../whatsapp/cloudApi.js';
-import { getDb } from '../db.js';
+import { getDb, json } from '../db.js';
 import { config as appConfig } from '../config.js';
 import { alert } from '../ops.js';
 import { emailShop } from '../email.js';
@@ -25,6 +25,7 @@ import { voiceConfigured, transcribe } from '../ai/voice.js';
 import { bookingsEnabled, bookingAction, bookingText, bookingFromText } from '../bookings.js';
 import { saveRating, addRatingComment } from '../ratings.js';
 import { teamStatus } from '../hours.js';
+import { ticketsOn, createTicket, ticketStatusText, getTicket } from '../tickets.js';
 import { ownerCommand } from '../briefing.js';
 import { visionConfigured, describeForSearch } from '../ai/vision.js';
 import { difyAllowed } from '../ai/gate.js';
@@ -401,6 +402,17 @@ function setAddress(ctx, text) {
 export const FAKE_BOOKING = /\b(you('| a)re (all )?(booked|confirmed|scheduled)|(appointment|booking|reservation|slot|table)\b[^.\n]{0,70}\b(is|has been|now|are)\s+(all\s+)?(set|booked|confirmed|reserved|scheduled)|i('ve| have) (booked|reserved|scheduled|confirmed)|(would you like|shall i|do you want me) to (confirm|book|reserve) (this|that|it|the|your))\b/i;
 /** Someone asks to book while bookings aren't switched on: take their details for the team instead of pretending. */
 export const WANTS_BOOKING = /(^|\b(i'?d like to|i would like to|i want to|can i|could i|please|let me|i need to|want to)\s+)(book|make an? (appointment|booking)|get an appointment|reserve)\b/;
+function openTicket(ctx) {
+  const T = ctx.conv.data.ticket || {};
+  ctx.conv.state = 'idle';
+  ctx.conv.data.ticket = null;
+  const phone = T.phone || json(ctx.customer?.attributes, {})?.phone || (String(ctx.conv.waId).startsWith('web:') ? null : `+${ctx.conv.waId}`);
+  const tk = createTicket(ctx.tenant, { waId: ctx.conv.waId, name: ctx.customer?.name, email: T.email || ctx.customer?.email, phone, description: T.description, channel: String(ctx.conv.waId).startsWith('web:') ? 'website' : 'whatsapp' });
+  import('../ai/direct.js').then(({ summarizeChat }) => summarizeChat(ctx.tenant, ctx.conv.waId)).then((s) => s && getDb().prepare('UPDATE tickets SET summary = ? WHERE id = ?').run(s, tk.id)).catch(() => {});
+  const team = teamStatus(ctx.S);
+  return ctx.reply({ type: 'text', text: `🎫 Ticket *#${tk.number}* is open. ${team.open ? `We aim to reply within ${tk.hours} hour${tk.hours > 1 ? 's' : ''}` : `Our team is away now – back ${team.next || 'soon'} – and will pick it up then`}. You'll get updates here${tk.email ? ' and by email' : ''}.\n\nAsk "ticket ${tk.number}" any time for an update.` });
+}
+
 function appointmentRequest(ctx, intro) {
   const url = ctx.S.business.bookingUrl;
   if (url) {
@@ -495,7 +507,7 @@ export function extractChoices(answer) {
   return { text: String(answer).slice(0, m.index).trim(), choices };
 }
 const choiceButtons = (text, choices, topic = 'general') => ({ type: 'buttons', text, buttons: choices.map((c) => ({
-  id: /call\s*(me)?\s*back|callback|phone me|ring me/i.test(c) ? `lead:call:${topic}` : /e-?mail me|brochure|send (me )?(the )?details/i.test(c) ? `lead:email:${topic}` : `say:${c.slice(0, 200)}`,
+  id: /\b(open|raise|log|create|submit)\s+(a\s+)?(support\s+)?ticket\b/i.test(c) ? 'ticket' : /call\s*(me)?\s*back|callback|phone me|ring me/i.test(c) ? `lead:call:${topic}` : /e-?mail me|brochure|send (me )?(the )?details/i.test(c) ? `lead:email:${topic}` : `say:${c.slice(0, 200)}`,
   title: c.slice(0, 20),
 })) });
 const leadTopic = (ctx, text) => String(ctx.conv.data.lastTopic || text || 'general').replace(/[\r\n]+/g, ' ').slice(0, 60);
@@ -614,6 +626,13 @@ async function handleAction(ctx, id) {
       if (!bookingsEnabled(ctx.S) && !['bcxl', 'bmine', 'bcal'].includes(cmd)) return bookInfo(ctx);
       return bookingAction(ctx, cmd, arg);
     case 'ask': return ctx.reply({ type: 'text', text: 'Sure, type your question and I\'ll answer from our information. 🙂' });
+    case 'ticket_skip': return ctx.conv.state === 'ticket_contact' ? openTicket(ctx) : ctx.reply(mainMenu(ctx));
+    case 'ticket': {
+      if (!ticketsOn(ctx.S)) return handover(ctx);
+      ctx.conv.state = 'ticket_desc';
+      ctx.conv.data.ticket = {};
+      return ctx.reply({ type: 'buttons', text: "🎫 Sure – I'll open a support ticket. Describe the problem in a few words: what happened, and any error message you see. (You can send a photo with 📎 too.)", buttons: [{ id: 'menu', title: 'Cancel' }] });
+    }
     case 'rate': {
       const team = !!(ctx.conv.humanHandover || ctx.conv.data?.staffActiveAt || ctx.conv.data?.handoverAt);
       const id = saveRating(ctx.tenant.id, ctx.conv.waId, arg, team ? 'team' : 'ai');
@@ -720,6 +739,42 @@ async function handleText(ctx, raw) {
   if (['stock_email', 'order_addr'].includes(ctx.conv.state)) {
     if (GREETING.test(t) || COMMANDS.has(t)) ctx.conv.state = 'idle';
     else { const r = ctx.conv.state === 'stock_email' ? await stockEmailText(ctx, text) : await orderAddressText(ctx, text); if (r !== false) return r; }
+  }
+  // ---------- support tickets ----------
+  if (ctx.conv.state === 'ticket_desc' && !GREETING.test(t) && !COMMANDS.has(t)) {
+    const T = ctx.conv.data.ticket || {};
+    T.description = String(text).slice(0, 4000);
+    ctx.conv.data.ticket = T;
+    const web = String(ctx.conv.waId).startsWith('web:');
+    if (web && !ctx.customer?.email && !json(ctx.customer?.attributes, {})?.phone) {
+      ctx.conv.state = 'ticket_contact';
+      return ctx.reply({ type: 'buttons', text: "📧 What's your email address, so we can send you updates? (Or a phone number.)", buttons: [{ id: 'ticket_skip', title: 'Skip' }] });
+    }
+    return openTicket(ctx);
+  }
+  if (ctx.conv.state === 'ticket_contact' && !GREETING.test(t) && !COMMANDS.has(t)) {
+    const T = ctx.conv.data.ticket || {};
+    const em = String(text).match(/[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]{2,}/)?.[0];
+    const ph = !em && String(text).replace(/[^\d+]/g, '').length >= 7 ? String(text).replace(/[^\d+]/g, '') : null;
+    if (!em && !ph) return ctx.reply({ type: 'buttons', text: "That doesn't look like an email address or phone number – try again, or tap Skip.", buttons: [{ id: 'ticket_skip', title: 'Skip' }] });
+    Object.assign(T, em ? { email: em.toLowerCase() } : { phone: ph });
+    ctx.conv.data.ticket = T;
+    return openTicket(ctx);
+  }
+  // "ticket 1042" / "what's happening with #1042?"
+  const tk = t.match(/\b(?:ticket|case|ref(?:erence)?)\s*(?:no\.?|number)?\s*#?\s*(\d{4,6})\b|^#(\d{4,6})$/);
+  if (tk && (ticketsOn(ctx.S) || getDb().prepare('SELECT 1 FROM tickets WHERE tenant_id = ? LIMIT 1').get(ctx.tenant.id))) {
+    const msg = ticketStatusText(ctx.tenant.id, tk[1] || tk[2], { waId: ctx.conv.waId, email: ctx.customer?.email });
+    return ctx.reply({ type: 'text', text: msg || "I can't find that ticket for this chat. For privacy I can only show tickets opened from this chat or with your email address – a member of our team can help: type *human*." });
+  }
+  // the team is waiting for this customer's reply on a ticket: add it to the ticket
+  const waiting = ticketsOn(ctx.S) && !GREETING.test(t) && !COMMANDS.has(t) && getDb().prepare("SELECT number FROM tickets WHERE tenant_id = ? AND wa_id = ? AND status = 'pending' AND updated_at > datetime('now', '-14 days') ORDER BY id DESC LIMIT 1").get(ctx.tenant.id, ctx.conv.waId);
+  if (waiting) {
+    const tick = getTicket(ctx.tenant.id, waiting.number);
+    getDb().prepare("INSERT INTO ticket_events (ticket_id, kind, text, by_name, public) VALUES (?, 'customer', ?, ?, 1)").run(tick.id, String(text).slice(0, 4000), ctx.customer?.name || 'Customer');
+    getDb().prepare("UPDATE tickets SET status = 'open', updated_at = datetime('now') WHERE id = ?").run(tick.id);
+    emailShop(ctx.tenant, `Reply on ticket #${tick.number}`, `The customer replied on ticket #${tick.number} (${tick.subject}):\n\n${String(text).slice(0, 1500)}`, { button: 'Open Tickets' }).catch(() => {});
+    return ctx.reply({ type: 'text', text: `Thanks – I've added that to ticket #${tick.number}. The team will get back to you here. 🙂` });
   }
   if (ctx.conv.state === 'rate_comment') {
     ctx.conv.state = 'idle';

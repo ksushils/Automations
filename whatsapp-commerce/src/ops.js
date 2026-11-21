@@ -42,7 +42,7 @@ export function listBackups(dir = config.backupDir) {
 export function securityHeaders(req, res, next) {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.set('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
   if (req.path.startsWith('/admin') || req.path.startsWith('/api')) res.set('X-Frame-Options', 'DENY');
   if (config.publicUrl.startsWith('https://')) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
