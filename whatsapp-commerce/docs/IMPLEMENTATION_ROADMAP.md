@@ -70,6 +70,6 @@ Rules that apply to every item:
 
 ## Next batches
 
-1. **R5:** Instagram/Messenger – compare what Meta allows for small businesses first (research before building).
+1. **R5:** Instagram/Messenger – research done (`docs/INSTAGRAM_MESSENGER_RESEARCH.md`). Before building, the platform owner needs to apply for App Review (Advanced Access for the messaging permissions) and Business Verification – 2–4 weeks. Then: Unified Login, a second webhook parser, Conversation Routing.
 3. **R6 (rest):** optional set-up fee at sign-up (Stripe one-off price) – needs the user's decision on the amount.
 4. **Site chat:** switch on the site's own assistant (Setup → site chat business) so the home, pricing and examples pages have a live "ask it anything" chat – the pages already show it when set.

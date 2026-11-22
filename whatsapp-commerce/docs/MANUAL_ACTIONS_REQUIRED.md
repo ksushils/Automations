@@ -83,3 +83,7 @@ This is how failure alerts reach you: failed emails, failing jobs, failed backup
 "Lost your key?" on the sign-in page (batch 13) can only send its link once email (Resend: API key and a verified sending domain) is set up in Setup. Until then it tells owners to contact support, and you can reset a key from the super admin dashboard.
 
 Also: none of the live businesses has an account email yet (they were created by hand). Each owner should add theirs in Billing → Account email – or you can, signed in as super admin – otherwise recovery has nowhere to send the link.
+
+## Instagram and Messenger (when you want them)
+
+Research is in `docs/INSTAGRAM_MESSENGER_RESEARCH.md`. Building it needs Meta approval first, which only the app owner can request: App Review for Advanced Access to the messaging permissions (`instagram_manage_messages` / `instagram_business_manage_messages`, `pages_messaging`, `pages_manage_metadata`, …) and Business Verification for the Human Agent feature. Meta says review can take several weeks.
