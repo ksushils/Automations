@@ -54,9 +54,41 @@ export function checkAnswer(answer, sources, { productText = '', now = Date.now(
   return { sources: scored, used: used.map((s) => s.doc), unsupported, flags, confidence: flags.includes('unsupported_figures') || flags.includes('no_source') ? 'low' : flags.length ? 'medium' : 'high' };
 }
 
-export function recordAnswer(tenantId, { waId, question, answer, sources = [], productText = '', model = null, latencyMs = null }) {
+/**
+ * Price guard: money amounts in an AI answer must come from the business's information (sources, products, its own
+ * delivery fee / minimum order…). Totals the AI works out are allowed when they're a known price × a small quantity
+ * or the sum of two known amounts. Any other amount is removed with the sentence it's in, and the customer is told
+ * the team will confirm the price – the assistant never states a price it can't back up.
+ */
+export function guardPrices(answer, sources = [], { productText = '', extra = [], customerText = '' } = {}) {
+  const money = (set) => [...set].filter((f) => /^[£$€]/.test(f));
+  const said = new Set(money(figures(customerText))); // the customer's own budget ("under £25") may be repeated back
+  const CHOICES = /\[CHOICES:[^\]]*\]/gi; // tap-to-choose options such as budget bands are questions, not price claims
+  const inAnswer = money(figures(String(answer).replace(CHOICES, ' '))).filter((f) => !said.has(f));
+  if (!inAnswer.length) return { answer, blocked: [] };
+  const knownNums = new Set();
+  for (const f of [...sources.flatMap((s) => [...figures(s.text)]), ...figures(productText), ...extra.filter((x) => Number(x) > 0).map((x) => '£' + Number(x))]) if (/^[£$€]/.test(f)) knownNums.add(Number(f.slice(1)));
+  const ok = (n) => {
+    const r = (x) => Math.round(x * 100) / 100;
+    for (const k of knownNums) {
+      if (r(k) === r(n)) return true;
+      for (let q = 2; q <= 20; q++) if (r(k * q) === r(n)) return true;
+      for (const j of knownNums) if (r(k + j) === r(n)) return true;
+    }
+    return false;
+  };
+  const blocked = inAnswer.filter((f) => !ok(Number(f.slice(1))));
+  if (!blocked.length) return { answer, blocked: [] };
+  const bad = new Set(blocked);
+  const kept = String(answer).split(/(?<=[.!?])\s+|\n+/).filter((s) => /^\s*\[CHOICES:/i.test(s) || !money(figures(s.replace(CHOICES, ' '))).some((f) => bad.has(f)));
+  const note = "I don't have a confirmed price for that, so I won't guess – the team can confirm it for you.";
+  return { answer: [...kept.filter((s) => s.trim()), note].join(' ').trim(), blocked };
+}
+
+export function recordAnswer(tenantId, { waId, question, answer, sources = [], productText = '', model = null, latencyMs = null, blocked = [] }) {
   if (!answer) return null;
   const c = checkAnswer(answer, sources, { productText });
+  if (blocked.length) { c.flags.push('price_blocked'); c.confidence = 'low'; }
   const id = Number(getDb().prepare('INSERT INTO answer_evidence (tenant_id, wa_id, question, answer, sources, flags, unsupported, confidence, model, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
     tenantId, waId || null, String(question || '').slice(0, 1000), String(answer).slice(0, 4000), JSON.stringify(c.sources.slice(0, 6)), JSON.stringify(c.flags), JSON.stringify(c.unsupported), c.confidence, model, latencyMs).lastInsertRowid);
   return { id, ...c };

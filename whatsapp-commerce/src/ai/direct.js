@@ -203,9 +203,20 @@ export async function directTurn(ctx, text) {
   }
   bumpUsage(ctx.tenant.id, 'ai_calls');
   // keep the answer with the sources it was given, and check its figures against them (Verified answers)
+  // …and never let an invented price reach the customer (settings.ai.blockUnverifiedPrices, on by default)
   try {
-    const { recordAnswer } = await import('../verified.js');
-    recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText: products.map((p) => `${p.title} ${money(p.price, sym)}`).join('\n'), model: model || 'default', latencyMs: Date.now() - startedAt });
+    const { recordAnswer, guardPrices } = await import('../verified.js');
+    const productText = products.map((p) => `${p.title} ${money(p.price, sym)} ${(p.variants || []).map((v) => money(v.price, sym)).join(' ')}`).join('\n');
+    let blocked = [];
+    if (answer && S.ai?.blockUnverifiedPrices !== false) {
+      // known amounts: the shop's own fees, the basket, and (for the built-in catalogue) every listed price
+      const catalogue = S.store?.type === 'manual' ? (S.store.manual?.products || []).flatMap((p) => [p.price, ...(p.variants || []).map((v) => v.price)]) : [];
+      const extra = [S.ordering?.deliveryFee, S.ordering?.freeDeliveryOver, S.ordering?.minimumOrder, ...(ctx.conv.cart || []).map((i) => i.price), ...catalogue];
+      const g = guardPrices(answer, kb, { productText, extra, customerText: text });
+      if (g.blocked.length) { blocked = g.blocked; console.log('[price guard]', ctx.tenant.id, g.blocked.join(', ')); }
+      recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt, blocked });
+      answer = g.answer;
+    } else recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt });
   } catch (e) { console.warn('[verified answers]', e.message); }
   let shown = products;
   if (agent) {

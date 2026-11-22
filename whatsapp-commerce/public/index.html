@@ -416,7 +416,7 @@ async function waitFor(sel, ms = 6000) { for (let t = 0; t < ms; t += 100) { con
 // ---------- Verified answers: what the AI said and which of your sources backed it (Knowledge tab) ----------
 async function answersCard(flagged = false) {
   const r = await api(T(`/answers?limit=30${flagged ? '&flagged=1' : ''}`));
-  const FLAG = { no_source: 'No source found', weak_support: 'Sources barely match', unsupported_figures: 'Figure not in your information', stale_source: 'Source not checked for 90+ days' };
+  const FLAG = { no_source: 'No source found', weak_support: 'Sources barely match', unsupported_figures: 'Figure not in your information', stale_source: 'Source not checked for 90+ days', price_blocked: 'Unconfirmed price removed before sending' };
   const when = (s) => new Date(s).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' });
   const box = await waitFor('#answersbox'); if (!box) return;
   box.className = 'card';

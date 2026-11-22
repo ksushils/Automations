@@ -4,12 +4,59 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 6 (owner copilot and cancellation feedback), 22 November 2026.
-- **Branch:** batches 1–6 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
+- **Last batch:** batch 8 (AI safety guards and the evaluation suite), 22 November 2026.
+- **Branch:** batches 1–8 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** the owner approved deploying ("keep doing all the batches… you can deploy"). The deploy is **not done yet**: since the start of batch 2, the VPS (191.215.46.170) has not answered on SSH or HTTPS, while the rest of the internet works from here.
 - **How to deploy:** with `scripts/deploy-vps.sh` on the server. It snapshots the database, runs the tests inside the new image, checks `/health`, and rolls back automatically if anything fails.
-- **Tests:** 299 of 299 pass locally on Node 24. They run again inside the Node 22 image during the deploy.
+- **Tests:** 309 of 309 pass locally on Node 24, across two full runs. They run again inside the Node 22 image during the deploy.
 - **Live server:** still on commit `231ae4e`.
+
+## Batch 8: AI safety guards and the evaluation suite (R8)
+- **Price guard** (`guardPrices` in `src/verified.js`, used in `src/ai/direct.js`; switch it off with `settings.ai.blockUnverifiedPrices: false`):
+  - Any £/$/€ amount in an AI answer must come from the business's own information.
+  - Amounts that count as known:
+    - the passages the AI was given;
+    - matching products, and every price in a built-in catalogue;
+    - the delivery fee, free-delivery threshold and minimum order;
+    - items in the basket;
+    - a known price × 2–20, or the sum of two known amounts;
+    - the customer's own figures (e.g. their budget);
+    - tap-to-choose options (budget bands are questions, not price claims).
+  - Anything else is removed with its sentence, and the customer is told the team will confirm the price.
+  - The answer is recorded with an "Unconfirmed price removed before sending" flag in Verified answers.
+- **Emergency notices** (`src/safety.js`, called in the engine before anything else):
+  - gas smell or leak → 0800 111 999;
+  - carbon monoxide → 0800 111 999 (and 999 if anyone is unwell);
+  - medical emergency → 999.
+  - Sent by fixed rules whatever the AI says, also during a handover or an AI pause, at most once every 10 minutes per chat.
+- **Human requests:** a clear request such as "can I speak to a real person please?" (up to 120 characters) now always hands over. Before, only exact words like "agent" did.
+- **Evaluation suite** (`src/evals.js`), 15 cases:
+  - **6 "guard" cases must pass even with a deliberately bad AI:** invented price, fake booking, gas emergency, medical emergency, human request, AI provider down.
+  - **9 "model" cases:** correct price, missing opening hours, prompt injection, instructions hidden in a document, other customers' data, payment-change request, allergens, Spanish, frustrated customer.
+  - Each records pass/fail, what was expected, what was said, the model, tokens, cost and latency.
+- **How to run it:** `node src/cli/runEvals.js` (add `--guard-only` to skip the real model). It reads the AI settings, then runs everything in an in-memory database, so no live data or customer is touched. Reports are saved to `data/evals/`.
+  - Guard-only run locally: 6/6 passed.
+  - **The real-model run is still to do on the server, which has the AI key.**
+- **Tests:** `test/evals.test.js`, 4 tests. Every guard case is run against a fake AI giving bad answers.
+
+## Batch 7: trade and beauty templates (R1.2) and service area (R2.1, part)
+- **9 specialist templates**, built on the existing trades and salon templates (all 16 originals kept):
+  - plumber, electrician, heating engineer, handyman, property maintenance;
+  - hair salon, barber, beauty salon, nail salon.
+  - Each has its own greeting, menu, the one question to ask, the questions customers ask most, and safety rules:
+    - gas and carbon monoxide numbers;
+    - "switch off at the consumer unit if safe";
+    - Gas Safe / NICEIC / Part P mentioned only if the business's information says so;
+    - no firm price without seeing the job;
+    - patch tests;
+    - no treatment-safety advice.
+  - The beauty templates come with typical services ready to edit. Bookings stay off until the owner turns them on.
+- **Template detection** now picks the specialist template (e.g. "Smith Plumbing" → plumber, "Kings Barber" → barber).
+- **Service area** (`src/serviceArea.js`). Settings → Service area takes postcode areas, districts, ranges or towns (e.g. "SW, SE1, CR0-CR4, Croydon").
+  - When a callback request includes a postcode outside those areas, the customer is told honestly that the team will check. Nobody is refused.
+  - The postcode and whether it's covered are saved on the lead (`chat_leads.area`) and shown in Opportunities.
+  - The areas also go into the AI's instructions.
+- **Tests:** `test/batch7.test.js`, 6 tests. The old template-detection test was updated, because the specialist templates now win.
 
 ## Batch 6: owner copilot (R3.2) and cancellation feedback (R6)
 - **Copilot** (`src/copilot.js`):

@@ -1,4 +1,5 @@
 import { getStore } from '../stores/index.js';
+import { emergencyNotice, shouldSendNotice } from '../safety.js';
 import { LEAD_STATES, leadAction, leadText, leadOffer, leadSettings, topicSummary } from '../leads.js';
 import { reorderOffer, reorder, claimHandoff, forgetMemory, rememberFacts } from '../continuity.js';
 import { siteCartFor, siteCartMessage } from '../siteCart.js';
@@ -914,6 +915,8 @@ async function handleText(ctx, raw) {
   if (['clear cart', 'empty cart', 'clear basket'].includes(t)) return handleAction(ctx, 'clear');
   if (['browse', 'shop', 'products', 'catalog', 'catalogue', 'categories'].includes(t)) return handleAction(ctx, 'browse');
   if (/^(agent|human|staff|person|operator|speak to (a )?(human|person|someone|agent)|talk to (a )?(human|person|someone|agent))$/.test(t)) return handleAction(ctx, 'human');
+  // "can I speak to a real person please?" – a clear request for a human always reaches one (short messages only)
+  if (t.length <= 120 && /\b(speak|talk|chat) (to|with) (a |an |some ?one|your )?(real |actual |live )?(human|person|someone|somebody|agent|member of (staff|the team)|staff|manager|owner)\b|\b(real|actual|live) (human|person)\b/.test(t)) return handleAction(ctx, 'human');
   if (['stop', 'unsubscribe', 'opt out'].includes(t)) return handleAction(ctx, 'unsubscribe');
   if (['subscribe', 'start offers', 'offers'].includes(t)) return handleAction(ctx, 'subscribe');
   if (t === 'cancel') return handleAction(ctx, 'cancel');
@@ -993,6 +996,9 @@ export async function handleInbound(tenant, event, send) {
   if (event.kind === 'text') {
     const ownerReply = ownerCommand(tenant, conv.waId, event.text);
     if (ownerReply) { saveConversation(conv); await send(conv.waId, { type: 'text', text: ownerReply }).catch(() => {}); return [{ type: 'text', text: ownerReply }]; }
+    // gas leak / carbon monoxide / medical emergency: fixed safety advice first, whatever happens next (src/safety.js)
+    const notice = emergencyNotice(event.text);
+    if (notice && shouldSendNotice(conv.data, notice.key)) await ctx.reply({ type: 'text', text: notice.text });
   }
 
   // Coexistence: the owner just replied from the WhatsApp Business app – the AI (direct or Dify) stays quiet until the pause ends

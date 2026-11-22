@@ -36,14 +36,14 @@ Rules that apply to every item:
 | ID | Item | Status |
 |---|---|---|
 | R1.1 | Business Twin: show what was learnt, with source pages; flag uncertain or missing facts; real progress steps; keep the approved configuration when the demo is claimed | ⬜ |
-| R1.2 | Trade variants (plumber, electrician, heating, handyman, property maintenance) and beauty variants (hair, barber, beauty, nails) on top of the existing templates | ⬜ |
+| R1.2 | Trade variants (plumber, electrician, heating, handyman, property maintenance) and beauty variants (hair, barber, beauty, nails) on top of the existing templates | ✅ batch 7 |
 | R1.3 | Scripted demo scenarios (emergency plumber, photo, quote, service area, booking, human, follow-up) running through the real engine, with sample data labelled as such | ⬜ |
 
 ## Phase 2: AI receptionist
 
 | ID | Item | Status |
 |---|---|---|
-| R2.1 | Photo-to-quote: link the photo to the quote request; postcode and service-area check; urgency; owner approval by default | ⬜ |
+| R2.1 | Photo-to-quote: link the photo to the quote request; postcode and service-area check; urgency; owner approval by default | 🟡 service area ✅ batch 7; linking photos to quotes still to do |
 | R2.2 | Per-trade qualification rules (one question at a time) | ⬜ |
 | R2.3 | Booking: tests across the daylight-saving change, configurable buffers, staff or resource availability | ⬜ |
 | R2.4 | Follow-up engine: one log of automatic actions, a per-customer cap, quiet hours | ✅ batch 5 |
@@ -66,13 +66,12 @@ Rules that apply to every item:
 | R5 | Voice receptionist (compare providers first); Instagram and Messenger; light CRM pipeline; Zapier/Make/n8n; agency mode; multi-branch |
 | R6 | Plan entitlements made clear; usage page; optional setup fee; cancellation flow with a churn reason |
 | R7 | Marketing site repositioned (receptionist and sales assistant), trades/salon/ecommerce pages, no made-up claims, real case studies only |
-| R8 | AI evaluation suite (model, cost, latency, evidence recorded); repeatable load tests and benchmarks |
+| R8 | AI evaluation suite (model, cost, latency, evidence recorded): ✅ batch 8, plus the price guard and emergency notices; real-model run 🔒 on the server. Repeatable load tests and benchmarks: ⬜ |
 
 ## Next batches
 
-These need no outside credentials:
-1. **R1.2:** trade and beauty variants (plumber, electrician, heating, handyman, property maintenance, hair, barber, beauty, nails) on top of the existing templates.
-2. **R2.1:** link photos to quote requests; postcode and service-area check.
+1. **Deploy batches 1–8** as soon as the server answers again, using `scripts/deploy-vps.sh`. Then run `node src/cli/runEvals.js` on the server for the real-model evaluation.
+2. **R2.1 (rest):** link a customer's photo to their quote request, so the owner sees it on the draft.
 3. **R1.1:** Business Twin: show what the demo learnt, with source pages and uncertain facts.
 4. **R4:** simple owner navigation (Today, Conversations, Leads and Customers, Bookings and Quotes, Teach My AI, Results).
-5. **R8:** AI evaluation cases (prompt injection, invented prices, emergencies) run against a fake AI and, when configured, the real one.
+5. **R8 (rest):** repeatable load test (widget, first reply, webhook throughput) with measured results.
