@@ -6,7 +6,8 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 - **Last batch:** batch 11 (lead questions one at a time, scripted demo scenarios, booking availability, JSON logs), 22 November 2026.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
-- **Deploy:** ✅ **batch 10 deployed to wa.karatit.com on 22 November 2026** (server commit `e7f0fd2`; 333/334 tests in the image, 1 skipped; health ok; 14 businesses and 1,110 messages intact; `PRAGMA synchronous` = NORMAL live). Batches 1–9 were deployed earlier the same day (server commit `0e50038`), with `scripts/deploy-vps.sh`:
+- **Deploy:** ✅ **batch 11 deployed to wa.karatit.com on 22 November 2026** (server commit `a565f41`; 354/355 tests in the image, 1 skipped; health ok; `/examples` live with all six scenarios and no sample business left behind; new `chat_leads.answers`/`urgent` columns present; no business had any of the four default-on settings switched off; the 5 live businesses intact – the 2 fewer since batch 10 are unclaimed instant demos that expired and were cleaned up as designed).
+- **Earlier:** batch 10 deployed to wa.karatit.com on 22 November 2026** (server commit `e7f0fd2`; 333/334 tests in the image, 1 skipped; health ok; 14 businesses and 1,110 messages intact; `PRAGMA synchronous` = NORMAL live). Batches 1–9 were deployed earlier the same day (server commit `0e50038`), with `scripts/deploy-vps.sh`:
   - **Database snapshots:** taken first, in `/root/wa-backups/predeploy-20261122-*.db`.
   - **Tests:** run inside the Node 22 image.
   - **Health:** `/health` returned `{"ok":true,"jobs":"ok"}`.
