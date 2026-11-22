@@ -46,14 +46,14 @@ Rules that apply to every item:
 | R2.1 | Photo-to-quote: link the photo to the quote request; postcode and service-area check; urgency; owner approval by default | ⬜ |
 | R2.2 | Per-trade qualification rules (one question at a time) | ⬜ |
 | R2.3 | Booking: tests across the daylight-saving change, configurable buffers, staff or resource availability | ⬜ |
-| R2.4 | Follow-up engine: one log of automatic actions, a per-customer cap, quiet hours | ⬜ |
+| R2.4 | Follow-up engine: one log of automatic actions, a per-customer cap, quiet hours | ✅ batch 5 |
 
 ## Phase 3: owner experience
 
 | ID | Item | Status |
 |---|---|---|
 | R3.1 | **Opportunities** view: un-quoted requests, unanswered callbacks, unfinished bookings, gaps in the assistant's knowledge. Each shows its evidence and suggested actions. | ✅ batch 3 |
-| R3.2 | Owner copilot in the dashboard and owner WhatsApp: read-only answers straight away; any action needs confirmation; everything logged | ⬜ |
+| R3.2 | Owner copilot in the dashboard and owner WhatsApp: read-only answers straight away; any action needs confirmation; everything logged | ✅ batch 6 (read-only; actions still go through the normal screens) |
 | R3.3 | Natural-language automation drafts → checked against a fixed list of allowed steps → simulation → approval | ⬜ |
 | R3.4 | Verified answers: owner can see each answer's source and date; stale sources flagged | ✅ batch 4 (plus figure checks) |
 | R3.5 | Results dashboard: verified, attributed, estimated and opportunity figures kept apart, each traceable to its records | ✅ batch 4 |
@@ -71,8 +71,8 @@ Rules that apply to every item:
 ## Next batches
 
 These need no outside credentials:
-1. **R2.4:** follow-up engine guard rails: one log of every automatic message, a per-customer daily cap, quiet hours.
-2. **R3.2:** owner copilot in the dashboard. It gives read-only answers from real records ("what happened today", "who needs a callback").
-3. **R6:** cancellation flow that records a churn reason, plus the churn report.
-4. **R1.2:** trade and beauty variants (plumber, electrician, heating, barber, nails…) on top of the existing templates.
-5. **R2.1:** link photos to quote requests; postcode and service-area check.
+1. **R1.2:** trade and beauty variants (plumber, electrician, heating, handyman, property maintenance, hair, barber, beauty, nails) on top of the existing templates.
+2. **R2.1:** link photos to quote requests; postcode and service-area check.
+3. **R1.1:** Business Twin: show what the demo learnt, with source pages and uncertain facts.
+4. **R4:** simple owner navigation (Today, Conversations, Leads and Customers, Bookings and Quotes, Teach My AI, Results).
+5. **R8:** AI evaluation cases (prompt injection, invented prices, emergencies) run against a fake AI and, when configured, the real one.

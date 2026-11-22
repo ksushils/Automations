@@ -63,6 +63,7 @@ import { entitlements, staffSeatsLeft } from '../entitlements.js';
 import { listOpportunities, setOpportunityState } from '../opportunities.js';
 import { listAnswers, answerStats } from '../verified.js';
 import { automationLog } from '../outreach.js';
+import { askCopilot, SUGGESTIONS } from '../copilot.js';
 import { resultsBreakdown } from '../results.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
@@ -317,6 +318,26 @@ export function adminRouter() {
       res.json(out);
     } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
   });
+  r.get('/tenants/:tenantId/copilot', requireTenant, (req, res) => res.json({ suggestions: SUGGESTIONS }));
+  r.post('/tenants/:tenantId/copilot', requireTenant, (req, res) => {
+    const q = String(req.body?.question || '').trim().slice(0, 300);
+    if (!q) return res.status(400).json({ error: 'Ask a question' });
+    const out = askCopilot(req.tenant, q);
+    audit({ tenantId: req.tenant.id, actor: req.staff?.name || 'owner', role: req.role, action: 'copilot.ask', detail: { intent: out.intent }, ip: req.ip });
+    res.json(out);
+  });
+  const CHURN = ['too_expensive', 'not_enough_value', 'missing_feature', 'too_hard_to_set_up', 'ai_answers_not_good_enough', 'switching_tool', 'business_closed_or_paused', 'other'];
+  r.post('/tenants/:tenantId/churn-feedback', requireTenant, requireOwner, (req, res) => {
+    const reason = String(req.body?.reason || '');
+    if (!CHURN.includes(reason)) return res.status(400).json({ error: 'Choose a reason' });
+    getDb().prepare('INSERT INTO churn_feedback (tenant_id, reason, detail, plan) VALUES (?, ?, ?, ?)').run(req.tenant.id, reason, String(req.body?.detail || '').slice(0, 1000) || null, req.tenant.plan);
+    res.json({ ok: true });
+  });
+  r.get('/system/churn', requireSuper, (req, res) => res.json({
+    reasons: getDb().prepare("SELECT reason, COUNT(*) AS n FROM churn_feedback WHERE created_at > datetime('now', '-365 days') GROUP BY reason ORDER BY n DESC").all(),
+    recent: getDb().prepare('SELECT f.reason, f.detail, f.plan, f.created_at, t.name FROM churn_feedback f LEFT JOIN tenants t ON t.id = f.tenant_id ORDER BY f.id DESC LIMIT 50').all(),
+    subscriptions: getDb().prepare("SELECT COALESCE(subscription_status, 'none') AS status, COUNT(*) AS n FROM tenants GROUP BY 1").all(),
+  }));
   r.get('/tenants/:tenantId/automation-log', requireTenant, (req, res) => res.json({ settings: { maxPerDay: Number(req.tenant.settings.followUps?.maxPerDay) || 2, quietStart: req.tenant.settings.followUps?.quietStart ?? 21, quietEnd: req.tenant.settings.followUps?.quietEnd ?? 8, enabled: req.tenant.settings.followUps?.enabled !== false }, log: automationLog(req.tenant.id, { waId: req.query.waId ? String(req.query.waId) : undefined, limit: req.query.limit }) }));
   r.get('/tenants/:tenantId/answers', requireTenant, (req, res) => res.json({ stats: answerStats(req.tenant.id), answers: listAnswers(req.tenant.id, { flagged: req.query.flagged === '1', limit: req.query.limit }) }));
   r.get('/tenants/:tenantId/results', requireTenant, (req, res) => res.json(resultsBreakdown(req.tenant, req.query.month ? String(req.query.month) : undefined)));

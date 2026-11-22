@@ -416,6 +416,15 @@ CREATE TABLE IF NOT EXISTS automation_log (
 );
 CREATE INDEX IF NOT EXISTS idx_automation_log_cust ON automation_log(tenant_id, wa_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_automation_log_ref ON automation_log(tenant_id, kind, ref);
+-- why a business cancelled or is thinking of leaving (optional, asked before the billing portal)
+CREATE TABLE IF NOT EXISTS churn_feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  detail TEXT,
+  plan TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- Opportunities the owner resolved or snoozed (the items themselves are computed from live records)
 CREATE TABLE IF NOT EXISTS opportunity_state (
   tenant_id TEXT NOT NULL,

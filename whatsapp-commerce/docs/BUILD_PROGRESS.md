@@ -4,12 +4,35 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 4 (verified answers and the honest results view), 22 November 2026.
-- **Branch:** batches 1–4 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
+- **Last batch:** batch 6 (owner copilot and cancellation feedback), 22 November 2026.
+- **Branch:** batches 1–6 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** the owner approved deploying ("keep doing all the batches… you can deploy"). The deploy is **not done yet**: since the start of batch 2, the VPS (191.215.46.170) has not answered on SSH or HTTPS, while the rest of the internet works from here.
 - **How to deploy:** with `scripts/deploy-vps.sh` on the server. It snapshots the database, runs the tests inside the new image, checks `/health`, and rolls back automatically if anything fails.
-- **Tests:** 290 of 290 pass locally on Node 24. They run again inside the Node 22 image during the deploy.
+- **Tests:** 299 of 299 pass locally on Node 24. They run again inside the Node 22 image during the deploy.
 - **Live server:** still on commit `231ae4e`.
+
+## Batch 6: owner copilot (R3.2) and cancellation feedback (R6)
+- **Copilot** (`src/copilot.js`):
+  - It answers the owner's everyday questions straight from the records: what happened today, new leads, callbacks, quotes awaiting approval, tomorrow's appointments, complaints, questions the AI couldn't answer, the most common requests, and what to prioritise.
+  - **Read-only, and the answers are built by fixed rules** from database queries, so no AI writes the numbers. Anything else gets the list of questions it can answer.
+  - **Dashboard:** "Ask about your business" box at the top of Opportunities, for any team member. Every question is audited.
+  - **WhatsApp:** the team numbers saved in Settings can ask the same questions (through the existing owner commands). Customers asking the same question get the normal assistant and no business data; this is tested.
+- **Cancellation feedback:**
+  - The Billing tab has a "Thinking of cancelling?" link. It asks an optional reason (8 choices plus a note) before opening the Stripe billing page. "Skip" is just as prominent, with no pressure tactics.
+  - Answers are stored in `churn_feedback`. The platform owner sees them at `GET /api/system/churn` (reasons over 12 months, recent answers, and how many businesses are in each subscription status).
+- **Tests:** `test/copilot.test.js`, 5 tests.
+
+## Batch 5: follow-up guard rails (R2.4)
+- **Guard rails** (`src/outreach.js`). Every automatic message to a customer goes through one gate:
+  - **Off switch:** settings.followUps.enabled = false turns all optional follow-ups off.
+  - **No duplicates:** the same follow-up for the same record (order, quote, cart) is never sent twice.
+  - **Quiet hours:** default 21:00–08:00 in the business's own time zone. Messages wait and go in the morning.
+  - **Daily cap:** at most 2 automatic messages per customer in 24 hours (configurable).
+- **Covered so far:** abandoned carts, payment reminders, quote follow-ups, review requests and win-back. Back-in-stock alerts and the 24-hour lead follow-up email are logged but not held back, because the customer asked for them.
+- **Log:** every automatic message is recorded in `automation_log` as sent, held back (with the reason) or failed (with the error). Shown in the **Automatic messages** card on the Automations tab; kept 180 days.
+- **Bug fixed:** a quote follow-up that failed to send used to be counted as sent (the error was silently swallowed). Now it's logged as failed and not counted.
+- **Settings → Automatic follow-ups:** on/off, daily limit, quiet hours.
+- **Tests:** `test/outreach.test.js`, 4 tests. The shared test helper switches quiet hours off, so other tests don't depend on the time of day.
 
 ## Batch 4: verified answers and the results view (R3.4, R3.5)
 - **Verified answers** (`src/verified.js`):

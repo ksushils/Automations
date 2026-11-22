@@ -1,4 +1,5 @@
 import { getDb } from './db.js';
+import { askCopilot, copilotText, detectIntent } from './copilot.js';
 import { listTenants } from './tenants.js';
 import { createSender, notify } from './whatsapp/cloudApi.js';
 import { emailShop } from './email.js';
@@ -75,7 +76,9 @@ export function ownerCommand(tenant, waId, text) {
   const t = String(text || '').trim().toLowerCase();
   if (/^(briefing|today|summary|stats|report)$/.test(t)) return briefingText(tenant).text;
   if (/^(waiting|who'?s waiting|queue)$/.test(t)) return waitingText(tenant);
-  if (/^(owner|commands|owner help)$/.test(t)) return '🛠️ *Owner commands*\n• *briefing* – yesterday and what needs you\n• *waiting* – chats waiting for a person\n\nEverything else you send here is treated like a customer message, so you can test your assistant.';
+  // questions about the business ("which customers need callbacks?") – read-only answers from the records
+  if (/\?$|^(what|which|who|how many|any)\b/.test(t) && detectIntent(t)) return copilotText(askCopilot(tenant, text));
+  if (/^(owner|commands|owner help)$/.test(t)) return '🛠️ *Owner commands*\n• *briefing* – yesterday and what needs you\n• *waiting* – chats waiting for a person\n• ask a question, e.g. *which customers need callbacks?*, *what appointments are booked tomorrow?*, *what should I prioritise today?*\n\nEverything else you send here is treated like a customer message, so you can test your assistant.';
   return null;
 }
 

@@ -436,6 +436,20 @@ async function answersCard(flagged = false) {
   }));
 }
 
+// ---------- Owner copilot: questions answered from the business's own records (read-only) ----------
+async function copilotBox(lastQ, last) {
+  const box = await waitFor('#copilot'); if (!box) return;
+  const { suggestions } = await api(T('/copilot'));
+  box.innerHTML = `<h2>💬 Ask about your business</h2><p class="mute">Answers come straight from your own chats, leads, quotes, bookings and tickets. It only looks – it never sends or changes anything. Team numbers saved in Settings can ask the same questions on WhatsApp.</p>
+    <div style="display:flex;gap:6px"><input id="cpq" placeholder="e.g. Which customers need callbacks?" value="${esc(lastQ || '')}"><button class="btn" id="cpgo" style="width:auto">Ask</button></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${suggestions.map((s) => `<button class="btn ghost" data-cps="${esc(s)}" style="width:auto;font-size:13px;padding:4px 10px">${esc(s)}</button>`).join('')}</div>
+    ${last ? `<div style="margin-top:12px;padding:12px;background:var(--soft,#f5f7f6);border-radius:10px"><p style="margin:0">${esc(last.answer)}</p>${last.items.length ? `<ul style="margin:8px 0 0 18px;padding:0">${last.items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}</div>` : ''}`;
+  const ask = async (q) => { if (!q.trim()) return; try { copilotBox(q, await api(T('/copilot'), { method: 'POST', body: { question: q } })); } catch (e) { toast(e.message); } };
+  box.querySelector('#cpgo').onclick = () => ask(box.querySelector('#cpq').value);
+  box.querySelector('#cpq').onkeydown = (e) => { if (e.key === 'Enter') ask(e.target.value); };
+  box.querySelectorAll('[data-cps]').forEach((b) => (b.onclick = () => ask(b.dataset.cps)));
+}
+
 // ---------- Opportunities: what needs the business today, from its own records ----------
 async function opportunities(showAll = false) {
   const r = await api(T(`/opportunities${showAll ? '?all=1' : ''}`));
@@ -456,7 +470,8 @@ async function opportunities(showAll = false) {
     };
     return map[a] || '';
   };
-  $('#app').innerHTML = `<div class="card"><h2>🎯 Opportunities</h2><p class="mute">Customers and jobs that need you, found in your own chats, leads, quotes, bookings and tickets. ${esc(r.note)}</p>
+  setTimeout(() => copilotBox().catch(() => {}), 0);
+  $('#app').innerHTML = `<div class="card" id="copilot"></div><div class="card"><h2>🎯 Opportunities</h2><p class="mute">Customers and jobs that need you, found in your own chats, leads, quotes, bookings and tickets. ${esc(r.note)}</p>
     <p>${r.counts.total ? `<b>${r.counts.total}</b> to look at${r.counts.high ? ` · <b>${r.counts.high}</b> urgent` : ''}` : '✅ Nothing waiting right now.'} <a href="#" id="oall" style="margin-left:8px">${showAll ? 'Hide resolved and snoozed' : 'Show resolved and snoozed'}</a></p></div>
     ${r.items.map((o) => `<div class="card" style="border-left:4px solid ${o.priority === 'high' ? 'var(--warn,#c0392b)' : 'var(--line,#dfe5e1)'}">
       <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div>${pill[o.priority]} <b>${esc(o.title)}</b></div><span class="mute" style="font-size:13px">${age(o.ageMinutes)}${o.status !== 'open' ? ` · ${esc(o.status)}` : ''}</span></div>
@@ -1606,6 +1621,19 @@ async function billing() {
   $('#app').querySelectorAll('[data-topup]').forEach((x) => (x.onclick = async () => { try { location.href = (await api(T('/billing/topup'), { method: 'POST', body: { usd: Number(x.dataset.topup) } })).url; } catch (e) { toast(e.message); } }));
   $('#app').querySelectorAll('[data-plan]').forEach((x) => (x.onclick = async () => { try { location.href = (await api(T('/billing/checkout'), { method: 'POST', body: { plan: x.dataset.plan } })).url; } catch (e) { toast(e.message); } }));
   if ($('#portal')) $('#portal').onclick = async () => { try { location.href = (await api(T('/billing/portal'), { method: 'POST' })).url; } catch (e) { toast(e.message); } };
+  if ($('#portal') && b.subscription_status && !['canceled', 'trial_expired'].includes(b.subscription_status)) $('#portal').insertAdjacentHTML('afterend', ' <a href="#" id="leaving" class="mute" style="margin-left:10px">Thinking of cancelling?</a>');
+  if ($('#leaving')) $('#leaving').onclick = (e) => {
+    e.preventDefault();
+    const R = [['too_expensive', 'Too expensive'], ['not_enough_value', 'Not getting enough customers or value from it'], ['missing_feature', 'Missing a feature I need'], ['too_hard_to_set_up', 'Too hard to set up'], ['ai_answers_not_good_enough', 'The AI answers aren\'t good enough'], ['switching_tool', 'Moving to another tool'], ['business_closed_or_paused', 'My business is closing or pausing'], ['other', 'Something else']];
+    $('#leaving').outerHTML = `<div class="card" style="margin-top:10px"><h3>Before you go – what's the main reason? <span class="mute" style="font-weight:normal">(optional)</span></h3>
+      ${R.map(([k, l]) => `<label style="display:block;font-weight:normal"><input type="radio" name="churn" value="${k}" style="width:auto"> ${l}</label>`).join('')}
+      <textarea id="churnd" placeholder="Anything we could have done better? (optional)" style="margin-top:6px"></textarea>
+      <p><button class="btn ghost" id="churngo" style="width:auto">Send and continue to cancel</button> <button class="btn ghost" id="churnskip" style="width:auto">Skip – continue to cancel</button></p>
+      <p class="mute">You cancel on the billing page on the next screen, which shows exactly when your plan ends.</p></div>`;
+    const go = async () => { try { location.href = (await api(T('/billing/portal'), { method: 'POST' })).url; } catch (x) { toast(x.message); } };
+    $('#churngo').onclick = async () => { const r = document.querySelector('input[name=churn]:checked'); if (r) await api(T('/churn-feedback'), { method: 'POST', body: { reason: r.value, detail: $('#churnd').value } }).catch(() => {}); go(); };
+    $('#churnskip').onclick = go;
+  };
   billingExtras(b, history).catch(() => {});
 }
 
