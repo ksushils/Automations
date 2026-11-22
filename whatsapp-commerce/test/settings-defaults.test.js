@@ -14,6 +14,7 @@ test('settings form shows code-default-on switches as Yes', () => {
     'followUps.enabled': /followUps\?\.enabled !== false/.test(src('routes/admin.js')),
     'ordering.askNote': /askNote !== false/.test(src('bot/engine.js')),
     'notifications.storeTemplates.abandonedCheckout.requireMarketingConsent': /requireMarketingConsent !== false/.test(src('routes/storeWebhooks.js')),
+    'bookings.chooseStaff': /chooseStaff !== false/.test(src('bookings.js')),
   };
   for (const [p, on] of Object.entries(onInCode)) {
     assert.ok(on, `${p}: expected the code to treat it as on by default`);

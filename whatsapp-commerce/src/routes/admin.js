@@ -388,7 +388,7 @@ export function adminRouter() {
 
   // ----- automations from plain English (src/autoDraft.js): AI draft → server checks → try-out → owner approves -----
   r.get('/tenants/:tenantId/automation-drafts', requireTenant, (req, res) => res.json({ drafts: listDrafts(req.tenant.id), aiReady: directConfigured() }));
-  r.post('/tenants/:tenantId/automation-drafts', requireTenant, requireOwner, rateLimit({ windowMs: 3600000, max: 20 }), wrap(async (req, res) => { try { res.json({ draft: await createDraft(req.tenant, String(req.body?.text || '')) }); } catch (e) { res.status(e.status || 502).json({ error: e.status ? e.message : 'The AI could not draft this just now – please try again.' }); } }));
+  r.post('/tenants/:tenantId/automation-drafts', requireTenant, requireOwner, rateLimit({ windowMs: 3600000, max: 20 }), wrap(async (req, res) => { try { res.json({ draft: await createDraft(req.tenant, String(req.body?.text || ''), { editOf: req.body?.editOf ? Number(req.body.editOf) : null }) }); } catch (e) { res.status(e.status || 502).json({ error: e.status ? e.message : 'The AI could not draft this just now – please try again.' }); } }));
   r.post('/tenants/:tenantId/automation-drafts/:draftId/approve', requireTenant, requireOwner, (req, res) => {
     try { res.json(approveDraft(req.tenant, req.params.draftId, { by: req.isSuper ? 'platform' : 'owner' })); } catch (e) { res.status(e.status || 500).json({ error: e.message, issues: e.issues }); }
   });

@@ -3,7 +3,7 @@ import { getDb, json } from './db.js';
 import { createTenant, getTenant, updateTenantSettings, deleteTenant } from './tenants.js';
 import { chatCompletion, directConfigured, costMicro } from './ai/direct.js';
 import { bumpUsage } from './tenants.js';
-import { validateFlow, saveFlow, listFlows } from './bot/flows.js';
+import { validateFlow, saveFlow, listFlows, getFlow } from './bot/flows.js';
 import { createSender } from './whatsapp/cloudApi.js';
 import { handleInbound } from './bot/engine.js';
 import { sampleRun } from './sampleRun.js';
@@ -59,8 +59,8 @@ const clip = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const isShop = (S) => ['shopify', 'shopify_public', 'woocommerce', 'custom'].includes(S.store?.type) || (S.store?.type === 'manual' && (S.store?.manual?.products || []).length > 0);
 
 // ---------- 1. the AI writes a draft ----------
-export function draftPrompt(S, text, existingKeywords = []) {
-  return `You turn a UK small business owner's request into an automation for their WhatsApp and website chat assistant. Business: "${S.business?.name}"${TRADES[S.trade] ? ` (${TRADES[S.trade].label})` : ''}. ${isShop(S) ? 'It sells products in the chat.' : 'No online shop in the chat.'} ${S.bookings?.enabled ? 'Customers can book in the chat.' : 'No bookings in the chat.'}${existingKeywords.length ? ` Trigger words already used by other automations: ${existingKeywords.join(', ')}.` : ''}
+export function draftPrompt(S, text, existingKeywords = [], current = null) {
+  return `${current ? `The owner wants to CHANGE this existing automation (keep everything they didn't ask to change; reply with type "flow" and the WHOLE updated flow):\n${JSON.stringify({ name: current.name, triggers: { keywords: current.triggers.keywords, match: current.triggers.match }, steps: current.steps.map(({ x, y, ...st }) => st) })}\n\n` : ''}You turn a UK small business owner's request into an automation for their WhatsApp and website chat assistant. Business: "${S.business?.name}"${TRADES[S.trade] ? ` (${TRADES[S.trade].label})` : ''}. ${isShop(S) ? 'It sells products in the chat.' : 'No online shop in the chat.'} ${S.bookings?.enabled ? 'Customers can book in the chat.' : 'No bookings in the chat.'}${existingKeywords.length ? ` Trigger words already used by other automations: ${existingKeywords.join(', ')}.` : ''}
 
 The owner wrote: """${clip(text, 600)}"""
 
@@ -76,17 +76,34 @@ ${Object.entries(SETTINGS).filter(([, v]) => (!v.shop || isShop(S)) && (!v.booki
 C) if it needs anything else – messaging people who haven't written in (that is Campaigns, and needs their consent), sending data to other systems, payments, changing prices – reply {"type":"cannot","summary":"…","reason":"why, and where in the dashboard to do it instead"}.`;
 }
 
-export async function draftAutomation(tenant, text) {
+export async function draftAutomation(tenant, text, { editOf = null } = {}) {
   if (!directConfigured()) throw Object.assign(new Error("Drafting automations needs the AI, which isn't set up on this server yet."), { status: 503 });
   const ask = clip(text, 600);
   if (ask.length < 8) throw Object.assign(new Error('Describe the automation in a sentence or two.'), { status: 400 });
-  const kw = listFlows(tenant.id).filter((f) => f.active).flatMap((f) => f.triggers.keywords || []);
-  const r = await chatCompletion({ temperature: 0.2, maxTokens: 1400, messages: [{ role: 'user', content: draftPrompt(tenant.settings, ask, kw) }] });
+  const current = editOf ? getFlow(tenant.id, editOf) : null;
+  if (editOf && !current) throw Object.assign(new Error('That automation no longer exists.'), { status: 404 });
+  const kw = listFlows(tenant.id).filter((f) => f.active && f.id !== current?.id).flatMap((f) => f.triggers.keywords || []);
+  const r = await chatCompletion({ temperature: 0.2, maxTokens: 1400, messages: [{ role: 'user', content: draftPrompt(tenant.settings, ask, kw, current) }] });
   bumpUsage(tenant.id, 'ai_calls'); bumpUsage(tenant.id, 'ai_cost_micro', costMicro(r.usage));
   const raw = String(r.choices?.[0]?.message?.content || '').replace(/```(json)?/g, '');
   let j = null;
   try { j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)); } catch {}
-  return checkDraft(j, tenant.settings, { existingKeywords: kw });
+  const d = checkDraft(j, tenant.settings, { existingKeywords: kw });
+  if (current && d.type !== 'flow') return { ...d, ok: false, issues: [...d.issues, 'A change to an automation must stay an automation – nothing to apply.'] };
+  if (current) { d.editOf = current.id; d.editName = current.name; d.diff = flowDiff(current, d.flow); }
+  return d;
+}
+
+/** What changed, in plain words (trigger words, steps added/removed by their text). */
+export function flowDiff(before, after) {
+  const label = (s) => `${s.type}${s.text ? `: ${String(s.text).slice(0, 60)}` : s.action ? `: ${s.action}` : ''}`;
+  const a = new Set(before.steps.map(label)), b = new Set(after.steps.map(label));
+  const kwA = before.triggers.keywords || [], kwB = after.triggers.keywords || [];
+  return {
+    added: [...b].filter((x) => !a.has(x)), removed: [...a].filter((x) => !b.has(x)),
+    keywordsAdded: kwB.filter((k) => !kwA.includes(k)), keywordsRemoved: kwA.filter((k) => !kwB.includes(k)),
+    renamed: before.name !== after.name ? { from: before.name, to: after.name } : null,
+  };
 }
 
 // ---------- 2. the server checks it ----------
@@ -205,8 +222,8 @@ export const listDrafts = (tenantId) => getDb().prepare('SELECT value FROM kv WH
 export const discardDraft = (tenantId, id) => getDb().prepare('DELETE FROM kv WHERE key = ?').run(KEY(tenantId, String(id).replace(/[^a-f0-9]/g, '')));
 
 /** Create a draft from the owner's words: AI → checks → try-out. */
-export async function createDraft(tenant, text) {
-  const d = await draftAutomation(tenant, text);
+export async function createDraft(tenant, text, { editOf = null } = {}) {
+  const d = await draftAutomation(tenant, text, { editOf });
   let tryout = null;
   if (d.type === 'flow' && d.flow.steps.length && !validateFlow(d.flow).length && d.flow.triggers.keywords.length) tryout = await simulateFlow(tenant, d.flow);
   return saveDraft(tenant.id, { text: clip(text, 600), ...d, tryout, status: 'draft' });
@@ -216,11 +233,14 @@ export async function createDraft(tenant, text) {
 export function approveDraft(tenant, id, { by = 'owner' } = {}) {
   const rec = getDraft(tenant.id, id);
   if (!rec || rec.status !== 'draft') throw Object.assign(new Error('Draft not found (or already approved).'), { status: 404 });
-  const kw = listFlows(tenant.id).filter((f) => f.active).flatMap((f) => f.triggers.keywords || []);
+  const current = rec.editOf ? getFlow(tenant.id, rec.editOf) : null;
+  if (rec.editOf && !current) throw Object.assign(new Error('The automation this changes has been deleted.'), { status: 404 });
+  const kw = listFlows(tenant.id).filter((f) => f.active && f.id !== current?.id).flatMap((f) => f.triggers.keywords || []);
   if (rec.type === 'flow') {
     const again = checkDraft({ type: 'flow', summary: rec.summary, flow: rec.flow }, tenant.settings, { existingKeywords: kw });
     if (!again.ok) throw Object.assign(new Error(again.issues[0] || 'This draft no longer passes the checks.'), { status: 400, issues: again.issues });
-    const flow = saveFlow(tenant.id, { ...again.flow, active: true });
+    // a change keeps the automation's id, on/off state and canvas start; a new one is switched on
+    const flow = saveFlow(tenant.id, current ? { ...again.flow, id: current.id, active: current.active, triggers: { ...current.triggers, ...again.flow.triggers, start: null } } : { ...again.flow, active: true });
     saveDraft(tenant.id, { ...rec, status: 'approved', approvedAt: new Date().toISOString(), approvedBy: by, flowId: flow.id });
     return { type: 'flow', flow };
   }

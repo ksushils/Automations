@@ -4,7 +4,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 12 (automations from plain English, "To do now", named staff on bookings, salon and shop examples), 22 November 2026.
+- **Last batch:** batch 13 (choose your stylist, per-staff day view, lost-key recovery, change an automation in plain English), 22 November 2026.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** ✅ **batch 12 deployed to wa.karatit.com on 22 November 2026** (server commit `3a1c687`; 366/367 tests in the image, 1 skipped; health ok; `/examples` shows all 8; `bookings.staff` column present; 12 businesses and 1,060 messages unchanged; no business was affected by the Online-shop menu bug).
 - **Earlier:** batch 11 deployed to wa.karatit.com on 22 November 2026** (server commit `a565f41`; 354/355 tests in the image, 1 skipped; health ok; `/examples` live with all six scenarios and no sample business left behind; new `chat_leads.answers`/`urgent` columns present; no business had any of the four default-on settings switched off; the 5 live businesses intact – the 2 fewer since batch 10 are unclaimed instant demos that expired and were cleaned up as designed).
@@ -15,8 +15,19 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - **Data:** intact (14 businesses).
   - **Rollback:** `sh scripts/rollback-vps.sh`.
 - **First deploy attempts:** one merge conflict with the demo-engine branch (`server.js` imports; both kept), and a calendar test that was flaky under load (fixed). The script stopped safely each time before restarting anything.
-- **Tests:** 352 of 352 pass locally on Node 24 (batch 12). They run again inside the Node 22 image during the deploy.
+- **Tests:** 356 of 356 pass locally on Node 24 (batch 13). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
+
+## Batch 13: choose who (R2.3), lost key (R0.13), change an automation (R3.3)
+- **Customers choose who** (`src/bookings.js`): after picking a service that two or more staff do, the chat asks "Who would you like?" (Anyone, or a name). The times shown are that person's; the booking summary says "With: Amy" and the booking is recorded with them. If they're fully booked: "Anyone else" or talk to a person. A service only one person does skips the question. Settings → Bookings → "Let customers choose who" (on by default; listed in the default-on switches so Save never turns it off).
+- **Day view per member of staff** (Bookings tab, upcoming): a day picker and a table – times down the side, one column per person (plus "Not assigned"), each booking with the customer and whether it still needs confirming. Changing "With" on a booking checks the name is on the staff list.
+- **Lost admin key** (`src/recovery.js`; "Lost your key?" on the sign-in page): the owner types their sign-up email and gets a one-time link (30 minutes; only a hash is stored).
+  - Same answer whether or not the email is known; the email is sent in the background so the reply time doesn't give it away. Alert addresses (which may be staff) can't recover.
+  - Opening the link changes nothing (so email link scanners can't use it up); pressing the button makes a new admin key, shown once. The old key stops working; the Dify tool key and staff keys are untouched. A second email says the key was changed; both steps are in the audit log. Rate-limited.
+  - **Needs email (Resend) to be set up on the server** – until then the form says so plainly and the platform operator can reset a key.
+- **Change an automation in plain English:** in "Describe an automation", choose "Change ‹name›" and say what to change. The AI gets the current automation and returns the whole updated one, which goes through the same checks and try-out; the draft shows what was added and removed and any trigger-word changes. Approving updates that automation in place (same id, on/off state kept); its own trigger words don't count as a clash.
+- **Roadmap correction:** the plan usage page (Billing → "Your usage this month") and the cancellation reason were already built (batches 2 and 6) – R6 is marked accordingly.
+- **Tests:** `test/recovery.test.js` (2), staff choice in `booking-edge.test.js` (1), automation change in `auto-draft.test.js` (1), `chooseStaff` in `settings-defaults.test.js`. Full suite 356/356 locally. Checked in a browser on a local test copy: day view (Dan / Raj / Not assigned), changing "With" (saved; unknown name refused), "Lost your key?" (shows the email-not-set-up message).
 
 ## Batch 12: automations from plain English (R3.3), "To do now" (R4), named staff (R2.3), more examples (R1.3)
 - **Automations from plain English** (`src/autoDraft.js`; Automations tab → "✨ Describe an automation"): the owner writes what they want; the AI (one call) drafts either a chat flow, a change to the built-in follow-ups, or an honest "can't do that here – use Campaigns/…".

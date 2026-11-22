@@ -20,6 +20,7 @@ import { siteRouter } from './site.js';
 import { helpRouter } from './help.js';
 import { quotesRouter } from './quotes.js';
 import { installJsonLogs, requestLog } from './log.js';
+import { recoveryRouter } from './recovery.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +40,7 @@ export function createApp() {
   app.use(customDomainMiddleware());
   app.use(trackingRouter()); // /go/:code – counted links to the shop's own website
   app.use(helpRouter());
+  app.use(recoveryRouter()); // /recover – lost admin key: one-time link to the sign-up email
   app.use(quotesRouter()); // /q/<token> – the customer's quote page and PDF // /help/<shop> – each business's public help centre
   app.use(siteRouter()); // public website: /, /pricing, /takeaways, /whatsapp-cost-calculator, /demo, sitemap, robots
   app.use(publicRouter());

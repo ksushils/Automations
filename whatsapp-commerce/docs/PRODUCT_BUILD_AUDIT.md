@@ -39,7 +39,7 @@ Today nothing is **Verified**: no real Stripe, Resend or Meta account has been c
 | Usage alerts | Tested | 80% AI-budget warning to staff (`round3.test.js`) | Owner email at 80% and 100% of the message allowance | Low | P2 |
 | Email delivery (Resend) | **Tested (this batch)** | `email_log` table: records, retries with back-off, failure alerts, manual retry, purge | Live Resend key and verified domain | High | P0 |
 | Transactional vs marketing email | Partial | `kind` column on `email_log`. Marketing campaigns are WhatsApp-only, gated on consent (`src/consent.js`). | Marketing email isn't built (by design) | Low | P2 |
-| Account recovery | Missing | Login is by admin key; there are no passwords | Key-recovery-by-email flow | Medium | P1 |
+| Account recovery | Built (batch 13) | One-time email link to the sign-up address makes a new admin key (`src/recovery.js`, `test/recovery.test.js`) | Live Resend key so the link can actually be sent | Medium | P1 |
 | WhatsApp webhook signature and dedupe | Tested | `src/whatsapp/webhook.js`, `test/http.test.js`, `test/coexistence.test.js` | Live Meta app | High | P0 (Blocked) |
 | Message recovery after restart | Tested | `recoverUnprocessed` (on start-up and every 30 s), dead-letter list and retry | No | Medium | Done |
 | 24-hour window and templates | Tested | `test/whatsapp.test.js` | Live templates approved by Meta | Medium | Blocked |

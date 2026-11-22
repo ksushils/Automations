@@ -653,7 +653,7 @@ async function handleAction(ctx, id) {
     case 'more': return ctx.reply(moreMenu());
     case 'browse': if (bookingsOnly(ctx)) return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx); return showCategories(ctx);
     case 'book': return bookingsEnabled(ctx.S) ? bookingAction(ctx, 'bstart') : bookInfo(ctx);
-    case 'bstart': case 'bsvc': case 'bday': case 'btime': case 'bconfirm': case 'bcxl': case 'bdays': case 'bslot': case 'bmine': case 'bcal': case 'bresch':
+    case 'bstart': case 'bsvc': case 'bday': case 'btime': case 'bconfirm': case 'bcxl': case 'bdays': case 'bslot': case 'bmine': case 'bcal': case 'bresch': case 'bstaff': case 'bsoon':
       if (!bookingsEnabled(ctx.S) && !['bcxl', 'bmine', 'bcal'].includes(cmd)) return bookInfo(ctx);
       return bookingAction(ctx, cmd, arg);
     case 'ask': return ctx.reply({ type: 'text', text: 'Sure, type your question and I\'ll answer from our information. 🙂' });

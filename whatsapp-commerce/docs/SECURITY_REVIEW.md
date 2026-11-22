@@ -38,6 +38,7 @@ This review is based on reading the code and on automated tests. It is **not** a
 | `/health` reveals no internal details | `phase0.test.js` |
 | JSON logs (`LOG_FORMAT=json`) mask API keys, bearer tokens, Meta and Stripe secrets; token-like path parts become `:token`; query strings are never logged | `json-logs.test.js` |
 | Demo scenarios run on a throwaway sample business that can't send anything (no WhatsApp number, replies captured, email and AI skipped during the run) and is deleted after each run | `scenarios.test.js` (zero network calls with an AI key on) |
+| Lost-key recovery: one-time 30-minute link to the sign-up email only, hashed at rest, same reply (and timing) for unknown emails, key changed only on a button press (not on opening the link), old key revoked, owner notified, audit-logged, rate-limited | `recovery.test.js` |
 | Automation drafts from plain English: only allowed steps and settings survive the server checks (no webhooks, templates or messages to people who haven't written in); try-outs run on a throwaway copy that can't send anything; nothing goes live without the owner's approval, re-checked at approval | `auto-draft.test.js` |
 | Settings form no longer switches the abandoned-checkout consent rule (and three other default-on settings) off when the owner presses Save | `settings-defaults.test.js` |
 

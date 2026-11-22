@@ -77,3 +77,7 @@ This is how failure alerts reach you: failed emails, failing jobs, failed backup
 | What happens when a subscription is cancelled | Pause the assistant (current), or drop to the Free plan (keeps website chat running and keeps the customer) | Not decided |
 | Legal pages (terms, privacy, data processing agreement, sub-processors) | The templates exist; they need review by a UK solicitor before taking payment | Open |
 | AI provider data terms | Check OpenRouter's and the model providers' data retention and where data is stored, for the privacy notice | Open |
+
+## Lost-key recovery needs email
+
+"Lost your key?" on the sign-in page (batch 13) can only send its link once email (Resend: API key and a verified sending domain) is set up in Setup. Until then it tells owners to contact support, and you can reset a key from the super admin dashboard.

@@ -123,3 +123,34 @@ test('in the chat, a confirmed booking records who it is with', async () => {
   const b = getDb().prepare('SELECT staff, service FROM bookings WHERE tenant_id = ? AND wa_id = ?').get(t.id, wa);
   assert.deepEqual([b.service, b.staff], ['Cut', 'Amy']);
 });
+
+test('the customer can choose who: "Anyone" or a name; times shown are that person\'s; the booking records them', async () => {
+  const t = salon({ staff: [{ name: 'Amy', days: [] }, { name: 'Priya', days: [], services: ['Cut'] }], times: ['09:00', '10:00', '11:00'], days: 3 });
+  const tomorrow = new Date(Date.now() + 864e5).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  // Priya is booked all tomorrow morning
+  for (const tm of ['09:00', '10:00', '11:00']) getDb().prepare("INSERT INTO bookings (tenant_id, wa_id, service, day, time, starts_at, status, staff) VALUES (?, 'x', 'Cut', ?, ?, ?, 'confirmed', 'Priya')").run(t.id, tomorrow, tm, zonedToUtc(tomorrow, tm, 'Europe/London').toISOString());
+  const wa = '447700900953';
+  await say(t, wa, { action: 'book' });
+  let r = await say(t, wa, { action: 'bsvc:1' }); // Cut: Amy and Priya both do it
+  assert.match(JSON.stringify(r), /who would you like/i);
+  assert.deepEqual(ids(r), ['bstaff:any', 'bstaff:0', 'bstaff:1']);
+  r = await say(t, wa, { action: 'bstaff:1' }); // Priya
+  assert.ok(!ids(r).some((x) => x.startsWith(`bslot:${tomorrow}`)), "Priya's full day isn't offered");
+  const slot = ids(r).find((x) => x.startsWith('bslot:'));
+  if (slot) {
+    r = await say(t, wa, { action: slot });
+    if (!ids(r).includes('bconfirm')) r = await say(t, wa, 'Jo');
+    assert.match(JSON.stringify(r), /With: Priya/);
+    await say(t, wa, { action: 'bconfirm' });
+    assert.equal(getDb().prepare('SELECT staff FROM bookings WHERE tenant_id = ? AND wa_id = ?').get(t.id, wa).staff, 'Priya');
+  }
+  // a service only one person does: no question
+  const wb = '447700900954';
+  await say(t, wb, { action: 'book' });
+  assert.doesNotMatch(JSON.stringify(await say(t, wb, { action: 'bsvc:0' })), /who would you like/i, 'only Amy colours');
+  // the owner can switch the question off
+  tenants.updateTenantSettings(t.id, { bookings: { chooseStaff: false } });
+  const wc = '447700900955';
+  await say(tenants.getTenant(t.id), wc, { action: 'book' });
+  assert.doesNotMatch(JSON.stringify(await say(tenants.getTenant(t.id), wc, { action: 'bsvc:1' })), /who would you like/i);
+});

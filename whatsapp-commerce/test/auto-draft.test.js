@@ -13,7 +13,7 @@ async function withAi(answer, fn) {
   Object.assign(config, { aiBaseUrl: 'https://ai.test/v1', aiApiKey: 'sk-test', embeddingsModel: '' });
   const calls = { ai: 0, other: 0 };
   globalThis.fetch = async (url, o) => {
-    if (String(url).includes('/chat/completions')) { calls.ai++; return new Response(JSON.stringify({ choices: [{ message: { content: typeof answer === 'string' ? answer : JSON.stringify(answer) } }], usage: { total_tokens: 50, cost: 0.0004 } })); }
+    if (String(url).includes('/chat/completions')) { calls.ai++; const ans = typeof answer === 'function' ? answer() : answer; return new Response(JSON.stringify({ choices: [{ message: { content: typeof ans === 'string' ? ans : JSON.stringify(ans) } }], usage: { total_tokens: 50, cost: 0.0004 } })); }
     if (String(url).startsWith('http://127.0.0.1')) return prev.fetch(url, o);
     calls.other++; return new Response('{}');
   };
@@ -127,4 +127,29 @@ test('API: another business cannot draft; no AI = clear message', async () => {
     assert.ok(Array.isArray(list.drafts));
     void other;
   } finally { server.close(); }
+});
+
+test('change an existing automation in plain English: same automation updated (id, on/off kept), diff shown, its own trigger words are not a clash', async () => {
+  const t = makeTenant({ store: { type: 'none' } });
+  const old = saveFlow(t.id, { name: 'Prices', active: false, triggers: { keywords: ['prices'] }, steps: [{ id: 'a', type: 'message', text: 'Our team will send prices.' }, { id: 'b', type: 'end' }] });
+  const updated = { type: 'flow', summary: 'Also asks for the postcode first.', flow: { name: 'Prices', triggers: { keywords: ['prices', 'quote'] }, steps: [{ id: 'a', type: 'question', text: "What's your postcode?", save: 'postcode' }, { id: 'b', type: 'message', text: 'Our team will send prices.' }, { id: 'c', type: 'end' }] } };
+  let prompt = '';
+  await withAi(() => updated, async () => {
+    const prevFetch = globalThis.fetch;
+    globalThis.fetch = async (url, o) => { if (String(url).includes('/chat/completions')) prompt = JSON.parse(o.body).messages[0].content; return prevFetch(url, o); };
+    const d = await createDraft(tenants.getTenant(t.id), 'ask for their postcode before saying the team will send prices', { editOf: old.id });
+    globalThis.fetch = prevFetch;
+    assert.match(prompt, /CHANGE this existing automation/); assert.match(prompt, /Our team will send prices/);
+    assert.equal(d.ok, true, JSON.stringify(d.issues));
+    assert.equal(d.editOf, old.id);
+    assert.deepEqual(d.diff.keywordsAdded, ['quote']);
+    assert.ok(d.diff.added.some((x) => /postcode/.test(x)));
+    assert.equal(listFlows(t.id).length, 1);
+    approveDraft(tenants.getTenant(t.id), d.id);
+    const after = listFlows(t.id);
+    assert.equal(after.length, 1, 'changed in place, not added');
+    assert.equal(after[0].id, old.id);
+    assert.equal(after[0].active, false, 'still switched off, as the owner had it');
+    assert.equal(after[0].steps[0].type, 'question');
+  });
 });

@@ -88,17 +88,18 @@ function freeStaff(B, day, service, held, s, len, buf, { exceptId = null } = {})
   return free.length - unassigned > 0 ? free : [];
 }
 /** Give a new booking to a free member of staff who does the service (the one with the fewest bookings that day). */
-export function assignStaff(tenant, day, time, service, { exceptId = null } = {}) {
+export function assignStaff(tenant, day, time, service, { exceptId = null, prefer = null } = {}) {
   const B = tenant.settings.bookings || {};
   if (!staffList(B).length) return null;
   const held = heldRanges(tenant, day);
   const s = zonedToUtc(day, time, tz(tenant.settings)).getTime();
   const free = freeStaff(B, day, service, held, s, serviceMinutes(B, service) * 60000, Math.max(0, Number(B.bufferMinutes) || 0) * 60000, { exceptId });
   const load = (n) => held.filter((h) => h[2] === n).length;
+  if (prefer && free.includes(prefer)) return prefer; // the customer asked for them
   return free.sort((a, b) => load(a) - load(b))[0] || null;
 }
 /** Free times for one day (notice period, overlapping bookings, buffers, staff on that day, Google Calendar). */
-export function freeTimes(tenant, day, now = new Date(), { service = null } = {}) {
+export function freeTimes(tenant, day, now = new Date(), { service = null, staff = null } = {}) {
   const B = tenant.settings.bookings || {};
   const lead = (Number(B.leadHours) || 0) * 3600000;
   const cap = capacity(B, day, service);
@@ -109,12 +110,12 @@ export function freeTimes(tenant, day, now = new Date(), { service = null } = {}
   const held = heldRanges(tenant, day);
   return (B.times || []).map(startTime).filter((t) => /^\d{1,2}:\d{2}$/.test(t))
     .filter((t) => zonedToUtc(day, t, tz(tenant.settings)).getTime() >= now.getTime() + lead)
-    .filter((t) => { const s = zonedToUtc(day, t, tz(tenant.settings)).getTime(); return staffList(B).length ? freeStaff(B, day, service, held, s, len, buf).length > 0 : held.filter(([a, b]) => s < b && a < s + len + buf).length < cap; })
+    .filter((t) => { const s = zonedToUtc(day, t, tz(tenant.settings)).getTime(); return staffList(B).length ? (staff ? freeStaff(B, day, service, held, s, len, buf).includes(staff) : freeStaff(B, day, service, held, s, len, buf).length > 0) : held.filter(([a, b]) => s < b && a < s + len + buf).length < cap; })
     .filter((t) => { const s = zonedToUtc(day, t, tz(tenant.settings)).getTime(); return !isBusy(tenant.id, s, s + len); }); // Google Calendar busy times
 }
 
 /** Days (max 10, for a WhatsApp list) that still have a free time. */
-export function freeDays(tenant, now = new Date(), { max = 10, service = null } = {}) {
+export function freeDays(tenant, now = new Date(), { max = 10, service = null, staff = null } = {}) {
   const B = tenant.settings.bookings || {};
   const closed = new Set((B.closedDays || []).map(Number));
   const p = zonedParts(now, tz(tenant.settings));
@@ -123,22 +124,23 @@ export function freeDays(tenant, now = new Date(), { max = 10, service = null } 
     const d = new Date(Date.UTC(p.y, p.m - 1, p.d + i, 12));
     if (closed.has(d.getUTCDay())) continue;
     const ymd = d.toISOString().slice(0, 10);
-    const n = freeTimes(tenant, ymd, now, { service }).length;
+    const n = freeTimes(tenant, ymd, now, { service, staff }).length;
     if (n) out.push({ ymd, label: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayLabel(ymd), free: n });
   }
   return out;
 }
 
 const svcOf = (ctx) => ctx.conv?.data?.booking?.service || null;
+const slotOpts = (ctx) => ({ service: svcOf(ctx), staff: ctx.conv?.data?.booking?.staffPref || null });
 const services = (S) => (S.bookings?.services || []).filter((s) => s?.name).slice(0, 10);
 
 /** The soonest free slots, optionally only on one day and/or part of the day. */
-export function soonestSlots(tenant, { day = null, part = null, limit = 3, now = new Date(), service = null } = {}) {
+export function soonestSlots(tenant, { day = null, part = null, limit = 3, now = new Date(), service = null, staff = null } = {}) {
   const inPart = (t) => { const h = Number(t.split(':')[0]); return !part || (part === 'morning' ? h < 12 : part === 'afternoon' ? h >= 12 && h < 17 : h >= 17); };
-  const days = day ? [{ ymd: day }] : freeDays(tenant, now, { max: 30, service });
+  const days = day ? [{ ymd: day }] : freeDays(tenant, now, { max: 30, service, staff });
   const out = [];
   for (const d of days) {
-    for (const t of freeTimes(tenant, d.ymd, now, { service }).filter(inPart)) { out.push({ day: d.ymd, time: t }); if (out.length >= limit) return out; }
+    for (const t of freeTimes(tenant, d.ymd, now, { service, staff }).filter(inPart)) { out.push({ day: d.ymd, time: t }); if (out.length >= limit) return out; }
   }
   return out;
 }
@@ -182,11 +184,11 @@ export function parseWhen(text, { timeZone = 'Europe/London', now = new Date() }
 /** Times on offer for what they asked: that time, else that part of the day, else that day, else the nearest days. */
 function slotsFor(ctx, when) {
   const T = ctx.tenant;
-  if (when.day && when.time && freeTimes(T, when.day, undefined, { service: svcOf(ctx) }).includes(when.time)) return { exact: { day: when.day, time: when.time } };
-  let slots = soonestSlots(T, { service: svcOf(ctx), day: when.day, part: when.part, limit: 3 });
+  if (when.day && when.time && freeTimes(T, when.day, undefined, slotOpts(ctx)).includes(when.time)) return { exact: { day: when.day, time: when.time } };
+  let slots = soonestSlots(T, { ...slotOpts(ctx), day: when.day, part: when.part, limit: 3 });
   let note = '';
-  if (!slots.length && when.day) { slots = soonestSlots(T, { service: svcOf(ctx), part: when.part, limit: 3 }).filter((s) => s.day > when.day).concat(soonestSlots(T, { service: svcOf(ctx), part: when.part, limit: 3 })).slice(0, 3); note = `Sorry, ${dayLabel(when.day)}${when.part ? ` ${when.part}` : ''} is full. The nearest free times:`; }
-  if (!slots.length) { slots = soonestSlots(T, { service: svcOf(ctx), limit: 3 }); note = slots.length ? 'The nearest free times:' : ''; }
+  if (!slots.length && when.day) { slots = soonestSlots(T, { ...slotOpts(ctx), part: when.part, limit: 3 }).filter((s) => s.day > when.day).concat(soonestSlots(T, { ...slotOpts(ctx), part: when.part, limit: 3 })).slice(0, 3); note = `Sorry, ${dayLabel(when.day)}${when.part ? ` ${when.part}` : ''} is full. The nearest free times:`; }
+  if (!slots.length) { slots = soonestSlots(T, { ...slotOpts(ctx), limit: 3 }); note = slots.length ? 'The nearest free times:' : ''; }
   return { slots, note };
 }
 
@@ -205,7 +207,7 @@ export async function bookingFromText(ctx, text) {
 
 /** Website calendar data (a month grid in the chat widget); WhatsApp shows the same days as a list. */
 function dayPicker(ctx, text) {
-  const all = freeDays(ctx.tenant, new Date(), { max: 42, service: svcOf(ctx) });
+  const all = freeDays(ctx.tenant, new Date(), { max: 42, ...slotOpts(ctx) });
   return { type: 'list', text, button: 'Choose a day', sections: [{ title: 'Available days', rows: all.slice(0, 10).map((d) => ({ id: `bday:${d.ymd}`, title: d.label, description: `${d.free} time${d.free > 1 ? 's' : ''} free` })) }], calendar: { days: all.map((d) => ({ ymd: d.ymd, free: d.free })), idPrefix: 'bday:' } };
 }
 
@@ -277,7 +279,22 @@ export async function bookingAction(ctx, cmd, arg) {
     const svc = services(S)[Number(arg)];
     ctx.conv.data.booking = { service: svc?.name || null, deposit: Number(svc?.deposit) || 0 };
     if (draft.rescheduleOf) ctx.conv.data.booking.rescheduleOf = draft.rescheduleOf;
-    const soon = soonestSlots(ctx.tenant, { service: svcOf(ctx), limit: 2 });
+    const who = staffList(S.bookings || {}).filter((p) => !svc?.name || !Array.isArray(p.services) || !p.services.length || p.services.includes(svc.name)).map((p) => String(p.name));
+    if (who.length >= 2 && S.bookings?.chooseStaff !== false && !draft.rescheduleOf) {
+      ctx.conv.data.booking.staffOptions = who.slice(0, 9);
+      return ctx.reply({ type: 'list', text: `👤 ${svc ? `*${svc.name}* – w` : 'W'}ho would you like?`, button: 'Choose', sections: [{ title: 'Who', rows: [{ id: 'bstaff:any', title: 'Anyone', description: 'The first free time' }, ...who.slice(0, 9).map((n, i) => ({ id: `bstaff:${i}`, title: n.slice(0, 24) }))] }] });
+    }
+    return bookingAction(ctx, 'bsoon');
+  }
+  if (cmd === 'bstaff') {
+    const opts = draft.staffOptions || [];
+    draft.staffPref = arg === 'any' ? null : opts[Number(arg)] || null;
+    return bookingAction(ctx, 'bsoon');
+  }
+  if (cmd === 'bsoon') {
+    const svc = services(S).find((x) => x.name === draft.service) || null;
+    const soon = soonestSlots(ctx.tenant, { ...slotOpts(ctx), limit: 2 });
+    if (!soon.length && draft.staffPref) return ctx.reply({ type: 'buttons', text: `😔 ${draft.staffPref} is fully booked for now.`, buttons: [{ id: 'bstaff:any', title: 'Anyone else' }, { id: 'human', title: '🙋 Talk to a person' }] });
     if (!soon.length) return ctx.reply({ type: 'buttons', text: "😔 Sorry, we're fully booked for now. Our team can help find another time.", buttons: [{ id: 'human', title: '🙋 Talk to a person' }, { id: 'menu', title: '📋 Menu' }] });
     // the soonest times first (fewest taps), any other day on the calendar – or they can just type "Friday afternoon"
     return ctx.reply({ type: 'buttons', text: `📅 ${svc ? `*${svc.name}* – t` : 'T'}he next free times are below. Or type a day, e.g. _Friday afternoon_.`, buttons: [...soon.map((s) => ({ id: `bslot:${s.day}T${s.time}`, title: slotLabel(s, tz(ctx.S)) })), { id: 'bdays', title: '📅 Other day' }] });
@@ -285,7 +302,7 @@ export async function bookingAction(ctx, cmd, arg) {
   if (cmd === 'bdays') return ctx.reply(dayPicker(ctx, '📅 Which day suits you?'));
   if (cmd === 'bslot') {
     const [day, time] = String(arg).split('T');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !freeTimes(ctx.tenant, day, undefined, { service: svcOf(ctx) }).includes(time)) return ctx.reply({ type: 'buttons', text: 'Sorry, that time has just gone. Here are the next ones:', buttons: [...soonestSlots(ctx.tenant, { service: svcOf(ctx), limit: 2 }).map((s) => ({ id: `bslot:${s.day}T${s.time}`, title: slotLabel(s, tz(ctx.S)) })), { id: 'bdays', title: '📅 Other day' }] });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !freeTimes(ctx.tenant, day, undefined, slotOpts(ctx)).includes(time)) return ctx.reply({ type: 'buttons', text: 'Sorry, that time has just gone. Here are the next ones:', buttons: [...soonestSlots(ctx.tenant, { ...slotOpts(ctx), limit: 2 }).map((s) => ({ id: `bslot:${s.day}T${s.time}`, title: slotLabel(s, tz(ctx.S)) })), { id: 'bdays', title: '📅 Other day' }] });
     draft.day = day;
     return bookingAction(ctx, 'btime', time);
   }
@@ -299,13 +316,13 @@ export async function bookingAction(ctx, cmd, arg) {
     return bookingAction(ctx, 'bsvc', String(i >= 0 ? i : services(S).length ? 0 : ''));
   }
   if (cmd === 'bday') {
-    const times = /^\d{4}-\d{2}-\d{2}$/.test(arg) ? freeTimes(ctx.tenant, arg, undefined, { service: svcOf(ctx) }) : [];
+    const times = /^\d{4}-\d{2}-\d{2}$/.test(arg) ? freeTimes(ctx.tenant, arg, undefined, slotOpts(ctx)) : [];
     if (!times.length) return ctx.reply(dayPicker(ctx, 'Sorry, that day has just filled up. Which other day suits you?'));
     draft.day = arg;
     return ctx.reply({ type: 'list', text: `🕒 ${dayLabel(arg)} – what time?`, button: 'Choose a time', sections: [{ title: 'Free times', rows: times.slice(0, 10).map((t) => ({ id: `btime:${t}`, title: t })) }] });
   }
   if (cmd === 'btime') {
-    if (!draft.day || !freeTimes(ctx.tenant, draft.day, undefined, { service: svcOf(ctx) }).includes(arg)) return ctx.reply({ type: 'buttons', text: 'Sorry, that time has just gone. Please pick another.', buttons: [{ id: 'bstart', title: '📅 Pick again' }] });
+    if (!draft.day || !freeTimes(ctx.tenant, draft.day, undefined, slotOpts(ctx)).includes(arg)) return ctx.reply({ type: 'buttons', text: 'Sorry, that time has just gone. Please pick another.', buttons: [{ id: 'bstart', title: '📅 Pick again' }] });
     draft.time = arg;
     if (!ctx.customer.name || String(ctx.conv.waId).startsWith('web:')) {
       ctx.conv.state = 'booking_name';
@@ -336,7 +353,7 @@ export function bookingText(ctx, text) {
 function bookingSummary(ctx) {
   const b = ctx.conv.data.booking;
   const S = ctx.S;
-  const lines = [`📋 *Your booking*`, b.service ? `• ${b.service}` : '', `• ${whenText(b)}`, `• Name: ${b.name || ctx.customer.name}`, b.phone ? `• Phone: ${b.phone}` : '', b.deposit ? `• Deposit: ${money(b.deposit, sym(S))} (paid now by card, taken off the price)` : ''].filter(Boolean);
+  const lines = [`📋 *Your booking*`, b.service ? `• ${b.service}` : '', b.staffPref ? `• With: ${b.staffPref}` : '', `• ${whenText(b)}`, `• Name: ${b.name || ctx.customer.name}`, b.phone ? `• Phone: ${b.phone}` : '', b.deposit ? `• Deposit: ${money(b.deposit, sym(S))} (paid now by card, taken off the price)` : ''].filter(Boolean);
   ctx.reply({ type: 'buttons', text: `${lines.join('\n')}\n\nShall I book it?`, buttons: [{ id: 'bconfirm', title: b.deposit ? '✅ Book & pay' : '✅ Book it' }, { id: 'bstart', title: '🔁 Change' }, { id: 'menu', title: '❌ Cancel' }] });
   return true;
 }
@@ -344,14 +361,14 @@ function bookingSummary(ctx) {
 async function confirmDraft(ctx) {
   const b = ctx.conv.data.booking || {};
   const S = ctx.S;
-  if (!b.day || !b.time || !freeTimes(ctx.tenant, b.day, undefined, { service: svcOf(ctx) }).includes(b.time)) {
+  if (!b.day || !b.time || !freeTimes(ctx.tenant, b.day, undefined, slotOpts(ctx)).includes(b.time)) {
     return ctx.reply({ type: 'buttons', text: 'Sorry, that time has just been taken. Please pick another.', buttons: [{ id: 'bstart', title: '📅 Pick again' }] });
   }
   const stripeKey = S.payments?.stripe?.secretKey;
   const deposit = b.deposit && stripeKey ? b.deposit : 0;
   const status = deposit ? 'awaiting_deposit' : S.bookings?.autoConfirm ? 'confirmed' : 'requested';
   const startsAt = zonedToUtc(b.day, b.time, tz(S)).toISOString().replace('T', ' ').slice(0, 19);
-  const staff = assignStaff(ctx.tenant, b.day, b.time, b.service); // null when no staff are listed
+  const staff = assignStaff(ctx.tenant, b.day, b.time, b.service, { prefer: b.staffPref }); // null when no staff are listed
   const id = Number(getDb().prepare('INSERT INTO bookings (tenant_id, wa_id, name, service, day, time, starts_at, status, deposit, notes, staff) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(ctx.tenant.id, ctx.conv.waId, b.name || ctx.customer.name || null, b.service, b.day, b.time, startsAt, status, deposit, b.phone ? `Phone: ${b.phone}` : null, staff).lastInsertRowid);
   delete ctx.conv.data.booking;

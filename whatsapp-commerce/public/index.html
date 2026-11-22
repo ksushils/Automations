@@ -124,13 +124,21 @@ function loginView() {
     <p class="mute">Paste your key. That's all you need: the admin key you were given, your shop key (starts with <code>adm_</code>) or a team key (<code>stf_</code>).</p>
     <label>Your key</label><input id="lk" type="password" autocomplete="current-password" autofocus>
     <p><button class="btn" id="lb">Sign in</button></p><p class="mute" id="lerr"></p>
-    <p class="mute">No shop yet? <a href="/signup">Start a free trial</a></p></div>`;
+    <p class="mute"><a href="#" id="forgot">Lost your key?</a> · No shop yet? <a href="/signup">Start a free trial</a></p><div id="forgotbox"></div></div>`;
   const go = async () => {
     S.key = $('#lk').value.trim(); S.tenantId = null; S.tenant = null; S.tab = null; S.setupStep = null;
     if (!S.key) return;
     try { await boot(); store.set('wc_key', S.key); store.set('wc_tenant', S.tenantId); } catch (e) { $('#lerr').textContent = '⚠️ ' + e.message; }
   };
   $('#lb').onclick = go; $('#lk').onkeydown = (e) => e.key === 'Enter' && go();
+  $('#forgot').onclick = (e) => {
+    e.preventDefault();
+    $('#forgotbox').innerHTML = `<label>The email you signed up with</label><input id="fem" type="email" autocomplete="email"><p><button class="btn ghost" id="fgo">Email me a sign-in link</button></p><p class="mute" id="fmsg"></p>`;
+    $('#fgo').onclick = async () => {
+      const r = await fetch('/recover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: $('#fem').value.trim() }) }).then((x) => x.json()).catch(() => null);
+      $('#fmsg').textContent = r?.message || 'Please try again in a moment.';
+    };
+  };
 }
 
 async function boot() {
@@ -979,10 +987,23 @@ async function bookings() {
   $('#app').innerHTML = `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center"><h2 style="margin:0">📅 Bookings</h2>
       <div><button class="btn ${past ? 'ghost' : ''}" data-bp="0">Upcoming</button> <button class="btn ${past ? '' : 'ghost'}" data-bp="1">Past</button></div></div>
     <div id="gcalcard"></div>
+    ${team.length && !past ? '<div id="dayview"></div>' : ''}
     ${on ? '' : '<p class="mute">Bookings in the chat are off. Switch them on in Settings → Bookings in the chat: add your start times (and services), and customers can book by typing <b>book</b>.</p>'}
     <div class="tablewrap"><table><tr><th>When</th><th>Customer</th><th>Service</th>${team.length ? '<th>With</th>' : ''}<th>Status</th><th></th></tr>
     ${list.map((b) => `<tr><td><b>${esc(day(b))}</b> ${esc(b.time)}</td><td>${esc(b.name || '')}<div class="mute">${String(b.wa_id).startsWith('web:') ? 'website chat' : '+' + esc(b.wa_id)}</div></td><td>${esc(b.service || '–')}${b.deposit ? `<div class="mute">deposit ${sym}${Number(b.deposit).toFixed(2)} ${b.deposit_paid ? '✅ paid' : 'unpaid'}</div>` : ''}</td>${team.length ? `<td><select data-bstaff="${b.id}" style="width:auto"><option value="">Anyone</option>${team.map((n) => `<option ${b.staff === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}${b.staff && !team.includes(b.staff) ? `<option selected>${esc(b.staff)}</option>` : ''}</select></td>` : ''}<td>${pill[b.status] || esc(b.status)}${b.reminded_at ? '<div class="mute">reminded</div>' : ''}</td><td style="white-space:nowrap">${actions(b)}</td></tr>`).join('') || `<tr><td colspan="5" class="mute">No ${past ? 'past' : 'upcoming'} bookings</td></tr>`}</table></div></div>`;
   gcalCard();
+  if ($('#dayview')) {
+    const days = [...new Set(list.filter((b) => !['cancelled', 'no_show'].includes(b.status)).map((b) => b.day))].sort();
+    const draw = (d) => {
+      const rows = list.filter((b) => b.day === d && !['cancelled', 'no_show'].includes(b.status)).sort((a, b) => a.time.localeCompare(b.time));
+      const cols = [...team, ...(rows.some((b) => !b.staff || !team.includes(b.staff)) ? ['Not assigned'] : [])];
+      const times = [...new Set(rows.map((b) => b.time))];
+      $('#dayview').innerHTML = `<h3 style="margin:14px 0 6px">👥 Day view <select id="dvday" style="width:auto">${days.map((x) => `<option value="${x}" ${x === d ? 'selected' : ''}>${esc(day({ day: x }))}</option>`).join('')}</select></h3>
+        ${rows.length ? `<div class="tablewrap"><table><tr><th>Time</th>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>${times.map((tm) => `<tr><td><b>${esc(tm)}</b></td>${cols.map((c) => `<td>${rows.filter((b) => b.time === tm && (c === 'Not assigned' ? !b.staff || !team.includes(b.staff) : b.staff === c)).map((b) => `${esc(b.service || 'Booking')}<div class="mute">${esc(b.name || '')} ${b.status === 'requested' ? '· to confirm' : ''}</div>`).join('<hr style="border:0;border-top:1px solid var(--line)">') || '<span class="mute">–</span>'}</td>`).join('')}</tr>`).join('')}</table></div>` : '<p class="mute">No bookings that day.</p>'}`;
+      $('#dvday').onchange = (e) => draw(e.target.value);
+    };
+    if (days.length) draw(days[0]); else $('#dayview').innerHTML = '<p class="mute">👥 The day view per member of staff appears here once there are upcoming bookings.</p>';
+  }
   $('#app').querySelectorAll('[data-bstaff]').forEach((el) => (el.onchange = async () => { try { await api(T(`/bookings/${el.dataset.bstaff}/staff`), { method: 'POST', body: { staff: el.value } }); toast('Saved'); } catch (e) { toast(e.message); } }));
   $('#app').querySelectorAll('[data-bp]').forEach((b) => (b.onclick = () => { store.set('wc_bpast', b.dataset.bp === '1' ? '1' : null); bookings(); }));
   $('#app').querySelectorAll('[data-bs]').forEach((b) => (b.onclick = async () => {
@@ -1080,7 +1101,7 @@ async function catalogue() {
 // ---------- settings ----------
 // Yes/no settings the server treats as ON when they've never been set: the form must show them as Yes, or pressing
 // Save would quietly switch them off (keep in step with the "!== false" defaults in src/).
-const BOOL_DEFAULT_ON = ['report.weeklyDigest', 'report.monthlyEmail', 'report.unansweredEmail', 'leads.enabled', 'followUps.enabled', 'ordering.askNote', 'notifications.storeTemplates.abandonedCheckout.requireMarketingConsent'];
+const BOOL_DEFAULT_ON = ['report.weeklyDigest', 'report.monthlyEmail', 'report.unansweredEmail', 'leads.enabled', 'followUps.enabled', 'ordering.askNote', 'notifications.storeTemplates.abandonedCheckout.requireMarketingConsent', 'bookings.chooseStaff'];
 const FIELDS = [
   ['Business', [['business.name', 'Business name'], ['business.currency', 'Currency code (GBP)'], ['business.currencySymbol', 'Currency symbol'], ['business.welcomeMessage', 'Welcome message ({{name}} = first name)', 'textarea'], ['business.supportHours', 'Support hours'], ['business.exampleQuery', 'Example search shown to customers'], ['business.whatsappNumber', 'Public WhatsApp number (for storefront buttons, e.g. 447700900123)'], ['business.timezone', 'Timezone (e.g. Europe/London)'], ['business.tagline', 'Storefront tagline'], ['business.logoUrl', 'Logo image URL'], ['business.customDomain', 'Custom storefront domain (CNAME to this server)'], ['business.bookingUrl', 'Booking page (for "enquiries and bookings" shops)'], ['business.bookingButton', 'Menu button text (bookings shops), e.g. 🛒 How to buy'], ['business.bookingLinkText', 'Link button text (bookings shops), e.g. Shop now']]],
   ['WhatsApp Cloud API (Meta)', [['whatsapp.phoneNumberId', 'Phone number ID'], ['whatsapp.wabaId', 'WhatsApp Business Account ID'], ['whatsapp.accessToken', 'Permanent access token (System User)', 'secret'], ['whatsapp.appSecret', 'App secret (verifies webhook signatures)', 'secret'], ['whatsapp.verifyToken', 'Webhook verify token']]],
@@ -1094,7 +1115,7 @@ const FIELDS = [
   ['Service area', [['business.serviceAreas', 'Areas covered (comma: postcode areas like SW, SE1, CR0-CR4, or towns). Leave empty to skip the check', 'csv']]],
   ['Results', [['results.averageJobValue', 'Average job or order value (optional – only used for estimates, always labelled as estimates)', 'number']]],
   ['Notifications', [['notifications.alertEmails', 'Email order alerts to (comma; empty = your sign-up email)', 'csv'], ['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Webhook URL for new leads, bookings and orders (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number'], ['notifications.defaultCountryCode', 'Default country code for local numbers (44 = UK)']]],
-  ['Bookings in the chat', [['bookings.enabled', 'Take bookings in the chat (customers pick a day and time)', 'bool'], ['bookings.services', 'Services (JSON) – [{"name":"Test day","minutes":60,"price":120,"deposit":30}] (deposit needs Stripe)', 'json'], ['bookings.times', 'Start times (comma, e.g. 09:00,11:00,14:00)', 'csv'], ['bookings.days', 'Days ahead to offer (default 14)', 'number'], ['bookings.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum'], ['bookings.leadHours', 'Minimum notice (hours)', 'number'], ['bookings.perSlot', 'Bookings per time slot (default 1)', 'number'], ['bookings.bufferMinutes', 'Gap after each visit in minutes – travel or clean-down (default 0)', 'number'], ['bookings.staff', 'Staff (JSON, optional – when set, how many can be booked at once follows who works that day) – [{"name":"Amy","days":[1,2,3,4,5],"services":[],"away":["2026-12-24"]}] (days: 0 = Sunday … 6 = Saturday; services empty = any)', 'json'], ['bookings.autoConfirm', 'Confirm automatically (otherwise you confirm on the Bookings tab)', 'bool'], ['bookings.reminderHours', 'Reminder hours before (0 = off, default 24)', 'number'], ['bookings.reminderTemplate', 'Reminder template for customers outside the 24h window (vars: name, when, shop)'], ['bookings.rebookDays', '"Book again" message days after a visit (0 = off)', 'number'], ['bookings.rebookTemplate', '"Book again" template (approved marketing template, var: name)', ['bookings.secondReminderHours', 'Second reminder this many hours before (e.g. 2; empty = none)', 'number']]]],
+  ['Bookings in the chat', [['bookings.enabled', 'Take bookings in the chat (customers pick a day and time)', 'bool'], ['bookings.services', 'Services (JSON) – [{"name":"Test day","minutes":60,"price":120,"deposit":30}] (deposit needs Stripe)', 'json'], ['bookings.times', 'Start times (comma, e.g. 09:00,11:00,14:00)', 'csv'], ['bookings.days', 'Days ahead to offer (default 14)', 'number'], ['bookings.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum'], ['bookings.leadHours', 'Minimum notice (hours)', 'number'], ['bookings.perSlot', 'Bookings per time slot (default 1)', 'number'], ['bookings.bufferMinutes', 'Gap after each visit in minutes – travel or clean-down (default 0)', 'number'], ['bookings.chooseStaff', 'Let customers choose who (when two or more staff do the service)', 'bool'], ['bookings.staff', 'Staff (JSON, optional – when set, how many can be booked at once follows who works that day) – [{"name":"Amy","days":[1,2,3,4,5],"services":[],"away":["2026-12-24"]}] (days: 0 = Sunday … 6 = Saturday; services empty = any)', 'json'], ['bookings.autoConfirm', 'Confirm automatically (otherwise you confirm on the Bookings tab)', 'bool'], ['bookings.reminderHours', 'Reminder hours before (0 = off, default 24)', 'number'], ['bookings.reminderTemplate', 'Reminder template for customers outside the 24h window (vars: name, when, shop)'], ['bookings.rebookDays', '"Book again" message days after a visit (0 = off)', 'number'], ['bookings.rebookTemplate', '"Book again" template (approved marketing template, var: name)', ['bookings.secondReminderHours', 'Second reminder this many hours before (e.g. 2; empty = none)', 'number']]]],
   ['Google review requests', [['notifications.reviewRequest.enabled', 'Ask for a review after an order is delivered / completed', 'bool'], ['notifications.reviewRequest.url', 'Your Google review link (Google Business Profile → Ask for reviews)'], ['notifications.reviewRequest.afterHours', 'Hours after delivery', 'number'], ['notifications.reviewRequest.text', 'Message ({{name}} = first name, {{shop}} = shop name)', 'textarea'], ['notifications.reviewRequest.template', 'Template for customers outside the 24h window (vars: name, shop) – optional']]],
   ['Leads from the chat', [['leads.enabled', 'Offer "Email me details" and "Call me back" in the chat (after menu topics, and when the AI sees real interest)', 'bool'], ['leads.brochureUrl', 'Brochure link (PDF or page) – sent to people who ask for details'], ['leads.requirementPrompt', 'Question to ask about their requirements (default: anything in particular to discuss – what, dates, how many people)'], ['leads.qualify', 'Questions to ask, one at a time (one per line; add up to 2 tap-to-answer choices with |, and ! for urgent – e.g. "How soon? | !Today | This week"). Leave empty to use the ready-made questions for your trade', 'qualify'], ['leads.qualifyOff', 'Ask the single question above instead of the questions one at a time', 'bool'], ['leads.callbackPromise', 'What you promise after they leave details (default: Our team will be in touch within one working day.)'], ['leads.privacyUrl', 'Your privacy policy link (shown when asking for email or phone)']]],
   ['Keep your number (WhatsApp Business app)', [['coexistence.takeoverMinutes', 'When you reply from the WhatsApp Business app on your phone, the AI stays quiet in that chat for this many minutes (default 30)', 'number']]],
@@ -1153,33 +1174,34 @@ async function downloadCsv(kind) {
 async function autoDraftCard() {
   const box = $('#autodraft');
   if (!box) return;
-  const { drafts, aiReady } = await api(T('/automation-drafts'));
+  const [{ drafts, aiReady }, { flows: existing }] = await Promise.all([api(T('/automation-drafts')), api(T('/flows'))]);
   const owner = S.role === 'owner' || S.super;
   const bubble = (m) => m.from === 'customer' ? `<div style="text-align:right;margin:4px 0"><span style="display:inline-block;background:#128c4a;color:#fff;border-radius:10px;padding:5px 10px;max-width:80%">${esc(m.text)}</span></div>`
     : m.from === 'note' ? `<div class="mute" style="text-align:center;font-size:13px;margin:4px 0">⏱️ ${esc(m.text)}</div>`
     : `<div style="margin:4px 0"><span style="display:inline-block;background:var(--card,#fff);border:1px solid #dfe5e1;border-radius:10px;padding:5px 10px;max-width:80%;white-space:pre-wrap">${esc(m.text)}</span>${(m.choices || []).length ? `<div style="margin-top:3px">${m.choices.map((c) => `<span class="pill">${esc(c)}</span>`).join(' ')}</div>` : ''}</div>`;
   const draftHtml = (d) => `<div class="card" style="border-left:4px solid ${d.status === 'approved' ? '#128c4a' : d.ok ? '#d4a017' : '#b42318'}">
     <p class="mute" style="margin:0">“${esc(d.text)}”</p>
-    <h3 style="margin:6px 0">${d.status === 'approved' ? '✅ Switched on' : d.type === 'cannot' ? '🚫 Not something automations can do' : '📝 Draft – not live yet'}: ${esc(d.summary || '')}</h3>
+    <h3 style="margin:6px 0">${d.status === 'approved' ? (d.editOf ? '✅ Changed' : '✅ Switched on') : d.type === 'cannot' ? '🚫 Not something automations can do' : d.editOf ? `📝 Change to “${esc(d.editName || '')}” – not applied yet` : '📝 Draft – not live yet'}: ${esc(d.summary || '')}</h3>
+    ${d.diff ? `<p class="mute">${[d.diff.renamed ? `Renamed to “${esc(d.diff.renamed.to)}”` : '', d.diff.keywordsAdded.length ? `New trigger words: ${d.diff.keywordsAdded.map(esc).join(', ')}` : '', d.diff.keywordsRemoved.length ? `Trigger words removed: ${d.diff.keywordsRemoved.map(esc).join(', ')}` : ''].filter(Boolean).join(' · ')}</p>${d.diff.added.length ? `<p style="margin:4px 0"><b>Added:</b></p><ul style="margin:0">${d.diff.added.map((x) => `<li>➕ ${esc(x)}</li>`).join('')}</ul>` : ''}${d.diff.removed.length ? `<p style="margin:4px 0"><b>Removed:</b></p><ul style="margin:0">${d.diff.removed.map((x) => `<li>➖ ${esc(x)}</li>`).join('')}</ul>` : ''}` : ''}
     ${d.type === 'cannot' ? `<p>${esc(d.reason || '')}</p>` : ''}
     ${(d.issues || []).length ? `<ul style="margin:6px 0">${d.issues.map((x) => `<li>⚠️ ${esc(x)}</li>`).join('')}</ul>` : ''}
     ${d.type === 'flow' ? `<p><b>Starts when a customer types:</b> ${(d.flow.triggers.keywords || []).map((k) => `<span class="pill">${esc(k)}</span>`).join(' ')} <span class="mute">· ${d.flow.steps.length} steps</span></p>` : ''}
     ${d.tryout?.runs?.length ? `<details ${d.status === 'draft' ? 'open' : ''}><summary><b>Try-out</b> – played through the real assistant on a test copy of your business (nothing sent)</summary><div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">${d.tryout.runs.map((run, i) => `<div style="flex:1;min-width:240px;background:var(--bg,#f5f7f6);border-radius:10px;padding:8px"><div class="mute" style="font-size:12px">Path ${i + 1}</div>${run.map(bubble).join('')}</div>`).join('')}</div></details>` : ''}
     ${d.type === 'settings' && (d.changes || []).length ? `<table><tr><th>Setting</th><th>Now</th><th>After</th></tr>${d.changes.map((c) => `<tr><td>${esc(c.label)}</td><td>${esc(String(c.before ?? '–'))}</td><td><b>${esc(String(c.after))}</b></td></tr>`).join('')}</table>` : ''}
-    ${d.status === 'draft' && owner ? `<p>${d.ok ? `<button class="btn" data-adok="${d.id}">✅ Approve and switch on</button> ` : ''}<button class="btn ghost" data-addel="${d.id}">Discard</button></p>` : ''}
+    ${d.status === 'draft' && owner ? `<p>${d.ok ? `<button class="btn" data-adok="${d.id}">✅ ${d.editOf ? 'Approve the change' : 'Approve and switch on'}</button> ` : ''}<button class="btn ghost" data-addel="${d.id}">Discard</button></p>` : ''}
     ${d.status === 'approved' && d.type === 'flow' ? '<p class="mute">It\'s in the list below – edit or switch it off there.</p>' : ''}</div>`;
   box.innerHTML = `<div class="card"><h2>✨ Describe an automation</h2>
     <p class="mute">Say what you want in your own words – e.g. <i>“when someone types prices, ask which service and pass them to the team”</i> or <i>“remind people the day before their appointment and 2 hours before”</i>. You get a draft made only from safe, allowed steps, tried out on a test copy of your business. Nothing changes until you approve it.</p>
-    ${!aiReady ? '<p class="mute">⚠️ This needs the AI, which isn\'t set up on this server yet.</p>' : owner ? `<textarea id="adtext" maxlength="600" style="min-height:70px" placeholder="When someone…"></textarea><p><button class="btn" id="adgo">Draft it</button> <span id="admsg" class="mute"></span></p>` : '<p class="mute">Only the owner can create automations.</p>'}
+    ${!aiReady ? '<p class="mute">⚠️ This needs the AI, which isn\'t set up on this server yet.</p>' : owner ? `${existing.length ? `<label>What to do</label><select id="adedit" style="width:auto"><option value="">Make a new automation</option>${existing.map((f) => `<option value="${f.id}">Change “${esc(f.name)}”</option>`).join('')}</select>` : ''}<textarea id="adtext" maxlength="600" style="min-height:70px" placeholder="When someone…"></textarea><p><button class="btn" id="adgo">Draft it</button> <span id="admsg" class="mute"></span></p>` : '<p class="mute">Only the owner can create automations.</p>'}
   </div>${drafts.slice(0, 5).map(draftHtml).join('')}`;
   if ($('#adgo')) $('#adgo').onclick = async () => {
     const text = $('#adtext').value.trim();
     if (text.length < 8) return toast('Describe it in a sentence or two');
     $('#adgo').disabled = true; $('#admsg').textContent = 'Drafting and trying it out… (about 10 seconds)';
-    try { await api(T('/automation-drafts'), { method: 'POST', body: { text } }); await autoDraftCard(); } catch (e) { toast(e.message); $('#adgo').disabled = false; $('#admsg').textContent = ''; }
+    try { await api(T('/automation-drafts'), { method: 'POST', body: { text, editOf: $('#adedit')?.value || null } }); await autoDraftCard(); } catch (e) { toast(e.message); $('#adgo').disabled = false; $('#admsg').textContent = ''; }
   };
   box.querySelectorAll('[data-adok]').forEach((b) => (b.onclick = async () => {
-    try { await api(T(`/automation-drafts/${b.dataset.adok}/approve`), { method: 'POST', body: {} }); toast('Switched on'); if (S.tab === 'automations') automations(); } catch (e) { toast(e.message); }
+    try { await api(T(`/automation-drafts/${b.dataset.adok}/approve`), { method: 'POST', body: {} }); toast('Done'); if (S.tab === 'automations') automations(); } catch (e) { toast(e.message); }
   }));
   box.querySelectorAll('[data-addel]').forEach((b) => (b.onclick = async () => { await api(T(`/automation-drafts/${b.dataset.addel}`), { method: 'DELETE' }); autoDraftCard(); }));
 }
