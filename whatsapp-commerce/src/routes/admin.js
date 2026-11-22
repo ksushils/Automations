@@ -58,6 +58,8 @@ import { estimateCampaign, monthEstimate } from '../metaPricing.js';
 import { recordConsent, consentHistory, HAS_CONSENT_SQL } from '../consent.js';
 import { createTopupCheckout } from '../platform.js';
 import { billingHistory } from '../platform.js';
+import { checkConnection, connectionStatus, connectionBanner } from '../waHealth.js';
+import { entitlements, staffSeatsLeft } from '../entitlements.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
 import { systemStatus, backup, alert } from '../ops.js';
@@ -241,7 +243,7 @@ export function adminRouter() {
   r.delete('/tenants/:tenantId', requireSuper, (req, res) => { deleteTenant(req.params.tenantId, { force: true }); res.json({ ok: true }); });
 
   // ----- tenant scoped -----
-  r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant), role: req.role, staffName: req.staff?.name || null, banner: billingBanner(req.tenant.id) }));
+  r.get('/tenants/:tenantId', requireTenant, (req, res) => res.json({ tenant: view(req.tenant), role: req.role, staffName: req.staff?.name || null, banner: billingBanner(req.tenant.id) || connectionBanner(req.tenant.id) }));
 
   // ----- the shop owner's step-by-step guide -----
   r.get('/tenants/:tenantId/onboarding', requireTenant, requireOwner, (req, res) => res.json(onboardingStatus(req.tenant)));
@@ -303,6 +305,8 @@ export function adminRouter() {
 
   // ----- billing (your SaaS subscription) -----
   r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS, history: billingHistory(req.tenant.id) }));
+  r.get('/tenants/:tenantId/entitlements', requireTenant, (req, res) => res.json(entitlements(req.tenant)));
+  r.get('/tenants/:tenantId/whatsapp/connection', requireTenant, wrap(async (req, res) => res.json({ connection: req.query.refresh ? await checkConnection(req.tenant) : connectionStatus(req.tenant.id) })));
   // emails sent for this business (alerts, quotes, tickets, follow-ups): status only, never other businesses' mail
   r.get('/tenants/:tenantId/email-log', requireTenant, requireOwner, (req, res) => res.json({ configured: emailConfigured(), emails: emailLog({ tenantId: req.tenant.id, limit: 50 }) }));
   r.post('/tenants/:tenantId/billing/checkout', requireTenant, requireOwner, wrap(async (req, res) => {
@@ -331,7 +335,10 @@ export function adminRouter() {
 
   // ----- team (staff logins) -----
   r.get('/tenants/:tenantId/staff', requireTenant, requireOwner, (req, res) => res.json({ staff: listStaff(req.tenant.id), roles: ROLES }));
-  r.post('/tenants/:tenantId/staff', requireTenant, requireOwner, (req, res) => {
+  r.post('/tenants/:tenantId/staff', requireTenant, requireOwner, (req, res, next) => {
+    if (!req.isSuper && staffSeatsLeft(req.tenant) <= 0) return res.status(403).json({ error: `Your plan includes ${PLANS[req.tenant.plan]?.staffSeats} team member key(s). Remove one or upgrade to add more.` });
+    next();
+  }, (req, res) => {
     if (!req.body?.name) return res.status(400).json({ error: 'name required' });
     res.status(201).json({ ...createStaff(req.tenant.id, req.body), note: 'Give this key to the team member – it is shown once.' });
   });

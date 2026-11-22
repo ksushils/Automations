@@ -85,11 +85,29 @@ export function listBackups(dir = config.backupDir) {
 }
 
 // ---------- security headers ----------
+// The dashboard's full policy runs in report-only mode first: violations are counted (POST /csp-report) and shown in
+// System health. Once a few weeks pass with no unexpected reports, move it to the enforced header.
+export const CSP_REPORT_ONLY = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://connect.facebook.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https://*.facebook.com; frame-src https://*.facebook.com; media-src 'self' data: blob:; font-src 'self' data:; report-uri /csp-report";
+const CSP_SEEN = new Map();
+export function recordCspReport(body) {
+  const r = body?.['csp-report'] || (Array.isArray(body) ? body[0]?.body : body?.body) || body || {};
+  const dir = String(r['violated-directive'] || r.effectiveDirective || r['effective-directive'] || '?').slice(0, 60);
+  const blocked = String(r['blocked-uri'] || r.blockedURL || '?').replace(/\?.*$/, '').slice(0, 120);
+  const k = `${dir} ${blocked}`;
+  if (!CSP_SEEN.has(k) && CSP_SEEN.size < 200) console.warn('[csp report-only]', k);
+  CSP_SEEN.set(k, (CSP_SEEN.get(k) || 0) + 1);
+}
+export const cspReports = () => [...CSP_SEEN.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20).map(([k, n]) => ({ violation: k, count: n }));
+
 export function securityHeaders(req, res, next) {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.set('Permissions-Policy', 'camera=(), microphone=(self), geolocation=()');
   if (req.path.startsWith('/admin') || req.path.startsWith('/api')) res.set('X-Frame-Options', 'DENY');
+  if (req.path.startsWith('/admin')) {
+    res.set('Content-Security-Policy', "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+    res.set('Content-Security-Policy-Report-Only', CSP_REPORT_ONLY);
+  }
   if (config.publicUrl.startsWith('https://')) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   next();
 }
@@ -112,6 +130,7 @@ export function systemStatus() {
     backups: listBackups().slice(0, 5),
     offsiteBackup: (() => { try { return JSON.parse(getDb().prepare("SELECT value FROM kv WHERE key = 'backup:offsite'").get()?.value || 'null'); } catch { return null; } })(), // null = not set up yet
     jobs: jobHealth(),
+    cspReports: cspReports(),
     integrity: lastIntegrity,
     emails: (() => { const rows = d.prepare("SELECT status, COUNT(*) AS n FROM email_log WHERE created_at > datetime('now', '-7 days') GROUP BY status").all(); return Object.fromEntries(rows.map((r) => [r.status, Number(r.n)])); })(),
     billingWebhook: d.prepare('SELECT type, received_at FROM billing_events ORDER BY received_at DESC LIMIT 1').get() || null,

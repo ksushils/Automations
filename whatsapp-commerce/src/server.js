@@ -12,7 +12,7 @@ import { startJobs } from './jobs.js';
 import { publicRouter, customDomainMiddleware } from './routes/public.js';
 import { webRouter, rateLimit } from './routes/web.js';
 import { webchatRouter } from './routes/webchat.js';
-import { securityHeaders, installCrashAlerts, alert, backup, jobHealth } from './ops.js';
+import { securityHeaders, installCrashAlerts, alert, backup, jobHealth, recordCspReport } from './ops.js';
 import { getDb } from './db.js';
 import { loadPlatformSetup } from './platformSetup.js';
 import { trackingRouter } from './tracking.js';
@@ -30,6 +30,7 @@ export function createApp() {
   app.use(express.json({ limit: '15mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
   app.use(securityHeaders);
+  app.post('/csp-report', rateLimit({ max: 60 }), express.json({ type: ['application/csp-report', 'application/reports+json', 'application/json'], limit: '20kb' }), (req, res) => { recordCspReport(req.body); res.sendStatus(204); });
   app.get('/health', (req, res) => {
     try { getDb().prepare('SELECT 1').get(); const bad = jobHealth().filter((j) => j.state === 'failing' || j.state === 'stale').length; res.json({ ok: true, jobs: bad ? 'degraded' : 'ok' }); } catch (e) { res.status(503).json({ ok: false, error: 'database unavailable' }); }
   });

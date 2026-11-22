@@ -5,10 +5,10 @@ import { config } from './config.js';
 /** Plans you sell. Limits are per calendar month. null = unlimited. */
 export const PLANS = {
   // Free: do-it-yourself website chat (the AI sets it up from the website). No WhatsApp, no card, no trial end.
-  free: { label: 'Free', priceGbp: 0, monthlyConversationsIn: 100, aiCalls: 100, aiBudgetUsd: 1, knowledgeDocs: 15, broadcasts: false, whatsapp: false, badge: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom', 'none'] },
-  starter: { label: 'Starter', priceGbp: 29, monthlyConversationsIn: 1000, aiCalls: 300, aiBudgetUsd: 5, knowledgeDocs: 20, broadcasts: false, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom', 'none'] },
-  growth: { label: 'Growth', priceGbp: 79, monthlyConversationsIn: 5000, aiCalls: 3000, aiBudgetUsd: 20, knowledgeDocs: 100, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom', 'none'] },
-  pro: { label: 'Managed', priceGbp: 249, monthlyConversationsIn: null, aiCalls: 20000, aiBudgetUsd: 80, knowledgeDocs: 500, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom', 'none'] },
+  free: { label: 'Free', priceGbp: 0, monthlyConversationsIn: 100, aiCalls: 100, aiBudgetUsd: 1, knowledgeDocs: 15, staffSeats: 1, broadcasts: false, whatsapp: false, badge: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom', 'none'] },
+  starter: { label: 'Starter', priceGbp: 29, monthlyConversationsIn: 1000, aiCalls: 300, aiBudgetUsd: 5, knowledgeDocs: 20, staffSeats: 3, broadcasts: false, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom', 'none'] },
+  growth: { label: 'Growth', priceGbp: 79, monthlyConversationsIn: 5000, aiCalls: 3000, aiBudgetUsd: 20, knowledgeDocs: 100, staffSeats: 10, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom', 'none'] },
+  pro: { label: 'Managed', priceGbp: 249, monthlyConversationsIn: null, aiCalls: 20000, aiBudgetUsd: 80, knowledgeDocs: 500, staffSeats: 25, broadcasts: true, storeTypes: ['manual', 'shopify_public', 'shopify', 'woocommerce', 'custom', 'none'] },
 };
 
 export function defaultSettings(name) {

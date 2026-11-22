@@ -202,6 +202,13 @@ export function publicRouter() {
     html ? res.send(html) : res.sendStatus(404);
   });
 
+  // Resend (email provider) → delivered / bounced / complained, signed with Svix
+  r.post('/webhooks/resend', async (req, res) => {
+    const { handleResendEvent } = await import('../email.js');
+    const out = handleResendEvent(req.rawBody?.toString('utf8') || '', req.headers);
+    res.status(out.status).json({ received: out.status === 200 });
+  });
+
   // Your own SaaS billing (Stripe Billing subscriptions)
   r.post('/webhooks/platform-stripe', (req, res) => {
     try {

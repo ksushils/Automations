@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { config } from './config.js';
 import { getDb } from './db.js';
 import { alert } from './ops.js';
@@ -79,7 +80,42 @@ export async function sendEmail({ to, subject, text, html, replyTo, tenantId = n
     bodies ? (text == null ? null : String(text)) : null, bodies ? (html == null ? null : String(html)) : null, bodies && replyTo && isEmail(replyTo) ? replyTo : null, status, error).lastInsertRowid);
   if (!emailConfigured()) { const logId = rec('skipped', 'Email is not set up on this server'); return { ok: false, skipped: true, error: 'Email is not set up on this server', logId }; }
   if (!recipients.length) { const logId = rec('failed', 'No valid email address'); return { ok: false, error: 'No valid email address', logId }; }
+  // never keep mailing an address that bounced (90 days) or marked us as spam (ever)
+  if (recipients.length === 1 && suppressed(recipients[0])) { const logId = rec('failed', 'Not sent: this address bounced or reported spam before'); return { ok: false, suppressed: true, error: 'This address bounced or reported spam before', logId }; }
   return attemptEmail(rec('queued', null, true));
+}
+
+export function suppressed(addr) {
+  return !!getDb().prepare("SELECT 1 FROM email_log WHERE lower(to_addr) = lower(?) AND (status = 'complained' OR (status = 'bounced' AND updated_at > datetime('now', '-90 days'))) LIMIT 1").get(String(addr).trim());
+}
+
+/** Resend signs webhooks with Svix: base64 HMAC-SHA256 of "id.timestamp.body" with the base64 secret after "whsec_". */
+export function verifySvix(raw, headers, secret = config.resendWebhookSecret, now = Date.now()) {
+  const id = headers['svix-id'], ts = headers['svix-timestamp'], sig = headers['svix-signature'];
+  if (!secret || !id || !ts || !sig) return false;
+  if (!/^\d+$/.test(String(ts)) || Math.abs(now / 1000 - Number(ts)) > 300) return false;
+  const expected = crypto.createHmac('sha256', Buffer.from(String(secret).replace(/^whsec_/, ''), 'base64')).update(`${id}.${ts}.${raw}`).digest('base64');
+  return String(sig).split(' ').some((p) => { const [v, s] = p.split(','); return v === 'v1' && s && s.length === expected.length && crypto.timingSafeEqual(Buffer.from(s), Buffer.from(expected)); });
+}
+
+/** Resend webhook: delivered / bounced / complained → the email's record. Returns { status, note }. */
+export function handleResendEvent(raw, headers) {
+  if (!verifySvix(raw, headers)) return { status: 400, note: 'bad signature' };
+  let ev;
+  try { ev = JSON.parse(raw); } catch { return { status: 400, note: 'bad body' }; }
+  const providerId = ev?.data?.email_id;
+  if (!providerId) return { status: 200, note: 'no email id' };
+  const d = getDb();
+  const row = d.prepare('SELECT id, status, topic, kind, to_addr FROM email_log WHERE provider_id = ?').get(providerId);
+  if (!row) return { status: 200, note: 'unknown email' };
+  if (ev.type === 'email.delivered') d.prepare("UPDATE email_log SET delivered_at = COALESCE(delivered_at, datetime('now')), event = 'delivered' WHERE id = ?").run(row.id);
+  else if (ev.type === 'email.bounced') {
+    const why = ev.data.bounce?.message || ev.data.bounce?.subType || 'bounced';
+    d.prepare("UPDATE email_log SET status = 'bounced', event = 'bounced', error = ?, updated_at = datetime('now') WHERE id = ?").run(String(why).slice(0, 300), row.id);
+    if (row.status !== 'bounced') alert(`Email bounced (${row.topic || row.kind}, #${row.id}): ${why}`, { key: 'email-bounced' });
+  } else if (ev.type === 'email.complained') d.prepare("UPDATE email_log SET status = 'complained', event = 'complained', error = 'Recipient marked this email as spam', updated_at = datetime('now') WHERE id = ?").run(row.id);
+  else if (ev.type === 'email.delivery_delayed') d.prepare("UPDATE email_log SET event = 'delayed' WHERE id = ?").run(row.id);
+  return { status: 200, note: ev.type };
 }
 
 /** Background job: emails waiting for another try. */
@@ -103,13 +139,13 @@ export function emailLog({ tenantId, status, limit = 100 } = {}) {
   const where = [], args = [];
   if (tenantId !== undefined) { where.push('tenant_id = ?'); args.push(tenantId); }
   if (status) { where.push('status = ?'); args.push(status); }
-  return getDb().prepare(`SELECT id, tenant_id, kind, topic, to_addr, subject, status, attempts, error, next_try_at, created_at, updated_at FROM email_log ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT ?`).all(...args, Math.min(500, Number(limit) || 100));
+  return getDb().prepare(`SELECT id, tenant_id, kind, topic, to_addr, subject, status, attempts, error, next_try_at, delivered_at, created_at, updated_at FROM email_log ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY id DESC LIMIT ?`).all(...args, Math.min(500, Number(limit) || 100));
 }
 
 /** Last 7 days by status – for System health. */
 export function emailStats() {
   const rows = getDb().prepare("SELECT status, COUNT(*) AS n FROM email_log WHERE created_at > datetime('now', '-7 days') GROUP BY status").all();
-  return Object.fromEntries(['sent', 'retrying', 'failed', 'skipped', 'queued'].map((s) => [s, Number(rows.find((r) => r.status === s)?.n || 0)]));
+  return Object.fromEntries(['sent', 'retrying', 'failed', 'skipped', 'queued', 'bounced', 'complained'].map((s) => [s, Number(rows.find((r) => r.status === s)?.n || 0)]));
 }
 
 /** Super admin: put a failed / skipped email back in the queue and try now. */

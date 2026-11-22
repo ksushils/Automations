@@ -1520,7 +1520,14 @@ async function billing() {
 async function billingExtras(b, history) {
   const when = (s) => new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const em = await api(T('/email-log')).catch(() => null);
+  const ent = await api(T('/entitlements')).catch(() => null);
   let html = '';
+  if (ent) {
+    const bar = (l) => { if (l.included == null) return `<b>${l.used ?? 0}</b> <span class="mute">(unlimited)</span>`; const pc = Math.min(100, Math.round(((l.used || 0) / Math.max(1, l.included)) * 100)); return `<b>${l.used ?? 0}</b> of ${l.included.toLocaleString()} <div style="height:6px;background:var(--line,#e3e8e5);border-radius:3px;margin-top:4px"><div style="height:6px;width:${pc}%;border-radius:3px;background:${pc >= 90 ? 'var(--warn,#c0392b)' : 'var(--accent,#128c4a)'}"></div></div>`; };
+    html += `<div class="card"><h2>Your usage this month</h2><p class="mute">${esc(ent.label)} plan · counts reset on ${new Date(ent.resetsOn).toLocaleDateString('en-GB')}</p><div class="tablewrap"><table><tr><th>What</th><th>Used</th><th>If you go over</th></tr>${ent.limits.map((l) => `<tr><td>${esc(l.label)} <span class="mute" style="font-size:12px">${esc(l.unit)}</span></td><td style="min-width:150px">${bar(l)}</td><td class="mute" style="font-size:13px">${esc(l.overage)}</td></tr>`).join('')}</table></div>
+      <p class="mute" style="margin-top:8px">Included: ${ent.features.whatsapp ? 'WhatsApp ✓' : 'WhatsApp ✗ (upgrade)'} · ${ent.features.campaigns ? 'Campaigns ✓' : 'Campaigns ✗'}${ent.features.poweredByBadge ? ' · "Powered by" link shown in your chat' : ''}</p>
+      <p class="mute">${ent.external.map((x) => `<b>${esc(x.label)}:</b> ${esc(x.text)}`).join('<br>')}</p></div>`;
+  }
   if (b.payment_failed_at) html += `<div class="card"><h2>⚠️ Payment problem</h2><p>Your last payment didn't go through. ${b.graceEndsAt && Date.parse(b.graceEndsAt) > Date.now() ? `Your assistant keeps working until <b>${when(b.graceEndsAt)}</b>.` : 'Your assistant is paused until the payment goes through.'} Use <b>Manage billing, invoices & card</b> to update your card.</p></div>`;
   if (history.length) html += `<div class="card"><h2>Billing history</h2><div class="tablewrap"><table><tr><th>Date</th><th>What happened</th></tr>${history.map((h) => `<tr><td>${when(h.at)}</td><td>${esc(h.note || h.type)}</td></tr>`).join('')}</table></div><p class="mute">Invoices and receipts are in "Manage billing". WhatsApp (Meta) message fees are billed to you by Meta, separately from this plan.</p></div>`;
   if (em) {

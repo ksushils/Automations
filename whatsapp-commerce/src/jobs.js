@@ -104,6 +104,7 @@ export function startJobs() {
     track('trials', H1, () => log('billing: paused expired trials')(enforceTrials()));
     track('grace-periods', H1, () => log('billing: paused after grace period')(enforceGracePeriods()));
     track('retention', H1, () => log('retention')({ ...applyRetention(), emails: purgeEmailLog() }));
+    track('whatsapp-health', H1, () => import('./waHealth.js').then(({ runConnectionChecks }) => runConnectionChecks()).then(log('whatsapp health')));
     track('db-integrity', H1, () => { if (Date.now() - (globalThis.__integrityAt || 0) < 24 * H1) return 'skipped'; globalThis.__integrityAt = Date.now(); return integrityCheck(); });
     // keep knowledge bases in step with the shops' websites (weekly per shop, one shop per hour)
     track('kb-refresh', H1, () => import('./dify/provision.js').then(({ knowledgeChanged }) => runWeeklyRefresh({ onChange: (id) => knowledgeChanged(id) }))
