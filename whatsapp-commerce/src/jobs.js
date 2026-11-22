@@ -103,7 +103,7 @@ export function startJobs() {
     track('weekly-unanswered', H1, () => runWeeklyUnanswered().then(log('unanswered')));
     track('trials', H1, () => log('billing: paused expired trials')(enforceTrials()));
     track('grace-periods', H1, () => log('billing: paused after grace period')(enforceGracePeriods()));
-    track('retention', H1, () => log('retention')({ ...applyRetention(), emails: purgeEmailLog() }));
+    track('retention', H1, () => import('./verified.js').then(({ purgeAnswers }) => log('retention')({ ...applyRetention(), emails: purgeEmailLog(), answers: purgeAnswers() })));
     track('whatsapp-health', H1, () => import('./waHealth.js').then(({ runConnectionChecks }) => runConnectionChecks()).then(log('whatsapp health')));
     track('db-integrity', H1, () => { if (Date.now() - (globalThis.__integrityAt || 0) < 24 * H1) return 'skipped'; globalThis.__integrityAt = Date.now(); return integrityCheck(); });
     // keep knowledge bases in step with the shops' websites (weekly per shop, one shop per hour)

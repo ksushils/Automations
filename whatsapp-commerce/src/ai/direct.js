@@ -202,6 +202,11 @@ export async function directTurn(ctx, text) {
     break;
   }
   bumpUsage(ctx.tenant.id, 'ai_calls');
+  // keep the answer with the sources it was given, and check its figures against them (Verified answers)
+  try {
+    const { recordAnswer } = await import('../verified.js');
+    recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText: products.map((p) => `${p.title} ${money(p.price, sym)}`).join('\n'), model: model || 'default', latencyMs: Date.now() - startedAt });
+  } catch (e) { console.warn('[verified answers]', e.message); }
   let shown = products;
   if (agent) {
     const searched = (await import('../bot/state.js')).getConversation(ctx.tenant.id, ctx.conv.waId).data.lastSearch;

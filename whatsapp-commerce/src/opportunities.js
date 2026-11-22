@@ -80,7 +80,7 @@ export function listOpportunities(tenant, { now = Date.now(), includeClosed = fa
   }
 
   // 4. bookings: requests not confirmed; cancelled future slots that are free again
-  for (const b of d.prepare("SELECT * FROM bookings WHERE tenant_id = ? AND status IN ('requested', 'cancelled') AND starts_at > ? ORDER BY starts_at LIMIT 200").all(tid, new Date(now).toISOString())) {
+  for (const b of d.prepare("SELECT * FROM bookings WHERE tenant_id = ? AND status IN ('requested', 'cancelled') AND starts_at > ? ORDER BY starts_at LIMIT 200").all(tid, new Date(now).toISOString().replace('T', ' ').slice(0, 19))) {
     const when = `${b.day} ${b.time}`;
     if (b.status === 'requested') add({
       key: `booking_req:${b.id}`, type: 'booking_request', at: ts(b.created_at),

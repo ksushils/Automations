@@ -386,6 +386,22 @@ CREATE TABLE IF NOT EXISTS email_log (
 );
 CREATE INDEX IF NOT EXISTS idx_email_log_status ON email_log(status, next_try_at);
 CREATE INDEX IF NOT EXISTS idx_email_log_tenant ON email_log(tenant_id, id);
+-- every AI answer with the passages it was given and the deterministic checks (verified answers)
+CREATE TABLE IF NOT EXISTS answer_evidence (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  wa_id TEXT,
+  question TEXT,
+  answer TEXT NOT NULL,
+  sources TEXT NOT NULL DEFAULT '[]',
+  flags TEXT NOT NULL DEFAULT '[]',
+  unsupported TEXT NOT NULL DEFAULT '[]',
+  confidence TEXT,
+  model TEXT,
+  latency_ms INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_answer_evidence_tenant ON answer_evidence(tenant_id, id);
 -- Opportunities the owner resolved or snoozed (the items themselves are computed from live records)
 CREATE TABLE IF NOT EXISTS opportunity_state (
   tenant_id TEXT NOT NULL,

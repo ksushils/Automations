@@ -11,7 +11,7 @@ async function withServer(fn) {
   try { return await fn(`http://127.0.0.1:${server.address().port}`); } finally { server.close(); }
 }
 const ago = (min) => new Date(Date.now() - min * 60000).toISOString().replace('T', ' ').slice(0, 19);
-const ahead = (h) => new Date(Date.now() + h * 3600000).toISOString();
+const ahead = (h) => new Date(Date.now() + h * 3600000).toISOString().replace('T', ' ').slice(0, 19);
 
 function seed() {
   const { tenant, adminKey } = tenants.createTenant({ name: 'Radar Plumbing', plan: 'growth' });

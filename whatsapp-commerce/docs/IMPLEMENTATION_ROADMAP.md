@@ -21,13 +21,13 @@ Rules that apply to every item:
 | R0.5 | Tenant isolation tests: cross-business keys, IDOR, owner vs staff, static route guard | ✅ batch 1 |
 | R0.6 | Restore drill (local) | ✅ batch 1. Live drill 🔒 (needs a bucket) |
 | R0.7 | Stripe test-mode end-to-end with the Stripe CLI (`stripe listen`, `stripe trigger`) | 🔒 needs test keys |
-| R0.8 | Resend live check: verified domain, test send, bounce webhook → `email_log` | 🔒 needs key and domain. The bounce webhook itself is ⏳ buildable now. |
+| R0.8 | Resend live check: verified domain, test send, bounce webhook → `email_log` | Webhook ✅ batch 2. Live check 🔒 needs key and domain. |
 | R0.9 | Decide on SQLite and in-process jobs: **keep for now**. Revisit at about 50 active businesses, or if the job queue lags (overdue jobs > 0 for 10+ min) or `SQLITE_BUSY` errors appear. Move to a durable job table before a second process is added. | ✅ decision recorded |
-| R0.10 | WhatsApp connection health: daily token/number check per business, owner alert on expiry or disconnection, "approval pending" status | ⏳ next |
-| R0.11 | Content-Security-Policy header for the dashboard and public pages (report-only first) | ⏳ |
-| R0.12 | Entitlement audit: list every plan-gated feature and prove each is enforced on the server (campaigns, seats, knowledge docs, WhatsApp, badge) | ⏳ |
+| R0.10 | WhatsApp connection health: daily token/number check per business, owner alert on expiry or disconnection, "approval pending" status | ✅ batch 2 |
+| R0.11 | Content-Security-Policy header for the dashboard and public pages (report-only first) | ✅ batch 2 (dashboard: safe directives enforced, full policy report-only) |
+| R0.12 | Entitlement audit: list every plan-gated feature and prove each is enforced on the server (campaigns, seats, knowledge docs, WhatsApp, badge) | ✅ batch 2 (staff seats added; usage card) |
 | R0.13 | Key recovery for owners (email a one-time link to reset the admin key) | ⏳ (works fully once email is live) |
-| R0.14 | Scripted rollback (`docs/DEPLOY.md`: restore the pre-deploy snapshot, check out the previous commit) | ⏳ |
+| R0.14 | Scripted rollback (`docs/DEPLOY.md`: restore the pre-deploy snapshot, check out the previous commit) | ✅ batch 2 (`scripts/deploy-vps.sh`, `scripts/rollback-vps.sh`) |
 | R0.15 | Structured JSON logs (opt-in env flag) | ⬜ |
 | R0.16 | Rename the product away from "WhatsApp…" (Meta trademark) | 🔒 business decision |
 
@@ -52,11 +52,11 @@ Rules that apply to every item:
 
 | ID | Item | Status |
 |---|---|---|
-| R3.1 | **Opportunities** view: un-quoted requests, unanswered callbacks, unfinished bookings, gaps in the assistant's knowledge. Each shows its evidence and suggested actions. | ⬜ |
+| R3.1 | **Opportunities** view: un-quoted requests, unanswered callbacks, unfinished bookings, gaps in the assistant's knowledge. Each shows its evidence and suggested actions. | ✅ batch 3 |
 | R3.2 | Owner copilot in the dashboard and owner WhatsApp: read-only answers straight away; any action needs confirmation; everything logged | ⬜ |
 | R3.3 | Natural-language automation drafts → checked against a fixed list of allowed steps → simulation → approval | ⬜ |
-| R3.4 | Verified answers: owner can see each answer's source and date; stale sources flagged | ⬜ |
-| R3.5 | Results dashboard: verified, attributed, estimated and opportunity figures kept apart, each traceable to its records | ⬜ |
+| R3.4 | Verified answers: owner can see each answer's source and date; stale sources flagged | ✅ batch 4 (plus figure checks) |
+| R3.5 | Results dashboard: verified, attributed, estimated and opportunity figures kept apart, each traceable to its records | ✅ batch 4 |
 
 ## Phases 4–7
 
@@ -68,12 +68,11 @@ Rules that apply to every item:
 | R7 | Marketing site repositioned (receptionist and sales assistant), trades/salon/ecommerce pages, no made-up claims, real case studies only |
 | R8 | AI evaluation suite (model, cost, latency, evidence recorded); repeatable load tests and benchmarks |
 
-## Recommended next batch (batch 2)
+## Next batches
 
 These need no outside credentials:
-1. **R0.10:** WhatsApp connection health checks and owner alerts.
-2. **R0.12:** entitlement audit and tests.
-3. **R0.8 (code part):** Resend bounce/complaint webhook (signature checked) → `email_log`.
-4. **R0.11:** Content-Security-Policy, report-only first.
-5. **R0.14:** rollback script.
-6. **R3.1:** Opportunities view. It's high-value, and the data it needs already exists.
+1. **R2.4:** follow-up engine guard rails: one log of every automatic message, a per-customer daily cap, quiet hours.
+2. **R3.2:** owner copilot in the dashboard. It gives read-only answers from real records ("what happened today", "who needs a callback").
+3. **R6:** cancellation flow that records a churn reason, plus the churn report.
+4. **R1.2:** trade and beauty variants (plumber, electrician, heating, barber, nails…) on top of the existing templates.
+5. **R2.1:** link photos to quote requests; postcode and service-area check.

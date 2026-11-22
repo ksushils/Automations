@@ -61,6 +61,8 @@ import { billingHistory } from '../platform.js';
 import { checkConnection, connectionStatus, connectionBanner } from '../waHealth.js';
 import { entitlements, staffSeatsLeft } from '../entitlements.js';
 import { listOpportunities, setOpportunityState } from '../opportunities.js';
+import { listAnswers, answerStats } from '../verified.js';
+import { resultsBreakdown } from '../results.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
 import { systemStatus, backup, alert } from '../ops.js';
@@ -314,6 +316,8 @@ export function adminRouter() {
       res.json(out);
     } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
   });
+  r.get('/tenants/:tenantId/answers', requireTenant, (req, res) => res.json({ stats: answerStats(req.tenant.id), answers: listAnswers(req.tenant.id, { flagged: req.query.flagged === '1', limit: req.query.limit }) }));
+  r.get('/tenants/:tenantId/results', requireTenant, (req, res) => res.json(resultsBreakdown(req.tenant, req.query.month ? String(req.query.month) : undefined)));
   r.get('/tenants/:tenantId/entitlements', requireTenant, (req, res) => res.json(entitlements(req.tenant)));
   r.get('/tenants/:tenantId/whatsapp/connection', requireTenant, wrap(async (req, res) => res.json({ connection: req.query.refresh ? await checkConnection(req.tenant) : connectionStatus(req.tenant.id) })));
   // emails sent for this business (alerts, quotes, tickets, follow-ups): status only, never other businesses' mail

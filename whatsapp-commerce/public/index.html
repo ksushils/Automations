@@ -389,6 +389,42 @@ async function tenants() {
 }
 
 // ---------- overview ----------
+// ---------- Results: verified vs assisted vs estimated vs potential (Analytics tab) ----------
+async function resultsCard() {
+  const r = await api(T('/results'));
+  const sym = r.currencySymbol;
+  const row = (f) => `<tr><td>${esc(f.label)}</td><td>${f.count}</td><td>${f.value == null ? '–' : sym + Number(f.value).toFixed(2)}</td><td class="mute" style="font-size:13px">${esc(f.how)}${f.records.length ? ` <span title="Record ids: ${esc(f.records.slice(0, 50).join(', '))}">(${f.records.length} record${f.records.length === 1 ? '' : 's'})</span>` : ''}</td></tr>`;
+  const group = (title, g, extra = '') => `<h3 style="margin:16px 0 4px">${title}${g.total != null ? ` <span class="mute" style="font-weight:normal">· ${sym}${Number(g.total).toFixed(2)}</span>` : ''}</h3><p class="mute" style="margin:0 0 6px">${esc(g.note)}</p>${g.figures.length ? `<div class="tablewrap"><table><tr><th>What</th><th>How many</th><th>Value</th><th>How it's worked out</th></tr>${g.figures.map(row).join('')}</table></div>` : ''}${extra}`;
+  const box = await waitFor('#resultsbox'); if (!box) return;
+  box.className = 'card';
+  box.innerHTML = `<h2>📈 Results for ${esc(r.month)}</h2><p class="mute">Four separate groups, so nothing estimated is ever counted as money earned. Every number links back to the records it came from.</p>
+    ${group('✅ Verified – completed and recorded', r.verified)}${group('🤝 Assisted – the assistant helped, outcome not proven', r.assisted)}${group('🧮 Estimated', r.estimated)}${group('🎯 Potential – still open', r.potential)}`;
+}
+async function waitFor(sel, ms = 6000) { for (let t = 0; t < ms; t += 100) { const el = document.querySelector(sel); if (el) return el; await new Promise((r) => setTimeout(r, 100)); } return null; }
+
+// ---------- Verified answers: what the AI said and which of your sources backed it (Knowledge tab) ----------
+async function answersCard(flagged = false) {
+  const r = await api(T(`/answers?limit=30${flagged ? '&flagged=1' : ''}`));
+  const FLAG = { no_source: 'No source found', weak_support: 'Sources barely match', unsupported_figures: 'Figure not in your information', stale_source: 'Source not checked for 90+ days' };
+  const when = (s) => new Date(s).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const box = await waitFor('#answersbox'); if (!box) return;
+  box.className = 'card';
+  const s = r.stats;
+  box.innerHTML = `<h2>🔎 Verified answers</h2><p class="mute">The assistant's recent answers, the sources from your own information it was given, and automatic checks. Last 30 days: ${s.answers} answers · ${s.unsupportedFigures} with a figure not found in your information · ${s.noSource} with no source · ${s.staleSource} using an old source.</p>
+    <p><a href="#" id="ansflag">${flagged ? 'Show all answers' : 'Show only answers that need checking'}</a></p>
+    ${r.answers.length ? r.answers.map((a) => `<details style="border-top:1px solid var(--line);padding:8px 0"><summary><b>${esc(a.question.slice(0, 120))}</b> <span class="mute" style="font-size:12px">${when(a.at)}</span> ${a.flags.map((f) => `<span class="pill warn">${esc(FLAG[f] || f)}</span>`).join(' ') || '<span class="pill">Backed by your information</span>'}</summary>
+      <p style="white-space:pre-wrap;margin:8px 0">${esc(a.answer)}</p>
+      ${a.unsupported.length ? `<p class="pill warn" style="display:inline-block">Not found in your information: ${esc(a.unsupported.join(', '))}</p>` : ''}
+      ${a.sources.length ? `<div class="tablewrap"><table><tr><th>Source</th><th>Match</th><th>Last checked</th><th>Passage</th></tr>${a.sources.map((x) => `<tr><td>${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.doc)}</a>` : esc(x.doc)}</td><td>${Math.round(x.support * 100)}%${x.figures.length ? ` · ${esc(x.figures.join(', '))}` : ''}</td><td>${x.lastChecked ? new Date(x.lastChecked).toLocaleDateString('en-GB') : '–'}${x.stale ? ' <span class="pill warn">old</span>' : ''}</td><td class="mute" style="font-size:12px">${esc(x.excerpt)}</td></tr>`).join('')}</table></div>` : '<p class="mute">No source was found for this question.</p>'}
+      <div style="display:flex;gap:6px;margin-top:6px"><input placeholder="Correct answer (teaches the assistant)" data-fixq="${esc(a.question)}" style="flex:1"><button class="btn ghost" data-fixbtn style="width:auto">Save correction</button></div></details>`).join('') : '<p class="mute">No AI answers recorded yet. They appear here as customers chat.</p>'}`;
+  box.querySelector('#ansflag').onclick = (e) => { e.preventDefault(); answersCard(!flagged); };
+  box.querySelectorAll('[data-fixbtn]').forEach((b) => (b.onclick = async () => {
+    const inp = b.previousElementSibling;
+    if (!inp.value.trim()) return toast('Write the correct answer first');
+    try { await api(T('/teach'), { method: 'POST', body: { question: inp.dataset.fixq, answer: inp.value.trim() } }); toast('Saved – the assistant uses this answer from now on'); inp.value = ''; } catch (e) { toast(e.message); }
+  }));
+}
+
 // ---------- Opportunities: what needs the business today, from its own records ----------
 async function opportunities(showAll = false) {
   const r = await api(T(`/opportunities${showAll ? '?all=1' : ''}`));
@@ -968,6 +1004,7 @@ const FIELDS = [
   ['Promo codes & delivery zones', [['ordering.promoCodes', 'Promo codes (JSON) – [{"code":"WELCOME10","type":"percent|fixed|free_delivery","value":10,"minSpend":0,"expires":"2026-12-31","maxUses":0,"oncePerCustomer":true}]', 'json'], ['ordering.deliveryZones', 'Delivery zones (JSON, empty = deliver anywhere) – [{"name":"Central London","postcodes":["SW1","W1","EC"],"fee":3.5,"minOrder":15,"freeOver":50}]', 'json']]],
   ['Delivery / collection time slots', [['ordering.slots.enabled', 'Ask customers to pick a time slot', 'bool'], ['ordering.slots.times', 'Time windows (comma, e.g. 10:00-12:00,14:00-16:00)', 'csv'], ['ordering.slots.days', 'Days ahead to offer', 'number'], ['ordering.slots.leadHours', 'Minimum notice (hours)', 'number'], ['ordering.slots.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum']]],
   ['Card payments (Stripe – built-in catalogue & custom stores)', [['payments.stripe.secretKey', 'Stripe secret key (sk_live_… / rk_live_…)', 'secret'], ['payments.stripe.webhookSecret', 'Stripe webhook signing secret (whsec_…)', 'secret']]],
+  ['Results', [['results.averageJobValue', 'Average job or order value (optional – only used for estimates, always labelled as estimates)', 'number']]],
   ['Notifications', [['notifications.alertEmails', 'Email order alerts to (comma; empty = your sign-up email)', 'csv'], ['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Webhook URL for new leads, bookings and orders (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number'], ['notifications.defaultCountryCode', 'Default country code for local numbers (44 = UK)']]],
   ['Bookings in the chat', [['bookings.enabled', 'Take bookings in the chat (customers pick a day and time)', 'bool'], ['bookings.services', 'Services (JSON) – [{"name":"Test day","minutes":60,"price":120,"deposit":30}] (deposit needs Stripe)', 'json'], ['bookings.times', 'Start times (comma, e.g. 09:00,11:00,14:00)', 'csv'], ['bookings.days', 'Days ahead to offer (default 14)', 'number'], ['bookings.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum'], ['bookings.leadHours', 'Minimum notice (hours)', 'number'], ['bookings.perSlot', 'Bookings per time slot (default 1)', 'number'], ['bookings.autoConfirm', 'Confirm automatically (otherwise you confirm on the Bookings tab)', 'bool'], ['bookings.reminderHours', 'Reminder hours before (0 = off, default 24)', 'number'], ['bookings.reminderTemplate', 'Reminder template for customers outside the 24h window (vars: name, when, shop)'], ['bookings.rebookDays', '"Book again" message days after a visit (0 = off)', 'number'], ['bookings.rebookTemplate', '"Book again" template (approved marketing template, var: name)', ['bookings.secondReminderHours', 'Second reminder this many hours before (e.g. 2; empty = none)', 'number']]]],
   ['Google review requests', [['notifications.reviewRequest.enabled', 'Ask for a review after an order is delivered / completed', 'bool'], ['notifications.reviewRequest.url', 'Your Google review link (Google Business Profile → Ask for reviews)'], ['notifications.reviewRequest.afterHours', 'Hours after delivery', 'number'], ['notifications.reviewRequest.text', 'Message ({{name}} = first name, {{shop}} = shop name)', 'textarea'], ['notifications.reviewRequest.template', 'Template for customers outside the 24h window (vars: name, shop) – optional']]],
@@ -1383,6 +1420,7 @@ async function shopGuide(t) {
 
 // ---------- knowledge base ----------
 async function knowledge() {
+  answersCard().catch(() => {});
   const k = await api(T('/knowledge'));
   const owner = S.role === 'owner';
   const badge = { pending: '⏳ waiting', indexing: '🔄 learning', ready: '✅ ready', error: '⚠️ error', to_delete: '🗑️ removing' };
@@ -1400,7 +1438,7 @@ async function knowledge() {
     ${L?.changedPages?.length ? `<details><summary class="mute">What changed</summary><ul class="mute">${L.changedPages.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
     ${owner ? `<p><button class="btn ghost" id="krefresh" ${rf.running ? 'disabled' : ''}>Re-read my website now</button>
       <label style="display:inline-flex;gap:6px;align-items:center;margin-left:10px;color:var(--ink)"><input type="checkbox" id="kauto" style="width:auto" ${rf.auto ? 'checked' : ''}> Re-read automatically every week</label></p>` : ''}</div>`;
-  $('#app').innerHTML = `<div class="card"><h2>📚 Knowledge base</h2>
+  $('#app').innerHTML = `<div id="answersbox"></div><div class="card"><h2>📚 Knowledge base</h2>
       <p class="mute">Everything your AI chatbot should know: delivery & returns policies, FAQs, size guides, product manuals, opening hours… It is searched automatically for every customer question.</p>
       <p>${k.docs.length} / ${k.limit} documents · ${k.provider === 'direct' ? '✅ Searched in-app by your AI chatbot (direct mode)' : k.aiConnected ? (k.attached ? '✅ Connected to your AI chatbot' : '🔄 Will connect to your AI chatbot after the next sync') : '<span class="pill warn">AI not connected on the server – documents are saved and the built-in search answers simple questions</span>'}
       ${owner && k.aiConnected ? ' <button class="btn ghost" id="ksync">Sync now</button>' : ''}</p></div>
@@ -1790,6 +1828,7 @@ function welcomeMenuEditor() {
 // ---------- analytics ----------
 async function analytics(days = Number(store.get('wc_days')) || 30) {
   const a = await api(T(`/analytics?days=${days}`));
+  setTimeout(() => resultsCard().catch(() => {}), 0);
   const sym = S.tenant.settings.business.currencySymbol || '£';
   const m = (n) => sym + Number(n || 0).toFixed(2);
   // fill every day so gaps show as zero
@@ -1825,7 +1864,7 @@ async function analytics(days = Number(store.get('wc_days')) || 30) {
   const adCard = ads.length ? `<div class="card"><h2>📣 Where your chats came from (last ${days} days)</h2><p class="mute">Click-to-WhatsApp ads, Google and Facebook ad clicks and campaign links (utm tags), and what each turned into.</p>
     <div class="tablewrap"><table><tr><th>Source</th><th>Chats</th><th>Leads</th><th>Bookings</th><th>Orders</th><th>Revenue</th></tr>${ads.map((g) => `<tr><td>${g.kind === 'ad' ? '📣 ' : g.kind === 'campaign' ? '🔗 ' : ''}${esc(g.label)}</td><td>${g.chats}</td><td>${g.leads}</td><td>${g.bookings}</td><td>${g.orders}</td><td>${M0(g.revenue)}</td></tr>`).join('')}</table></div>
     <p class="mute" style="font-size:12px">Tip: add <code>?utm_source=facebook&amp;utm_campaign=spring-offer</code> to the links in your ads and posts to see each campaign here.</p></div>` : '';
-  $('#app').innerHTML = valueCard + adCard + `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Period</b>${[7, 30, 90].map((d) => `<button class="btn ${d === days ? '' : 'ghost'}" data-days="${d}">Last ${d} days</button>`).join('')}</div>
+  $('#app').innerHTML = '<div id="resultsbox"></div>' + valueCard + adCard + `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>Period</b>${[7, 30, 90].map((d) => `<button class="btn ${d === days ? '' : 'ghost'}" data-days="${d}">Last ${d} days</button>`).join('')}</div>
     <div class="row">
       <div class="card"><div class="mute">Revenue (after discounts)</div><div class="stat">${m(a.revenue)}</div><div class="mute">${m(a.paid_revenue)} paid</div></div>
       <div class="card"><div class="mute">Orders</div><div class="stat">${a.orders}</div><div class="mute">avg ${m(a.aov)}</div></div>

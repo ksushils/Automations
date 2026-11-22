@@ -163,5 +163,5 @@ export async function retrieve(tenantId, query, { k = 4 } = {}) {
   }
   const top = [...ranked.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([id]) => id);
   if (!top.length) return [];
-  return top.map((id) => d.prepare('SELECT c.id, c.text, k.name AS doc, k.url FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.id = ?').get(id)).filter(Boolean);
+  return top.map((id) => d.prepare('SELECT c.id, c.text, k.name AS doc, k.url, k.id AS docId, k.updated_at AS docUpdated FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.id = ?').get(id)).filter(Boolean);
 }

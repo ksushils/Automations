@@ -4,10 +4,62 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 1 (Phase 0: reliability and billing), 22 November 2026.
-- **Branch:** work is committed locally in the worktree on `main`. **Not pushed and not deployed.** Deploy only after the owner approves; the steps are in `docs/DEPLOY.md`.
-- **Tests:** 272 of 272 pass locally on Node 24 (`node --test test/*.test.js`). The server image runs Node 22 and should be re-tested there before deploying.
-- **Live server:** still on commit `231ae4e`, without this batch.
+- **Last batch:** batch 4 (verified answers and the honest results view), 22 November 2026.
+- **Branch:** batches 1–4 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
+- **Deploy:** the owner approved deploying ("keep doing all the batches… you can deploy"). The deploy is **not done yet**: since the start of batch 2, the VPS (191.215.46.170) has not answered on SSH or HTTPS, while the rest of the internet works from here.
+- **How to deploy:** with `scripts/deploy-vps.sh` on the server. It snapshots the database, runs the tests inside the new image, checks `/health`, and rolls back automatically if anything fails.
+- **Tests:** 290 of 290 pass locally on Node 24. They run again inside the Node 22 image during the deploy.
+- **Live server:** still on commit `231ae4e`.
+
+## Batch 4: verified answers and the results view (R3.4, R3.5)
+- **Verified answers** (`src/verified.js`):
+  - Every direct-AI answer is stored with the passages it was given (`answer_evidence` table, kept 90 days).
+  - Each source gets a match score. Prices, times, durations and percentages in the answer that aren't in the sources or the product list are flagged ("Figure not in your information").
+  - Sources not checked for 90+ days are flagged, and so are answers given with no source at all.
+  - Where the owner sees it: Knowledge tab → **Verified answers**. Each answer shows its sources, the matching passage and when the source was last checked. A correction box teaches the assistant via `/teach`.
+  - Tested end-to-end with a fake AI server: a made-up "£60" was flagged.
+- **Results** (`src/results.js`) show four separate groups:
+  - **Verified:** paid orders, completed cash orders, accepted quotes, completed bookings, deposits.
+  - **Assisted:** open orders, recovered carts, basket adds, leads, future bookings.
+  - **Estimated:** only if the owner enters an average job value. Always labelled ESTIMATE.
+  - **Potential:** open quotes that have full prices, and new leads.
+  - Every figure carries a "how it's worked out" note and the ids of the records it counts. It's shown at the top of the Analytics tab.
+  - New setting: Settings → Results → average job value.
+- **API:** `GET /tenants/:id/answers` (with `?flagged=1` for answers that need checking), `GET /tenants/:id/results` (with `?month=YYYY-MM`).
+- **Tests:** `test/batch4.test.js`, 5 tests.
+
+## Batch 3: Opportunities (R3.1)
+- **Opportunities** tab (`src/opportunities.js`). It is built only from the business's own records:
+  - callbacks and detail requests nobody has handled yet (after 15 minutes);
+  - customers waiting for a person;
+  - quotes waiting for approval, or sent more than 2 days ago with no answer;
+  - booking requests not yet confirmed, and cancelled future slots that are free again;
+  - questions the assistant couldn't answer (grouped into one item);
+  - tickets with no reply after 8 hours;
+  - customers who seemed unhappy in the last 3 days;
+  - orders waiting for payment for more than an hour.
+- Each item shows its evidence, the customer, how long ago it happened, the next step and action buttons:
+  - view chat, call, mark as contacted, confirm booking, or open the related tab;
+  - done, snooze, or reopen (stored in `opportunity_state`, and audited).
+- A value appears only when the record has one: a fully priced quote's total or an order's subtotal. Nothing is predicted.
+- **Tests:** `test/opportunities.test.js`, 3 tests. Checked in the browser, including the "Mark as contacted" button and phone width.
+
+## Batch 2: Phase 0 continued (R0.8 code, R0.10, R0.11, R0.12, R0.14)
+- **WhatsApp connection health** (`src/waHealth.js`):
+  - A daily Meta check for each connected business, reduced to one plain state: ok, token_invalid, disconnected, name_declined, quality_low, approval_pending, check_failed or not_connected.
+  - One failed call to Meta is tolerated; three in a row are reported.
+  - Moving into a problem state emails the owner and alerts the platform owner. Recovery sends a "working again" email.
+  - A dashboard banner shows while there's a problem.
+- **Plan limits and usage** (`src/entitlements.js`):
+  - The Billing tab now has a "Your usage this month" card: what's included, what's used, and what happens if you go over. Meta and payment fees are shown separately.
+  - Staff seats are now limited per plan: Free 1, Starter 3, Growth 10, Managed 25. The limit is enforced on the server. **Business decision:** these numbers can be changed in `PLANS`.
+- **Resend webhook** (`POST /webhooks/resend`, signed with Svix):
+  - delivered, bounced and complained events are recorded on the email's entry;
+  - addresses that bounced (in the last 90 days) or complained (ever) are not mailed again.
+- **Dashboard security header (CSP):** safe directives are enforced on `/admin`. A full policy runs in report-only mode, with reports counted at `/csp-report` and shown in System health.
+- **Deploy scripts:** `scripts/deploy-vps.sh` (safe deploy with automatic rollback) and `scripts/rollback-vps.sh`.
+- **Auto-setup fix:** the "Create automatically" Stripe setup now listens to the invoice and trial events, and tops up webhooks created by older versions.
+- **Tests:** `test/batch2.test.js`, 10 tests.
 
 ## Batch 1: Phase 0 reliability and billing
 
