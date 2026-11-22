@@ -1,4 +1,7 @@
 import { pageNote } from '../bot/engine.js';
+import { stripInjections } from '../safety.js';
+// accents/non-Latin letters or common words of other languages → probably not English
+const looksNonEnglish = (t) => /[^\x00-\x7F£€’‘“”–—…]/.test(String(t)) || /\b(que|qué|cuánto|cuanto|cuesta|precio|wie|viel|kostet|combien|prix|quanto|costa|dove|ile|kosztuje|kitna|kya|hai)\b/i.test(String(t));
 import { memoryOf, memoryNote, SENSITIVE_MEMORY } from '../continuity.js';
 import { config } from '../config.js';
 import { getDb, json } from '../db.js';
@@ -156,9 +159,14 @@ export async function directTurn(ctx, text) {
   const sym = S.business.currencySymbol || '£';
   const [kb, products] = await Promise.all([
     retrieve(ctx.tenant.id, text, { k: 6 }).catch(() => [])
+      // A question in another language finds nothing in English pages: translate it (one small AI call) and search again
+      .then(async (hits) => {
+        if (hits.length || !looksNonEnglish(text)) return hits;
+        try { const { translateText } = await import('./assist.js'); const { text: en } = await translateText(ctx.tenant, text, 'English'); return en && en !== text ? await retrieve(ctx.tenant.id, en, { k: 6 }) : hits; } catch { return hits; }
+      })
       // Nothing in the search index? Fall back to the keyword search with synonyms (deliver ≈ shipping ≈ postage…),
       // so the AI isn't told "nothing relevant" and left to guess.
-      .then(async (hits) => (hits.length ? hits : (await import('../knowledge.js')).searchKnowledge(ctx.tenant.id, text, { limit: 3 }).map((h) => ({ doc: h.doc, url: h.url, text: h.text })))),
+      .then(async (hits) => (hits.length ? hits : (await import('../knowledge.js')).searchKnowledge(ctx.tenant.id, text, { limit: 3 }).map((h) => ({ doc: h.doc, url: h.url, text: stripInjections(h.text).text })))),
     agent || S.store?.type === 'none' ? Promise.resolve([]) : ctx.store.searchProducts(text, { limit: 5 }).catch(() => []),
   ]);
   const data = [

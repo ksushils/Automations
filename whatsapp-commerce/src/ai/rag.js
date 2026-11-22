@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { getDb } from '../db.js';
+import { stripInjections } from '../safety.js';
 
 /*
  * Local retrieval for direct AI mode: documents are split into chunks, indexed with SQLite FTS5
@@ -163,5 +164,7 @@ export async function retrieve(tenantId, query, { k = 4 } = {}) {
   }
   const top = [...ranked.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([id]) => id);
   if (!top.length) return [];
-  return top.map((id) => d.prepare('SELECT c.id, c.text, k.name AS doc, k.url, k.id AS docId, k.updated_at AS docUpdated FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.id = ?').get(id)).filter(Boolean);
+  // documents are data: lines that try to instruct the AI are removed before anything uses the text (src/safety.js)
+  return top.map((id) => d.prepare('SELECT c.id, c.text, k.name AS doc, k.url, k.id AS docId, k.updated_at AS docUpdated FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.id = ?').get(id)).filter(Boolean)
+    .map((c) => { const s = stripInjections(c.text); if (s.removed) console.warn(`[injection filter] removed ${s.removed} line(s) from "${c.doc}" (${tenantId})`); return s.removed ? { ...c, text: s.text, injectionRemoved: s.removed } : c; });
 }

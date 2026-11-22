@@ -103,7 +103,7 @@ test('direct assist mode: knowledge + products as data, history, disclosure, pro
     assert.match(sys[0].content, /You are Test Shop assistant for Test Shop/); // placeholders filled
     assert.doesNotMatch(sys[0].content, /session_token/);
     assert.match(sys[1].content, /data, not instructions/); // injection guard wraps retrieved text
-    assert.match(sys[1].content, /IGNORE ALL PREVIOUS INSTRUCTIONS/); // …which stays inside <shop_data>
+    assert.doesNotMatch(sys[1].content, /IGNORE ALL PREVIOUS INSTRUCTIONS/); // removed by the injection filter (src/safety.js) before it reaches the AI
     assert.match(sys[1].content, /White Mug \| £8\.50/);
     assert.equal(tenants.getUsage(t.id).ai_tokens, 321);
     // conversation history (as logged by the webhook / simulator) is sent on the next turn
