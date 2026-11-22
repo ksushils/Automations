@@ -133,9 +133,9 @@ async function boot() {
 }
 $('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant', null); store.set('wc_tab', null); S.key = null; S.tenant = null; S.tenantId = null; S.setup = null; loginView(); };
 
-const TABS = [['overview', 'Overview'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['leads', 'Leads'], ['quotes', 'Quotes'], ['tickets', 'Tickets'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['help', 'Help centre'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
-const STAFF_TABS = new Set(['overview', 'analytics', 'simulator', 'inbox', 'leads', 'quotes', 'tickets', 'orders', 'bookings', 'contacts']);
-const MAIN_TABS = new Set(['overview', 'analytics', 'inbox', 'leads', 'orders', 'simulator', 'ai', 'settings']);
+const TABS = [['overview', 'Overview'], ['opportunities', 'Opportunities'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['leads', 'Leads'], ['quotes', 'Quotes'], ['tickets', 'Tickets'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['help', 'Help centre'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
+const STAFF_TABS = new Set(['overview', 'opportunities', 'analytics', 'simulator', 'inbox', 'leads', 'quotes', 'tickets', 'orders', 'bookings', 'contacts']);
+const MAIN_TABS = new Set(['overview', 'opportunities', 'analytics', 'inbox', 'leads', 'orders', 'simulator', 'ai', 'settings']);
 // The dashboard as an app: service worker for phone notifications
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' }).catch(() => {});
 async function enablePush() {
@@ -219,7 +219,7 @@ function render() {
   $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('') + (hasMore ? `<button id="moretabs">${showAll ? '‹ Fewer' : 'More ›'}</button>` : '');
   $('#nav').querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => { S.fromGuide = false; S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
   if ($('#moretabs')) $('#moretabs').onclick = () => { store.set('wc_alltabs', showAll ? null : '1'); if (showAll && !MAIN_TABS.has(S.tab)) S.tab = 'overview'; render(); };
-  ({ setup, tenants, overview, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, leads, quotes, tickets, help, orders, bookings, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
+  ({ setup, tenants, overview, opportunities, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, leads, quotes, tickets, help, orders, bookings, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
 
 // ---------- super admin: guided platform setup ----------
@@ -389,6 +389,47 @@ async function tenants() {
 }
 
 // ---------- overview ----------
+// ---------- Opportunities: what needs the business today, from its own records ----------
+async function opportunities(showAll = false) {
+  const r = await api(T(`/opportunities${showAll ? '?all=1' : ''}`));
+  const age = (m) => (m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} day${m >= 2880 ? 's' : ''} ago`);
+  const pill = { high: '<span class="pill warn">Urgent</span>', medium: '<span class="pill">Today</span>', low: '<span class="pill" style="opacity:.7">When you can</span>' };
+  const btn = (o, a) => {
+    const c = o.customer || {}, s = o.source || {};
+    const map = {
+      view: c.waId && `<button class="btn ghost" data-oview="${esc(c.waId)}" style="width:auto">View chat</button>`,
+      call: c.phone && `<a class="btn ghost" href="tel:${esc(c.phone)}" style="width:auto">Call ${esc(c.phone)}</a>`,
+      mark_contacted: s.id && `<button class="btn ghost" data-olead="${s.id}" style="width:auto">Mark as contacted</button>`,
+      open_quote: `<button class="btn ghost" data-otab="quotes" style="width:auto">Open quote Q-${esc(s.number)}</button>`,
+      confirm_booking: s.id && `<button class="btn" data-obook="${s.id}" style="width:auto">Confirm booking</button>`,
+      open_bookings: '<button class="btn ghost" data-otab="bookings" style="width:auto">Open bookings</button>',
+      open_unanswered: '<button class="btn" data-otab="knowledge" style="width:auto">Add the answers</button>',
+      open_ticket: '<button class="btn ghost" data-otab="tickets" style="width:auto">Open tickets</button>',
+      open_order: '<button class="btn ghost" data-otab="orders" style="width:auto">Open orders</button>',
+    };
+    return map[a] || '';
+  };
+  $('#app').innerHTML = `<div class="card"><h2>🎯 Opportunities</h2><p class="mute">Customers and jobs that need you, found in your own chats, leads, quotes, bookings and tickets. ${esc(r.note)}</p>
+    <p>${r.counts.total ? `<b>${r.counts.total}</b> to look at${r.counts.high ? ` · <b>${r.counts.high}</b> urgent` : ''}` : '✅ Nothing waiting right now.'} <a href="#" id="oall" style="margin-left:8px">${showAll ? 'Hide resolved and snoozed' : 'Show resolved and snoozed'}</a></p></div>
+    ${r.items.map((o) => `<div class="card" style="border-left:4px solid ${o.priority === 'high' ? 'var(--warn,#c0392b)' : 'var(--line,#dfe5e1)'}">
+      <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div>${pill[o.priority]} <b>${esc(o.title)}</b></div><span class="mute" style="font-size:13px">${age(o.ageMinutes)}${o.status !== 'open' ? ` · ${esc(o.status)}` : ''}</span></div>
+      <p style="margin:8px 0 4px">${esc(o.reason)}</p>
+      ${o.evidence ? `<p class="mute" style="margin:4px 0;font-style:italic">“${esc(o.evidence)}”</p>` : ''}
+      <p class="mute" style="margin:4px 0;font-size:13px">${o.customer?.name ? `👤 ${esc(o.customer.name)} ` : ''}${o.customer?.phone ? `· ${esc(o.customer.phone)} ` : ''}${o.customer?.email ? `· ${esc(o.customer.email)} ` : ''}${o.valueText ? `· 💷 ${esc(o.valueText)} <span title="${esc(o.valueBasis)}">(${esc(o.valueBasis)})</span>` : ''}</p>
+      <p style="margin:6px 0"><b>Next:</b> ${esc(o.next)}</p>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${o.actions.map((a) => btn(o, a)).join('')}
+        ${o.status === 'open' ? `<button class="btn ghost" data-ores="${esc(o.key)}" style="width:auto">Done</button><button class="btn ghost" data-osnz="${esc(o.key)}" style="width:auto">Snooze 1 day</button>` : `<button class="btn ghost" data-oreo="${esc(o.key)}" style="width:auto">Reopen</button>`}</div></div>`).join('')}`;
+  const act = async (key, action, body) => { try { await api(T(`/opportunities/${encodeURIComponent(key)}/${action}`), { method: 'POST', body: body || {} }); opportunities(showAll); } catch (e) { toast(e.message); } };
+  $('#oall').onclick = (e) => { e.preventDefault(); opportunities(!showAll); };
+  $('#app').querySelectorAll('[data-ores]').forEach((b) => (b.onclick = () => act(b.dataset.ores, 'resolve')));
+  $('#app').querySelectorAll('[data-osnz]').forEach((b) => (b.onclick = () => act(b.dataset.osnz, 'snooze', { hours: 24 })));
+  $('#app').querySelectorAll('[data-oreo]').forEach((b) => (b.onclick = () => act(b.dataset.oreo, 'reopen')));
+  $('#app').querySelectorAll('[data-otab]').forEach((b) => (b.onclick = () => { S.tab = b.dataset.otab; store.set('wc_tab', S.tab); render(); }));
+  $('#app').querySelectorAll('[data-oview]').forEach((b) => (b.onclick = () => { S.tab = 'inbox'; store.set('wc_tab', 'inbox'); render(); setTimeout(() => inbox(b.dataset.oview).catch(() => {}), 50); }));
+  $('#app').querySelectorAll('[data-olead]').forEach((b) => (b.onclick = async () => { try { await api(T(`/leads/${b.dataset.olead}`), { method: 'PATCH', body: { status: 'contacted' } }); toast('Marked as contacted'); opportunities(showAll); } catch (e) { toast(e.message); } }));
+  $('#app').querySelectorAll('[data-obook]').forEach((b) => (b.onclick = async () => { try { await api(T(`/bookings/${b.dataset.obook}/status`), { method: 'POST', body: { status: 'confirmed' } }); toast('Booking confirmed (WhatsApp customers get a message automatically)'); opportunities(showAll); } catch (e) { toast(e.message); } }));
+}
+
 async function overview() {
   const t = (S.tenant = (await api(T(''))).tenant);
   const lim = t.planLimits || {};

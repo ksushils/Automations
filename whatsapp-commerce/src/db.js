@@ -386,6 +386,15 @@ CREATE TABLE IF NOT EXISTS email_log (
 );
 CREATE INDEX IF NOT EXISTS idx_email_log_status ON email_log(status, next_try_at);
 CREATE INDEX IF NOT EXISTS idx_email_log_tenant ON email_log(tenant_id, id);
+-- Opportunities the owner resolved or snoozed (the items themselves are computed from live records)
+CREATE TABLE IF NOT EXISTS opportunity_state (
+  tenant_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  status TEXT NOT NULL,
+  snooze_until TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (tenant_id, key)
+);
 -- Stripe Billing webhook events already handled (idempotency + a readable history)
 CREATE TABLE IF NOT EXISTS billing_events (
   id TEXT PRIMARY KEY,

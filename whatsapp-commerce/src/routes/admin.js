@@ -60,6 +60,7 @@ import { createTopupCheckout } from '../platform.js';
 import { billingHistory } from '../platform.js';
 import { checkConnection, connectionStatus, connectionBanner } from '../waHealth.js';
 import { entitlements, staffSeatsLeft } from '../entitlements.js';
+import { listOpportunities, setOpportunityState } from '../opportunities.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
 import { systemStatus, backup, alert } from '../ops.js';
@@ -305,6 +306,14 @@ export function adminRouter() {
 
   // ----- billing (your SaaS subscription) -----
   r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS, history: billingHistory(req.tenant.id) }));
+  r.get('/tenants/:tenantId/opportunities', requireTenant, (req, res) => res.json(listOpportunities(req.tenant, { includeClosed: req.query.all === '1' })));
+  r.post('/tenants/:tenantId/opportunities/:key/:action', requireTenant, (req, res) => {
+    try {
+      const out = setOpportunityState(req.tenant.id, req.params.key, req.params.action, { hours: req.body?.hours });
+      audit({ tenantId: req.tenant.id, actor: req.staff?.name || 'owner', role: req.role, action: `opportunity.${req.params.action}`, target: String(req.params.key).slice(0, 100), ip: req.ip });
+      res.json(out);
+    } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+  });
   r.get('/tenants/:tenantId/entitlements', requireTenant, (req, res) => res.json(entitlements(req.tenant)));
   r.get('/tenants/:tenantId/whatsapp/connection', requireTenant, wrap(async (req, res) => res.json({ connection: req.query.refresh ? await checkConnection(req.tenant) : connectionStatus(req.tenant.id) })));
   // emails sent for this business (alerts, quotes, tickets, follow-ups): status only, never other businesses' mail
