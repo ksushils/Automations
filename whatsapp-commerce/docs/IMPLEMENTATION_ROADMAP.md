@@ -35,7 +35,7 @@ Rules that apply to every item:
 
 | ID | Item | Status |
 |---|---|---|
-| R1.1 | Business Twin: show what was learnt, with source pages; flag uncertain or missing facts; real progress steps; keep the approved configuration when the demo is claimed | ⬜ |
+| R1.1 | Business Twin: show what was learnt, with source pages; flag uncertain or missing facts; real progress steps; keep the approved configuration when the demo is claimed | ✅ batch 10 |
 | R1.2 | Trade variants (plumber, electrician, heating, handyman, property maintenance) and beauty variants (hair, barber, beauty, nails) on top of the existing templates | ✅ batch 7 |
 | R1.3 | Scripted demo scenarios (emergency plumber, photo, quote, service area, booking, human, follow-up) running through the real engine, with sample data labelled as such | ⬜ |
 
@@ -62,15 +62,16 @@ Rules that apply to every item:
 
 | ID | Item |
 |---|---|
-| R4 | Simple owner navigation; industry-aware dashboard; UX polish; first-run onboarding checklist |
+| R4 | Simple owner navigation ✅ batch 10 (grouped menu, pages hidden that don't fit the business); industry-aware dashboard 🟡; UX polish; first-run onboarding checklist (exists: 9-step guide) |
 | R5 | Voice receptionist (compare providers first); Instagram and Messenger; light CRM pipeline; Zapier/Make/n8n; agency mode; multi-branch |
 | R6 | Plan entitlements made clear; usage page; optional setup fee; cancellation flow with a churn reason |
 | R7 | Marketing site repositioned (receptionist and sales assistant), trades/salon/ecommerce pages, no made-up claims, real case studies only |
-| R8 | AI evaluation suite (model, cost, latency, evidence recorded): ✅ batch 8, plus the price guard and emergency notices; real-model run 🔒 on the server. Repeatable load tests and benchmarks: ⬜ |
+| R8 | AI evaluation suite (model, cost, latency, evidence recorded): ✅ batch 8, plus the price guard and emergency notices; real-model run 🔒 on the server. Repeatable load tests and benchmarks: ✅ batch 10 (webhook throughput, on-disk database; SQLite tuned) |
 
 ## Next batches
 
-1. **Deploy batches 1–8** as soon as the server answers again, using `scripts/deploy-vps.sh`. Then run `node src/cli/runEvals.js` on the server for the real-model evaluation.
-2. **R1.1:** Business Twin: show what the demo learnt, with source pages and uncertain facts.
-3. **R4:** simple owner navigation (Today, Conversations, Leads and Customers, Bookings and Quotes, Teach My AI, Results).
-4. **R8 (rest):** repeatable load test (widget, first reply, webhook throughput) with measured results.
+1. **R1.3:** scripted demo scenarios (emergency plumber, photo, quote, service area, booking, human, follow-up) through the real engine, sample data labelled.
+2. **R2.2:** per-trade qualification rules (one question at a time).
+3. **R2.3:** booking tests across the clock change, buffers, staff/resource availability.
+4. **R3.3:** natural-language automation drafts → allowed steps only → simulation → approval.
+5. **R0.15:** structured JSON logs (opt-in).

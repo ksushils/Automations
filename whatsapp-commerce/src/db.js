@@ -473,6 +473,12 @@ export function initDb(file = config.databasePath) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
   db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+  // WAL + synchronous=NORMAL is SQLite's recommended pairing: the database can't be corrupted, and an app crash loses
+  // nothing; only the last moment of writes could be lost if the whole machine loses power. FULL (the old default)
+  // waits for the disk on every write, which made each chat reply about 5× slower in the load test (scripts/loadtest.js).
+  // Set SQLITE_SYNCHRONOUS=FULL to go back. busy_timeout: wait instead of failing if a backup holds a lock briefly.
+  const sync = /^(OFF|NORMAL|FULL|EXTRA)$/i.test(process.env.SQLITE_SYNCHRONOUS || '') ? process.env.SQLITE_SYNCHRONOUS.toUpperCase() : 'NORMAL';
+  db.exec(`PRAGMA synchronous = ${sync === 'OFF' ? 'NORMAL' : sync}; PRAGMA busy_timeout = 5000;`);
   db.exec(SCHEMA);
   for (const [table, cols] of Object.entries(MIGRATIONS)) {
     const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));

@@ -51,6 +51,17 @@ test('instant demo: website → demo shop → chat → keep it on sign-up; expir
     const pageHtml = await (await fetch(`${base}/try/${token}`)).text();
     assert.match(pageHtml, /Meet the Bloom Florist assistant/);
     assert.match(pageHtml, /noindex/);
+    assert.match(pageHtml, /What your assistant learnt/);
+    const scripts = [...pageHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((js) => /twinlist/.test(js));
+    assert.equal(scripts.length, 1);
+    assert.doesNotThrow(() => new Function(scripts[0]), 'the demo page script parses');
+    // Business Twin: what it learnt, each fact with the page it came from; missing facts are named, not invented
+    const twin = await (await fetch(`${base}/try/${token}/twin`)).json();
+    assert.ok(twin.summary.pages >= 3);
+    const dl = twin.facts.find((f) => f.key === 'delivery');
+    assert.equal(dl.status, 'found');
+    assert.ok(dl.values.some((v) => /£4\.95/.test(v.value) && /\/delivery$/.test(v.source.url)));
+    assert.equal(twin.facts.find((f) => f.key === 'hours').status, 'missing');
 
     // the demo shop is hidden from the super admin client list
     const t = tenants.getTenant(st.tenantId);
@@ -69,6 +80,9 @@ test('instant demo: website → demo shop → chat → keep it on sign-up; expir
     assert.equal(kept.plan, 'growth');
     assert.ok(tenants.authenticateAdminKey(kept.id, s.adminKey));
     assert.ok(getDb().prepare("SELECT COUNT(*) AS n FROM knowledge_docs WHERE tenant_id = ?").get(kept.id).n >= 3);
+    assert.equal((await fetch(`${base}/try/${token}/twin`)).status, 404, 'a claimed demo is no longer public');
+    const ownerTwin = await (await fetch(`${base}/api/tenants/${kept.id}/twin`, { headers: { Authorization: 'Bearer ' + s.adminKey } })).json();
+    assert.equal(ownerTwin.summary.pages, twin.summary.pages, 'what was learnt in the demo is kept after sign-up');
 
     // an unclaimed, expired demo is deleted with its knowledge
     const r2 = await (await fetch(base + '/try', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ website: origin }) })).json();

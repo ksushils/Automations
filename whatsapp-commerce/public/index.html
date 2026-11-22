@@ -12,6 +12,7 @@
 header{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2;flex-wrap:wrap}
 header h1{font-size:16px;margin:0;flex:1}nav{display:flex;gap:2px;flex-wrap:nowrap;overflow-x:auto;order:3;flex-basis:100%;scrollbar-width:thin;padding-bottom:2px}nav button{white-space:nowrap}
 nav button{background:none;border:0;padding:6px 10px;border-radius:8px;color:var(--mute);cursor:pointer;font:inherit}nav button.on{background:var(--brand);color:#fff}
+.subnav{max-width:1100px;margin:10px auto 0;padding:0 16px;display:flex;gap:4px;flex-wrap:wrap;align-items:center}.subnav button{background:none;border:1px solid var(--line);padding:5px 12px;border-radius:16px;color:var(--mute);cursor:pointer;font:inherit;font-size:14px}.subnav button.on{border-color:var(--brand);color:var(--brand);font-weight:600}.subnav #navmode{border:0;font-size:13px}
 main{max-width:1100px;margin:0 auto;padding:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
 h2{font-size:15px;margin:0 0 12px}h3{font-size:13px;margin:16px 0 8px;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}
@@ -148,6 +149,25 @@ $('#logout').onclick = () => { store.set('wc_key', null); store.set('wc_tenant',
 const TABS = [['overview', 'Overview'], ['opportunities', 'Opportunities'], ['analytics', 'Analytics'], ['inbox', 'Inbox'], ['leads', 'Leads'], ['quotes', 'Quotes'], ['tickets', 'Tickets'], ['orders', 'Orders'], ['bookings', 'Bookings'], ['contacts', 'Contacts'], ['automations', 'Automations'], ['campaigns', 'Campaigns'], ['templates', 'Templates'], ['grow', 'Grow'], ['knowledge', 'Knowledge base'], ['help', 'Help centre'], ['ai', 'AI assistant'], ['simulator', 'Test bot'], ['catalogue', 'Catalogue'], ['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']];
 const STAFF_TABS = new Set(['overview', 'opportunities', 'analytics', 'simulator', 'inbox', 'leads', 'quotes', 'tickets', 'orders', 'bookings', 'contacts']);
 const MAIN_TABS = new Set(['overview', 'opportunities', 'analytics', 'inbox', 'leads', 'orders', 'simulator', 'ai', 'settings']);
+// Simple menu (R4): groups in the owner's words. Every page is still there; the old flat menu is one click away.
+const NAV_GROUPS = [
+  ['today', 'Today', [['overview', 'Today'], ['opportunities', 'Opportunities']]],
+  ['conversations', 'Conversations', [['inbox', 'Chats'], ['tickets', 'Tickets']]],
+  ['customers', 'Leads & customers', [['leads', 'Leads'], ['contacts', 'Customers']]],
+  ['work', 'Bookings & quotes', [['bookings', 'Bookings'], ['quotes', 'Quotes'], ['orders', 'Orders']]],
+  ['teach', 'Teach my AI', [['knowledge', 'What it knows'], ['ai', 'How it replies'], ['simulator', 'Test it'], ['help', 'Help centre'], ['catalogue', 'Catalogue'], ['templates', 'WhatsApp templates']]],
+  ['results', 'Results', [['analytics', 'Results']]],
+  ['grow', 'Grow', [['campaigns', 'Campaigns'], ['automations', 'Automations'], ['grow', 'Reviews & referrals']]],
+  ['admin', 'Settings', [['settings', 'Settings'], ['team', 'Team'], ['billing', 'Billing']]],
+];
+/** The groups this person sees: only pages their role allows, and only pages that fit this kind of business. */
+function navGroups(t, allowed, current) {
+  const st = t?.settings || {};
+  const shop = !!st.store?.type && st.store.type !== 'none';
+  const hide = new Set([...(shop ? [] : ['orders', 'catalogue']), ...(shop && !st.bookings?.enabled ? ['bookings'] : [])]);
+  const label = { work: shop ? (st.bookings?.enabled ? 'Orders & bookings' : 'Orders & quotes') : 'Bookings & quotes' };
+  return NAV_GROUPS.map(([key, l, tabs]) => ({ key, label: label[key] || l, tabs: tabs.filter(([k]) => allowed.includes(k) && (!hide.has(k) || k === current)).sort((a, b) => (shop && key === 'work' ? (a[0] === 'orders' ? -1 : b[0] === 'orders' ? 1 : 0) : 0)) })).filter((g) => g.tabs.length);
+}
 // The dashboard as an app: service worker for phone notifications
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' }).catch(() => {});
 async function enablePush() {
@@ -215,12 +235,18 @@ function startAlerts() {
 function render() {
   startAlerts();
   const shopTabs = S.tenant ? TABS.filter(([k]) => S.role === 'owner' || STAFF_TABS.has(k)) : [];
-  const showAll = store.get('wc_alltabs') === '1' || !MAIN_TABS.has(S.tab) && shopTabs.some(([k]) => k === S.tab);
   const setupLabel = S.setup ? `Setup ${S.setup.done === S.setup.total ? '✅' : `(${S.setup.done}/${S.setup.total})`}` : 'Setup';
   const superTabs = S.setup && S.setup.done === S.setup.total ? [['tenants', 'Clients'], ['setup', setupLabel]] : [['setup', setupLabel], ['tenants', 'Clients']];
-  const tabs = [...(S.super ? superTabs : []), ...shopTabs.filter(([k]) => showAll || MAIN_TABS.has(k))];
-  const hasMore = shopTabs.some(([k]) => !MAIN_TABS.has(k));
+  const simple = S.tenant && store.get('wc_nav') !== 'classic';
+  // simple menu (R4): a few groups in the owner's words, each with its own row of pages; pages that don't fit the
+  // business (orders for a plumber, bookings for a shop without them) are hidden unless you're already on one
+  const groups = simple ? navGroups(S.tenant, shopTabs.map(([k]) => k), S.tab) : [];
+  const showAll = !simple && (store.get('wc_alltabs') === '1' || !MAIN_TABS.has(S.tab) && shopTabs.some(([k]) => k === S.tab));
+  const tabs = [...(S.super ? superTabs : []), ...(simple ? groups.flatMap((g) => g.tabs) : shopTabs.filter(([k]) => showAll || MAIN_TABS.has(k)))];
+  const hasMore = !simple && shopTabs.some(([k]) => !MAIN_TABS.has(k));
   if (!tabs.find((t) => t[0] === S.tab)) S.tab = tabs[0][0];
+  const group = groups.find((g) => g.tabs.some(([k]) => k === S.tab));
+  if (group) store.set('wc_g_' + group.key, S.tab);
   document.querySelector('main').style.maxWidth = '';
   $('#banner').innerHTML = S.banner ? `<div style="max-width:1100px;margin:12px auto 0;padding:0 16px"><div class="card" style="margin:0;border-color:${S.banner.level === 'warn' ? 'var(--warn)' : 'var(--line)'}">${S.banner.level === 'warn' ? '⚠️' : '⏳'} ${esc(S.banner.text)} ${S.role === 'owner' ? '<a href="#" id="bgo">Choose a plan →</a>' : ''}</div></div>` : '';
   if (S.fromGuide && S.tab !== 'overview') $('#banner').insertAdjacentHTML('beforeend', `<div style="max-width:1100px;margin:12px auto 0;padding:0 16px"><a href="#" id="backguide">← Back to your steps</a></div>`);
@@ -228,8 +254,18 @@ function render() {
   if ($('#backguide')) $('#backguide').onclick = (e) => { e.preventDefault(); S.fromGuide = false; S.tab = 'overview'; store.set('wc_tab', 'overview'); render(); };
   if ($('#bgo')) $('#bgo').onclick = (e) => { e.preventDefault(); S.tab = 'billing'; render(); };
   $('#who').textContent = S.tenant ? '· ' + S.tenant.name : S.super ? '· super admin' : '';
-  $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('') + (hasMore ? `<button id="moretabs">${showAll ? '‹ Fewer' : 'More ›'}</button>` : '');
-  $('#nav').querySelectorAll('button[data-t]').forEach((b) => (b.onclick = () => { S.fromGuide = false; S.tab = b.dataset.t; store.set('wc_tab', S.tab); render(); }));
+  if (simple) {
+    $('#nav').innerHTML = (S.super ? superTabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('') : '')
+      + groups.map((g) => `<button data-g="${g.key}" class="${group === g ? 'on' : ''}">${esc(g.label)}</button>`).join('');
+    const sub = group && group.tabs.length > 1 ? group.tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${esc(l)}</button>`).join('') : '';
+    $('#banner').insertAdjacentHTML('beforeend', `<div class="subnav">${sub}<span style="flex:1"></span><button id="navmode" title="Show every page as one long menu">Full menu</button></div>`);
+  } else {
+    $('#nav').innerHTML = tabs.map(([k, l]) => `<button data-t="${k}" class="${S.tab === k ? 'on' : ''}">${l}</button>`).join('') + (hasMore ? `<button id="moretabs">${showAll ? '‹ Fewer' : 'More ›'}</button>` : '') + (S.tenant ? '<button id="navmode">Simple menu</button>' : '');
+  }
+  const go = (t) => { S.fromGuide = false; S.tab = t; store.set('wc_tab', S.tab); render(); };
+  document.querySelectorAll('#nav button[data-t], .subnav button[data-t]').forEach((b) => (b.onclick = () => go(b.dataset.t)));
+  $('#nav').querySelectorAll('button[data-g]').forEach((b) => (b.onclick = () => { const g = groups.find((x) => x.key === b.dataset.g); const last = store.get('wc_g_' + g.key); go(g.tabs.some(([k]) => k === last) ? last : g.tabs[0][0]); }));
+  if ($('#navmode')) $('#navmode').onclick = () => { store.set('wc_nav', simple ? 'classic' : null); render(); };
   if ($('#moretabs')) $('#moretabs').onclick = () => { store.set('wc_alltabs', showAll ? null : '1'); if (showAll && !MAIN_TABS.has(S.tab)) S.tab = 'overview'; render(); };
   ({ setup, tenants, overview, opportunities, analytics, team, billing, knowledge, ai, automations, contacts, campaigns, templates, grow, simulator, inbox, leads, quotes, tickets, help, orders, bookings, catalogue, settings, broadcast })[S.tab]().catch((e) => toast(e.message));
 }
@@ -1469,6 +1505,15 @@ async function knowledge() {
   const kb = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
   const gaps = (await api(T('/unanswered')).catch(() => ({ items: [] }))).items;
   const rf = k.refresh || {}; const L = rf.last;
+  const tw = await api(T('/twin')).catch(() => null);
+  const link = (src) => (/^https?:/.test(src.url || '') ? `<a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.page)}</a>` : esc(src.page));
+  const twinCard = tw ? `<div class="card"><h2>🧠 What your assistant knows about your business</h2>
+    <p class="mute">${esc(tw.note)}</p>
+    <p><span class="pill">✅ ${tw.summary.found} found</span> <span class="pill warn">⚠️ ${tw.summary.uncertain} to check</span> <span class="pill">➖ ${tw.summary.missing} missing</span> <span class="mute">from ${tw.summary.pages} pages and documents</span></p>
+    ${tw.facts.map((f) => `<div style="border-top:1px solid var(--line);padding:8px 0"><b>${f.status === 'found' ? '✅' : f.status === 'uncertain' ? '⚠️' : '➖'} ${esc(f.label)}</b>
+      ${f.status === 'missing' ? `<div class="mute">Not found. ${esc(f.ifMissing)} ${owner ? `<a href="#" data-twinadd="${esc(f.label)}">Add it</a>` : ''}</div>`
+        : `${f.why ? `<div style="color:var(--warn,#8a5a00)">${esc(f.why)}</div>` : ''}<ul style="margin:4px 0">${f.values.map((v) => `<li>${esc(v.value)} <span class="mute" style="font-size:12px">– ${link(v.source)}</span></li>`).join('')}${f.more ? `<li class="mute">…and ${f.more} more</li>` : ''}</ul>`}</div>`).join('')}
+  </div>` : '';
   const when = (iso) => { try { return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
   const gapsCard = gaps.length ? `<div class="card"><h2>❓ Questions your assistant couldn't answer (${gaps.length})</h2>
     <p class="mute">Real questions from customers where the assistant wasn't sure or passed the chat to your team. Type the answer once and it will use it from then on.</p>
@@ -1484,6 +1529,7 @@ async function knowledge() {
       <p class="mute">Everything your AI chatbot should know: delivery & returns policies, FAQs, size guides, product manuals, opening hours… It is searched automatically for every customer question.</p>
       <p>${k.docs.length} / ${k.limit} documents · ${k.provider === 'direct' ? '✅ Searched in-app by your AI chatbot (direct mode)' : k.aiConnected ? (k.attached ? '✅ Connected to your AI chatbot' : '🔄 Will connect to your AI chatbot after the next sync') : '<span class="pill warn">AI not connected on the server – documents are saved and the built-in search answers simple questions</span>'}
       ${owner && k.aiConnected ? ' <button class="btn ghost" id="ksync">Sync now</button>' : ''}</p></div>
+    ${twinCard}
     ${gapsCard}
     ${refreshCard}
     ${owner ? `<div class="row">
@@ -1536,6 +1582,7 @@ async function knowledge() {
     }
     res(out.join('\n')); again();
   };
+  document.querySelectorAll('[data-twinadd]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); $('#ktitle').value = a.dataset.twinadd; $('#ktext').focus(); $('#ktext').scrollIntoView({ behavior: 'smooth', block: 'center' }); }));
   $('#kadd').onclick = async () => { try { await api(T('/knowledge/text'), { method: 'POST', body: { name: $('#ktitle').value || 'Notes', text: $('#ktext').value } }); toast('Added'); again(); } catch (e) { res(e.message); } };
 }
 

@@ -159,6 +159,9 @@ function demoPage(token, s, layout) {
   <div id="ready" ${s?.status === 'ready' ? '' : 'hidden'}>
     <h2 style="margin-top:0">Try asking</h2>
     <div id="chips" class="chips"></div>
+    <div class="card" id="twin" style="margin-top:18px" hidden><h3 style="margin-top:0">What your assistant learnt</h3><p class="mute" id="twinsum"></p><div id="twinlist"></div>
+      <details style="margin-top:8px"><summary class="mute">Pages it read</summary><ul class="mute" id="twinpages" style="font-size:14px"></ul></details>
+      <p class="mute" style="font-size:13px">Found by reading your pages with fixed rules, not AI guesses. Where something is missing, the assistant says so instead of making it up.</p></div>
     <div class="card" style="margin-top:18px"><h3 style="margin-top:0">Like it? Keep it.</h3>
       <p class="mute">Start your free trial and this exact assistant becomes yours: we keep everything it learnt, add it to your website with one line, and connect your WhatsApp when you're ready.</p>
       <p><a class="btn" id="keep" href="/signup?demo=${esc(token)}&website=${encodeURIComponent(s?.origin || '')}">Keep this assistant – start free trial</a> <a class="btn ghost" href="/signup?demo=${esc(token)}&plan=free&website=${encodeURIComponent(s?.origin || '')}">Keep it free (website chat only)</a></p>
@@ -193,7 +196,21 @@ function demoPage(token, s, layout) {
     $('lead').textContent = 'It has read ' + st.pages + ' pages of ' + st.origin + (st.shopify ? ' and is connected to your Shopify catalogue' : '') + '. Ask it what your customers ask you.';
     $('chips').innerHTML = ''; (st.suggestions || []).forEach((q) => { const b = document.createElement('button'); b.textContent = q; b.onclick = () => ask(q); $('chips').appendChild(b); });
     // the real website chat (calendar, buttons, file upload), shown inside the phone
+    twin();
     if (!window.__waChat) { $('wbox').innerHTML = ''; const sc = document.createElement('script'); sc.src = '/chat-widget/' + encodeURIComponent(tenant) + '.js'; sc.setAttribute('data-embed', '#wbox'); document.body.appendChild(sc); }
+  }
+  const h = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  async function twin() {
+    const tw = await fetch('/try/' + token + '/twin').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (!tw) return;
+    const icon = { found: '✅', uncertain: '⚠️', missing: '➖' };
+    $('twinsum').textContent = tw.summary.found + ' found · ' + tw.summary.uncertain + ' to check · ' + tw.summary.missing + ' missing, from ' + tw.summary.pages + ' pages.';
+    $('twinlist').innerHTML = tw.facts.map((f) => '<div style="border-top:1px solid var(--line);padding:8px 0"><b>' + icon[f.status] + ' ' + h(f.label) + '</b>'
+      + (f.status === 'missing' ? '<div class="mute" style="font-size:14px">Not on your pages. ' + h(f.ifMissing) + '</div>'
+        : (f.why ? '<div style="font-size:14px;color:#8a5a00">' + h(f.why) + '</div>' : '') + '<ul style="margin:4px 0;padding-left:18px;font-size:14px">' + f.values.slice(0, 3).map((v) => '<li>' + h(v.value) + ' <span class="mute" style="font-size:12px">– ' + (/^https?:/.test(v.source.url || '') ? '<a href="' + h(v.source.url) + '" target="_blank" rel="noopener nofollow">' + h(v.source.page) + '</a>' : h(v.source.page)) + '</span></li>').join('') + '</ul>')
+      + '</div>').join('');
+    $('twinpages').innerHTML = tw.pages.map((p) => '<li>' + (/^https?:/.test(p.url || '') ? '<a href="' + h(p.url) + '" target="_blank" rel="noopener nofollow">' + h(p.name) + '</a>' : h(p.name)) + '</li>').join('');
+    $('twin').hidden = false;
   }
   async function poll() {
     const st = await fetch('/try/' + token + '/status').then((r) => r.json()).catch(() => null);
@@ -228,6 +245,13 @@ export function instantDemoRouter(layout) {
     const s = state(req.params.token);
     if (!s) return res.status(404).type('html').send(layout('/try', '<section class="hero"><div class="wrap"><h1>This demo has expired</h1><p class="lead">Demos are kept for 48 hours. Build a new one in a minute.</p><p><a class="btn" href="/#try">Build my assistant</a></p></div></section>', { noindex: true }));
     res.set('Cache-Control', 'no-store').type('html').send(demoPage(req.params.token, s, layout));
+  });
+  // Business Twin: what the demo learnt, each fact with its page (src/businessTwin.js). Only once the demo is ready.
+  r.get('/try/:token/twin', async (req, res) => {
+    const st = state(req.params.token), t = demoTenantForToken(req.params.token);
+    if (!t || st?.status !== 'ready') return res.status(404).json({ error: 'Not ready' });
+    const { buildTwin } = await import('./businessTwin.js');
+    res.set('Cache-Control', 'no-store').json(buildTwin(t));
   });
   r.get('/try/:token/status', (req, res) => {
     const s = state(req.params.token);

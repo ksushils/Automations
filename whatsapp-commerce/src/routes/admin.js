@@ -61,6 +61,7 @@ import { billingHistory } from '../platform.js';
 import { checkConnection, connectionStatus, connectionBanner } from '../waHealth.js';
 import { entitlements, staffSeatsLeft } from '../entitlements.js';
 import { listOpportunities, setOpportunityState } from '../opportunities.js';
+import { buildTwin } from '../businessTwin.js';
 import { listAnswers, answerStats } from '../verified.js';
 import { automationLog } from '../outreach.js';
 import { askCopilot, SUGGESTIONS } from '../copilot.js';
@@ -310,6 +311,7 @@ export function adminRouter() {
 
   // ----- billing (your SaaS subscription) -----
   r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS, history: billingHistory(req.tenant.id) }));
+  r.get('/tenants/:tenantId/twin', requireTenant, (req, res) => res.json(buildTwin(req.tenant)));
   r.get('/tenants/:tenantId/opportunities', requireTenant, (req, res) => res.json(listOpportunities(req.tenant, { includeClosed: req.query.all === '1' })));
   r.post('/tenants/:tenantId/opportunities/:key/:action', requireTenant, (req, res) => {
     try {

@@ -60,7 +60,20 @@ Run conditions: Node 24 on the development PC, an in-memory database, and a fake
 | Website chat message → reply (fake AI) | 103.8 ms | 180.8 ms | 188 ms | 176 |
 | Database read (messages per business) | 0.3 ms | 0.4 ms | 0.5 ms | — |
 
-Memory after the run: 157 MB RSS (44 MB heap). Still to do: the same run on the VPS (Node 22, file database) once it is reachable.
+Memory after the run: 157 MB RSS (44 MB heap).
+
+### Batch 10: database file on disk and WhatsApp webhook (22 November 2026, local)
+
+`node --disable-warning=ExperimentalWarning scripts/loadtest.js --businesses 20 --chats 200 --concurrency 20 --file`. Same conditions as above, but a real database file (WAL) and the WhatsApp webhook added. Sends to Meta are answered inside the process; nothing is sent.
+
+| Test | Before (synchronous FULL) | After (synchronous NORMAL) |
+|---|---|---|
+| Website chat message → reply, p50 / p95 | 498.6 / 596.3 ms (40 per second) | 174.3 / 270.6 ms (109 per second) |
+| WhatsApp webhook acknowledged, p50 / p95 | 492.4 / 602.3 ms | 214.4 / 270.4 ms |
+| WhatsApp messages fully answered (200 chats) | 200/200 in 5.0 s (40 per second) | 200/200 in 2.3 s (87 per second) |
+| Knowledge search, p50 | 29.5 ms | 23.6 ms |
+
+Acknowledgements stay far inside Meta's ~10 s limit. Not a claim about maximum capacity; the AI provider adds 1–4 s per real reply.
 
 ## AI evaluation (batch 8)
 

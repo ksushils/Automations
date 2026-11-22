@@ -4,7 +4,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 9 (photos attached to quote requests), 22 November 2026.
+- **Last batch:** batch 10 (Business Twin, simple menu, load test + SQLite tuning), 22 November 2026.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** ✅ **deployed to wa.karatit.com on 22 November 2026** (server commit `0e50038`), with `scripts/deploy-vps.sh`:
   - **Database snapshots:** taken first, in `/root/wa-backups/predeploy-20261122-*.db`.
@@ -13,8 +13,25 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - **Data:** intact (14 businesses).
   - **Rollback:** `sh scripts/rollback-vps.sh`.
 - **First deploy attempts:** one merge conflict with the demo-engine branch (`server.js` imports; both kept), and a calendar test that was flaky under load (fixed). The script stopped safely each time before restarting anything.
-- **Tests:** 310 of 310 pass locally on Node 24. They run again inside the Node 22 image during the deploy.
+- **Tests:** 319 of 319 pass locally on Node 24 (batch 10). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
+
+## Batch 10: Business Twin (R1.1), simple menu (R4), load test (R8)
+- **Business Twin** (`src/businessTwin.js`): "what your assistant learnt about your business", built by fixed rules from the pages and documents it holds (no AI, so nothing invented).
+  - Facts: business name, type, phone, email, postcode, opening hours, prices, delivery, returns, booking, areas covered – each with the page it came from (linked).
+  - **Uncertain:** several different values (e.g. two phone numbers) – "tell us which one customers should use".
+  - **Missing:** says what the assistant does instead (e.g. "won't make up times; offers to pass it to your team").
+  - Shown on the instant-demo page under the chat ("What your assistant learnt", with the pages it read) and in the dashboard (Teach my AI → What it knows), with an "Add it" link for missing facts.
+  - Endpoints: `GET /try/:token/twin` (only while the demo is ready and unclaimed) and `GET /api/tenants/:id/twin` (owner/staff of that business; covered by the isolation test).
+  - Claiming a demo keeps everything it learnt (tested).
+- **Simple menu** (dashboard): Today · Conversations · Leads & customers · Bookings & quotes · Teach my AI · Results · Grow · Settings, each with its own row of pages.
+  - Fits the business: no Orders/Catalogue for enquiry businesses; a shop sees "Orders & quotes" (Orders first) and Bookings only if switched on. A hidden page you're already on still shows.
+  - Staff only see staff pages. Every old page is still there; "Full menu" switches back to the old flat menu (remembered per browser).
+  - Checked in a browser on a local test copy (plumber and shop).
+- **Load test** (`scripts/loadtest.js`): added the WhatsApp webhook (signed POSTs → acknowledged → fully answered; sends to Meta are caught inside the process, nothing leaves) and `--file` (real database file on disk).
+  - Found: with a file database every write waited for the disk – chat replies ~500 ms of our own time. **Fix:** `PRAGMA synchronous = NORMAL` (SQLite's recommended setting with WAL; crash-safe, only the last moment of writes could be lost on a power cut) plus a 5 s `busy_timeout`. `SQLITE_SYNCHRONOUS=FULL` switches back.
+  - Result locally: chat reply p50 498 → 174 ms; WhatsApp messages fully answered 40 → 87 per second. Numbers in `END_TO_END_TEST_RESULTS.md`.
+- **Tests:** `test/twin.test.js` (3), `test/navigation.test.js` (4), `test/sqlite-settings.test.js` (1), plus twin checks and a page-script parse check in `test/instant-demo.test.js`. Full suite: 319/319 locally.
 
 ## Batch 9: photo to quote (R2.1, rest)
 - When a quote is requested, photos the customer sent in the same chat in the last 2 days are attached to it (`quotes.photos`, `chatPhotos()` in `src/quotes.js`).
