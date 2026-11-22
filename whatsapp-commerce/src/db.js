@@ -457,7 +457,8 @@ CREATE TABLE IF NOT EXISTS usage (
 
 // Columns added after v1 – applied to existing databases on start.
 const MIGRATIONS = {
-  chat_leads: { contacted_at: 'TEXT', area: 'TEXT' }, // area: postcode + whether it's inside the business's areas
+  chat_leads: { contacted_at: 'TEXT', area: 'TEXT' },
+  quotes: { photos: "TEXT NOT NULL DEFAULT '[]'" }, // photos the customer sent in the same chat (last 2 days) // area: postcode + whether it's inside the business's areas
   email_log: { delivered_at: 'TEXT', event: 'TEXT' }, // from the Resend webhook: delivered / bounced / complained
   orders: { discount: 'REAL NOT NULL DEFAULT 0', delivery_fee: 'REAL NOT NULL DEFAULT 0', promo_code: 'TEXT', slot: 'TEXT', receipt_token: 'TEXT', paid_at: 'TEXT', reminded_at: 'TEXT', stripe_session_id: 'TEXT', recovered: 'INTEGER NOT NULL DEFAULT 0', review_sent_at: 'TEXT', review_status: 'TEXT' },
   customers: { last_inbound_at: 'TEXT', winback_sent_at: 'TEXT', tags: "TEXT NOT NULL DEFAULT '[]'", attributes: "TEXT NOT NULL DEFAULT '{}'", source: 'TEXT' },

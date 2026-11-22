@@ -32,7 +32,22 @@ export function cleanItems(items) {
   }).filter((x) => x.item);
 }
 export const quoteTotal = (items) => Math.round(items.reduce((s, x) => s + (x.price || 0) * x.qty, 0) * 100) / 100;
-const map = (q) => q && { ...q, items: json(q.items, []) };
+const map = (q) => q && { ...q, items: json(q.items, []), photos: json(q.photos, []) };
+
+/**
+ * Photos the customer sent in this chat in the last 2 days, attached to their quote request so the team sees them
+ * next to the draft. Website photos are links to the stored file; WhatsApp photos are opened through the dashboard
+ * (they're fetched from Meta with the business's own token). The AI's description is kept as a hint only – it never
+ * decides the price, and quotes still need the team's approval unless auto-send is switched on.
+ */
+export function chatPhotos(tenantId, waId) {
+  if (!waId) return [];
+  return getDb().prepare("SELECT type, body, created_at FROM messages WHERE tenant_id = ? AND wa_id = ? AND direction = 'in' AND type IN ('file', 'image') AND created_at > datetime('now', '-2 days') ORDER BY id DESC LIMIT 6").all(tenantId, waId)
+    .map((m) => ({ ...json(m.body, {}), _type: m.type, at: m.created_at }))
+    .filter((b) => b._type === 'image' || String(b.mime || '').startsWith('image/'))
+    .map((b) => ({ url: b.fileUrl || null, mediaId: b.mediaId || null, hint: String(b.text || b.caption || '').replace(/^📎 \[photo: [^\]]*\]\s*(–\s*)?/, '').slice(0, 200) || null, at: b.at }))
+    .reverse();
+}
 export const getQuote = (tenantId, number) => map(getDb().prepare('SELECT * FROM quotes WHERE tenant_id = ? AND number = ?').get(tenantId, Number(number)));
 export const quoteByToken = (token) => map(getDb().prepare('SELECT * FROM quotes WHERE token = ?').get(String(token)));
 export const listQuotes = (tenantId, { status } = {}) => getDb().prepare(`SELECT * FROM quotes WHERE tenant_id = ? ${status ? 'AND status = ?' : ''} ORDER BY id DESC LIMIT 200`).all(...[tenantId, status].filter(Boolean)).map(map);
@@ -65,12 +80,14 @@ export async function createQuote(tenant, { waId, name, email, phone, request },
   const token = crypto.randomBytes(18).toString('base64url');
   getDb().prepare(`INSERT INTO quotes (tenant_id, number, token, wa_id, name, email, phone, request, items, total, notes, status, valid_until)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', date('now', ?))`).run(tenant.id, number, token, waId || null, name || null, email || null, phone || null, req, JSON.stringify(items), quoteTotal(items), notes, `+${days} days`);
+  const photos = chatPhotos(tenant.id, waId);
+  if (photos.length) getDb().prepare('UPDATE quotes SET photos = ? WHERE tenant_id = ? AND number = ?').run(JSON.stringify(photos), tenant.id, number);
   let q = getQuote(tenant.id, number);
   const auto = tenant.settings.quotes?.autoSend === true && items.length && items.every((x) => x.price !== null);
   let message = null;
   if (auto) ({ quote: q, message } = await sendQuote(tenant, number, { by: 'auto', skipChat: fromChat }));
   else {
-    const text = `📝 Quote request Q-${number}: ${req.slice(0, 300)}\n${[name, email, phone].filter(Boolean).join(' · ')}`;
+    const text = `📝 Quote request Q-${number}: ${req.slice(0, 300)}\n${[name, email, phone].filter(Boolean).join(' · ')}${photos.length ? `\n📷 ${photos.length} photo${photos.length === 1 ? '' : 's'} attached – see the Quotes tab` : ''}`;
     emailShop(tenant, `Quote to check: Q-${number}`, `${text}\n\nThe AI has drafted it from your price list – check it on the Quotes tab and press Send.`, { button: 'Open Quotes' }).catch(() => {});
     pushTeam(tenant, { title: `📝 Quote to check: Q-${number}`, body: req.slice(0, 120), url: '/admin/#quotes', tag: `quote-${number}` }).catch(() => {});
     for (const s of tenant.settings.notifications?.staffWaIds || []) notify(tenant, String(s).replace(/\D/g, ''), { type: 'text', text }, null).catch(() => {});

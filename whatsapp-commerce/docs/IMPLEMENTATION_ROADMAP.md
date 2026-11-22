@@ -43,7 +43,7 @@ Rules that apply to every item:
 
 | ID | Item | Status |
 |---|---|---|
-| R2.1 | Photo-to-quote: link the photo to the quote request; postcode and service-area check; urgency; owner approval by default | 🟡 service area ✅ batch 7; linking photos to quotes still to do |
+| R2.1 | Photo-to-quote: link the photo to the quote request; postcode and service-area check; urgency; owner approval by default | ✅ service area (batch 7), photos attached to quotes (batch 9) |
 | R2.2 | Per-trade qualification rules (one question at a time) | ⬜ |
 | R2.3 | Booking: tests across the daylight-saving change, configurable buffers, staff or resource availability | ⬜ |
 | R2.4 | Follow-up engine: one log of automatic actions, a per-customer cap, quiet hours | ✅ batch 5 |
@@ -71,7 +71,6 @@ Rules that apply to every item:
 ## Next batches
 
 1. **Deploy batches 1–8** as soon as the server answers again, using `scripts/deploy-vps.sh`. Then run `node src/cli/runEvals.js` on the server for the real-model evaluation.
-2. **R2.1 (rest):** link a customer's photo to their quote request, so the owner sees it on the draft.
-3. **R1.1:** Business Twin: show what the demo learnt, with source pages and uncertain facts.
-4. **R4:** simple owner navigation (Today, Conversations, Leads and Customers, Bookings and Quotes, Teach My AI, Results).
-5. **R8 (rest):** repeatable load test (widget, first reply, webhook throughput) with measured results.
+2. **R1.1:** Business Twin: show what the demo learnt, with source pages and uncertain facts.
+3. **R4:** simple owner navigation (Today, Conversations, Leads and Customers, Bookings and Quotes, Teach My AI, Results).
+4. **R8 (rest):** repeatable load test (widget, first reply, webhook throughput) with measured results.

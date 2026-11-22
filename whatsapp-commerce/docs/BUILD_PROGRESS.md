@@ -4,12 +4,21 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 8 (AI safety guards and the evaluation suite), 22 November 2026.
-- **Branch:** batches 1–8 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
+- **Last batch:** batch 9 (photos attached to quote requests), 22 November 2026.
+- **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** the owner approved deploying ("keep doing all the batches… you can deploy"). The deploy is **not done yet**: since the start of batch 2, the VPS (191.215.46.170) has not answered on SSH or HTTPS, while the rest of the internet works from here.
 - **How to deploy:** with `scripts/deploy-vps.sh` on the server. It snapshots the database, runs the tests inside the new image, checks `/health`, and rolls back automatically if anything fails.
-- **Tests:** 309 of 309 pass locally on Node 24, across two full runs. They run again inside the Node 22 image during the deploy.
+- **Tests:** 310 of 310 pass locally on Node 24. They run again inside the Node 22 image during the deploy.
 - **Live server:** still on commit `231ae4e`.
+
+## Batch 9: photo to quote (R2.1, rest)
+- When a quote is requested, photos the customer sent in the same chat in the last 2 days are attached to it (`quotes.photos`, `chatPhotos()` in `src/quotes.js`).
+  - Website photos show as thumbnails on the quote.
+  - WhatsApp photos open through the dashboard with the login key; they are never public links.
+- The AI's description of a photo is shown as "the AI's guess – check the photo yourself". It never sets a price.
+- Quotes stay drafts for the team to approve, unless the owner has switched auto-send on.
+- The team's alert says how many photos are attached.
+- **Tests:** `test/photo-quote.test.js`.
 
 ## Batch 8: AI safety guards and the evaluation suite (R8)
 - **Price guard** (`guardPrices` in `src/verified.js`, used in `src/ai/direct.js`; switch it off with `settings.ai.blockUnverifiedPrices: false`):
