@@ -333,6 +333,18 @@ export function adminRouter() {
     res.json(out);
   });
   const CHURN = ['too_expensive', 'not_enough_value', 'missing_feature', 'too_hard_to_set_up', 'ai_answers_not_good_enough', 'switching_tool', 'business_closed_or_paused', 'other'];
+  // account email: where "Lost your key?" links (and billing emails) go. Owners only; the old address is told of a change.
+  r.get('/tenants/:tenantId/account-email', requireTenant, requireOwner, (req, res) => res.json({ email: getDb().prepare('SELECT owner_email FROM tenants WHERE id = ?').get(req.tenant.id)?.owner_email || null, emailConfigured: emailConfigured() }));
+  r.put('/tenants/:tenantId/account-email', requireTenant, requireOwner, (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]{2,}$/.test(email)) return res.status(400).json({ error: 'Please enter a valid email address' });
+    const old = getDb().prepare('SELECT owner_email FROM tenants WHERE id = ?').get(req.tenant.id)?.owner_email || null;
+    if (old === email) return res.json({ email });
+    getDb().prepare('UPDATE tenants SET owner_email = ? WHERE id = ?').run(email, req.tenant.id);
+    audit({ tenantId: req.tenant.id, actor: req.isSuper ? 'platform' : 'owner', role: req.role, action: 'account_email.changed', ip: req.ip });
+    if (old) sendEmail({ tenantId: req.tenant.id, topic: 'account_email_changed', to: old, subject: 'Your account email was changed', text: `The account email for ${req.tenant.settings.business?.name || req.tenant.name} was changed from this address. Sign-in links will now go to the new address.\n\nIf this wasn't you, reply to this email straight away.` }).catch(() => {});
+    res.json({ email });
+  });
   r.post('/tenants/:tenantId/churn-feedback', requireTenant, requireOwner, (req, res) => {
     const reason = String(req.body?.reason || '');
     if (!CHURN.includes(reason)) return res.status(400).json({ error: 'Choose a reason' });

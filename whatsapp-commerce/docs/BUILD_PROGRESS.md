@@ -15,7 +15,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - **Data:** intact (14 businesses).
   - **Rollback:** `sh scripts/rollback-vps.sh`.
 - **First deploy attempts:** one merge conflict with the demo-engine branch (`server.js` imports; both kept), and a calendar test that was flaky under load (fixed). The script stopped safely each time before restarting anything.
-- **Tests:** 356 of 356 pass locally on Node 24 (batch 13). They run again inside the Node 22 image during the deploy.
+- **Tests:** 357 of 357 pass locally on Node 24 (batch 13). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
 
 ## Batch 13: choose who (R2.3), lost key (R0.13), change an automation (R3.3)
@@ -25,6 +25,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - Same answer whether or not the email is known; the email is sent in the background so the reply time doesn't give it away. Alert addresses (which may be staff) can't recover.
   - Opening the link changes nothing (so email link scanners can't use it up); pressing the button makes a new admin key, shown once. The old key stops working; the Dify tool key and staff keys are untouched. A second email says the key was changed; both steps are in the audit log. Rate-limited.
   - **Needs email (Resend) to be set up on the server** – until then the form says so plainly and the platform operator can reset a key.
+  - **Account email** (Billing → "🔑 Account email", owners only): none of the 12 live businesses had a sign-up email recorded (they were set up by hand), so recovery couldn't have reached them. Owners can now set it; changing it emails the old address and is audit-logged; Today shows "Add your account email" until it's set. (Checked by tests, not yet in a browser.)
 - **Change an automation in plain English:** in "Describe an automation", choose "Change ‹name›" and say what to change. The AI gets the current automation and returns the whole updated one, which goes through the same checks and try-out; the draft shows what was added and removed and any trigger-word changes. Approving updates that automation in place (same id, on/off state kept); its own trigger words don't count as a clash.
 - **Roadmap correction:** the plan usage page (Billing → "Your usage this month") and the cancellation reason were already built (batches 2 and 6) – R6 is marked accordingly.
 - **Tests:** `test/recovery.test.js` (2), staff choice in `booking-edge.test.js` (1), automation change in `auto-draft.test.js` (1), `chooseStaff` in `settings-defaults.test.js`. Full suite 356/356 locally. Checked in a browser on a local test copy: day view (Dan / Raj / Not assigned), changing "With" (saved; unknown name refused), "Lost your key?" (shows the email-not-set-up message).

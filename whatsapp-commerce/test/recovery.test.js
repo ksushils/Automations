@@ -62,3 +62,26 @@ test('without email set up, the page says so instead of pretending', async () =>
     assert.match(r.message, /isn't set up/);
   } finally { server.close(); }
 });
+
+test('owners set their account email (needed for recovery); a change tells the old address; staff cannot', () => withEmail(async (sent) => {
+  const { tenant } = tenants.createTenant({ name: 'Hand-made Shop' });
+  const { createStaff } = await import('../src/staff.js');
+  const staffKey = createStaff(tenant.id, { name: 'Sam' }).key;
+  const { todayList } = await import('../src/today.js');
+  assert.ok(todayList(tenants.getTenant(tenant.id)).items.some((i) => i.key === 'account_email'), 'Today reminds the owner');
+  const server = createApp().listen(0);
+  const url = `http://127.0.0.1:${server.address().port}/api/tenants/${tenant.id}/account-email`;
+  const sup = { Authorization: `Bearer ${process.env.SUPER_ADMIN_KEY}`, 'Content-Type': 'application/json' };
+  try {
+    assert.equal((await fetch(url, { method: 'PUT', headers: { ...sup, Authorization: `Bearer ${staffKey}` }, body: JSON.stringify({ email: 'evil@x.example' }) })).status, 403);
+    assert.equal((await fetch(url, { method: 'PUT', headers: sup, body: JSON.stringify({ email: 'nope' }) })).status, 400);
+    await fetch(url, { method: 'PUT', headers: sup, body: JSON.stringify({ email: 'Owner@Shop.example' }) });
+    assert.equal((await (await fetch(url, { headers: sup })).json()).email, 'owner@shop.example');
+    assert.equal(sent.length, 0, 'first time: nobody to tell');
+    await fetch(url, { method: 'PUT', headers: sup, body: JSON.stringify({ email: 'new@shop.example' }) });
+    await new Promise((x) => setTimeout(x, 50));
+    assert.equal(sent.at(-1).to?.[0] || sent.at(-1).to, 'owner@shop.example');
+    assert.match(sent.at(-1).subject, /account email was changed/);
+    assert.ok(!todayList(tenants.getTenant(tenant.id)).items.some((i) => i.key === 'account_email'));
+  } finally { server.close(); }
+}));

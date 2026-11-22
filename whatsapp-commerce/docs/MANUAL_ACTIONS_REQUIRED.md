@@ -81,3 +81,5 @@ This is how failure alerts reach you: failed emails, failing jobs, failed backup
 ## Lost-key recovery needs email
 
 "Lost your key?" on the sign-in page (batch 13) can only send its link once email (Resend: API key and a verified sending domain) is set up in Setup. Until then it tells owners to contact support, and you can reset a key from the super admin dashboard.
+
+Also: none of the live businesses has an account email yet (they were created by hand). Each owner should add theirs in Billing → Account email – or you can, signed in as super admin – otherwise recovery has nowhere to send the link.

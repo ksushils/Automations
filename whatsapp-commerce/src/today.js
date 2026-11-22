@@ -54,6 +54,8 @@ export function todayList(tenant, { now = Date.now() } = {}) {
   // 8. automation drafts waiting for approval
   const ad = d.prepare("SELECT value FROM kv WHERE key LIKE ?").all(`autodraft:${id}:%`).map((r) => json(r.value, {})).filter((x) => x.status === 'draft' && x.ok).length;
   if (ad) items.push({ key: 'automation_drafts', level: 'info', icon: '✨', title: `${ad} automation ${ad === 1 ? 'draft' : 'drafts'} to review`, detail: 'Not live until you approve', tab: 'automations' });
+  // 9. no account email: a lost key would lock the owner out
+  if (!d.prepare('SELECT owner_email FROM tenants WHERE id = ?').get(id)?.owner_email) items.push({ key: 'account_email', level: 'info', icon: '🔑', title: 'Add your account email', detail: 'So you can get back in if you ever lose your key', tab: 'billing', ownerOnly: true });
   const order = { urgent: 0, todo: 1, info: 2 };
   items.sort((a, b) => order[a.level] - order[b.level]);
   return { items, allClear: !items.some((i) => i.level !== 'info'), at: new Date(now).toISOString() };

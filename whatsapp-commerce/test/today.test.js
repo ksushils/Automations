@@ -10,8 +10,8 @@ const keys = (t) => todayList(tenants.getTenant(t.id)).items.map((i) => i.key);
 test('Today: all clear for a quiet business', () => {
   const t = makeTenant({ store: { type: 'none' } });
   const r = todayList(tenants.getTenant(t.id));
-  assert.equal(r.allClear, true);
-  assert.deepEqual(r.items, []);
+  assert.equal(r.allClear, true, 'only for-information rows');
+  assert.deepEqual(r.items.map((i) => i.key), ['account_email'], 'just the reminder to add an account email');
 });
 
 test('Today: urgent first, then things to do, then for-information – each linking to its page', () => {
@@ -30,12 +30,12 @@ test('Today: urgent first, then things to do, then for-information – each link
   d.prepare("INSERT INTO tickets (tenant_id, number, wa_id, subject, description, status) VALUES (?, 1, 'z', 'Leak', 'Kitchen', 'open')").run(t.id);
   d.prepare("INSERT INTO unanswered (tenant_id, question) VALUES (?, 'Do you do Sundays?')").run(t.id);
   const r = todayList(tenants.getTenant(t.id));
-  assert.deepEqual(r.items.map((i) => i.key), ['handover', 'urgent_leads', 'leads', 'bookings_to_confirm', 'quotes', 'tickets', 'appointments_today', 'gaps']);
+  assert.deepEqual(r.items.map((i) => i.key), ['handover', 'urgent_leads', 'leads', 'bookings_to_confirm', 'quotes', 'tickets', 'appointments_today', 'gaps', 'account_email']);
   assert.equal(r.allClear, false);
   assert.match(r.items[0].title, /^1 chat is waiting/, 'the automatic answer check (qa:) is not a customer');
   assert.match(r.items[1].detail, /Dave/);
   assert.match(r.items.find((i) => i.key === 'appointments_today').detail, /23:59 Visit – Kim/);
-  assert.deepEqual([...new Set(r.items.map((i) => i.tab))], ['inbox', 'leads', 'bookings', 'quotes', 'tickets', 'knowledge']);
+  assert.deepEqual([...new Set(r.items.map((i) => i.tab))], ['inbox', 'leads', 'bookings', 'quotes', 'tickets', 'knowledge', 'billing']);
 });
 
 test('Today fits the business: no booking or order rows when those are off; a shop sees orders', () => {

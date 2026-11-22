@@ -573,7 +573,7 @@ async function overview() {
       <div><button class="btn ghost" data-test="dify">Test Dify</button></div>
       <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></details>`;
   api(T('/today')).then((td) => {
-    if (S.role !== 'owner' && !S.super) td.items = td.items.filter((i) => STAFF_TABS.has(i.tab)); // staff only see what they can open
+    if (S.role !== 'owner' && !S.super) td.items = td.items.filter((i) => STAFF_TABS.has(i.tab) && !i.ownerOnly); // staff only see what they can open
     const col = { urgent: '#b42318', todo: '#d4a017', info: '#5d6b63' };
     $('#todo').innerHTML = `<div class="card"><h2>${td.allClear ? '✅ All clear for now' : '📋 To do now'}</h2>${td.items.length ? td.items.map((i) => `<a href="#" data-todo="${esc(i.tab)}" style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line);text-decoration:none;color:inherit"><span style="font-size:20px">${i.icon}</span><span style="flex:1"><b style="color:${col[i.level]}">${esc(i.title)}</b><br><span class="mute">${esc(i.detail || '')}</span></span><span class="mute">Open →</span></a>`).join('') : '<p class="mute">Nothing waiting – no chats for a person, no new leads, nothing to confirm. New ones show here as they arrive.</p>'}</div>`;
     $('#todo').querySelectorAll('[data-todo]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); S.tab = a.dataset.todo; store.set('wc_tab', S.tab); render(); }));
@@ -1743,7 +1743,8 @@ async function billing() {
       <div style="display:flex;gap:6px"><input readonly value="${esc(rf.link)}" id="reflink"><button class="btn" id="refcopy" style="width:auto">Copy</button></div>
       <p class="mute" style="margin-top:8px">${rf.signups} signed up · ${rf.paying} paying · <b>£${rf.monthlyEarnings}/month</b> earned${rf.referred.length ? '' : ' so far'}. Free plan chats show a "Powered by" link that counts for you too.</p>
       ${rf.referred.length ? `<div class="tablewrap"><table><tr><th>Business</th><th>Plan</th><th>Status</th><th>Since</th></tr>${rf.referred.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.plan)}</td><td>${esc(r.status)}</td><td>${esc(r.since)}</td></tr>`).join('')}</table></div>` : ''}</div>` : '';
-  $('#app').innerHTML = refCard + `<div class="card"><h2>Your plan</h2>
+  setTimeout(() => accountEmailCard().catch(() => {}), 0);
+  $('#app').innerHTML = refCard + `<div id="acctemail"></div><div class="card"><h2>Your plan</h2>
       <p><b>${esc(plans[b.plan]?.label || b.plan)}</b> · status <span class="pill ${['active', 'trialing'].includes(status) ? '' : 'warn'}">${esc(status)}</span>${trial && status === 'trialing' ? ` · trial ends ${trial.toLocaleDateString('en-GB')}` : ''}</p>
       ${b.configured ? `<p>${b.stripe_customer_id ? '<button class="btn ghost" id="portal">Manage billing, invoices & card</button>' : ''}</p>` : '<p class="mute">Online billing is not set up on this server (PLATFORM_STRIPE_SECRET_KEY). Your provider will invoice you directly.</p>'}</div>
     ${b.configured ? `<div class="row">${Object.entries(plans).filter(([, p]) => p.priceGbp > 0).map(([k, p]) => `<div class="card"><h2>${esc(p.label)}</h2><div class="stat">£${p.priceGbp}<span class="mute" style="font-size:13px">/month</span></div>
@@ -1767,6 +1768,16 @@ async function billing() {
     $('#churnskip').onclick = go;
   };
   billingExtras(b, history).catch(() => {});
+}
+
+async function accountEmailCard() {
+  if (S.role !== 'owner' && !S.super) return;
+  const box = $('#acctemail'); if (!box) return;
+  const a = await api(T('/account-email'));
+  box.innerHTML = `<div class="card"><h2>🔑 Account email</h2><p class="mute">Where we send a sign-in link if you lose your key (“Lost your key?” on the sign-in page), and billing emails. Only you, the owner, can change it.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="acem" type="email" value="${esc(a.email || '')}" placeholder="you@yourbusiness.co.uk" style="flex:1;min-width:220px"><button class="btn" id="acsave">Save</button></div>
+    ${a.email ? '' : '<p class="pill warn" style="margin-top:8px">Not set – if you lose your key, you can\'t get back in on your own.</p>'}</div>`;
+  $('#acsave').onclick = async () => { try { await api(T('/account-email'), { method: 'PUT', body: { email: $('#acem').value } }); toast('Saved'); accountEmailCard(); } catch (e) { toast(e.message); } };
 }
 
 async function billingExtras(b, history) {
