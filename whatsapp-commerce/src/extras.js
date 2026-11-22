@@ -74,10 +74,12 @@ export async function runStockAlerts() {
       const name = t.settings.business?.name || t.name;
       const text = `🎉 Good news – *${a.title}* is back in stock at ${name}!${p.url ? `\n${p.url}` : ''}`;
       if (a.email) {
-        await sendEmail({ to: a.email, subject: `${a.title} is back in stock`, text: `${text.replace(/\*/g, '')}\n\nYou asked us to tell you when it was back. This was a one-off alert.\n\n${name}` }).then((r) => r.ok && sent++, () => {});
+        await sendEmail({ tenantId: t.id, topic: 'stock_alert', to: a.email, subject: `${a.title} is back in stock`, text: `${text.replace(/\*/g, '')}\n\nYou asked us to tell you when it was back. This was a one-off alert.\n\n${name}` }).then((r) => r.ok && sent++, () => {});
       } else if (!String(a.wa_id).startsWith('web:')) {
         const tpl = t.settings.notifications?.templates?.backInStock;
-        const r = await notify(t, a.wa_id, { type: 'buttons', text, buttons: [{ id: `p:${p.id}`, title: '🛍️ See it' }] }, tpl ? { name: tpl, params: [a.title] } : null, send).catch(() => 'failed');
+        const r = await notify(t, a.wa_id, { type: 'buttons', text, buttons: [{ id: `p:${p.id}`, title: '🛍️ See it' }] }, tpl ? { name: tpl, params: [a.title] } : null, send).catch((e) => { console.warn('[back in stock]', e.message); return 'failed'; });
+        const { logOutreach } = await import('./outreach.js');
+        logOutreach(t.id, a.wa_id, 'stock_alert', { ref: `stock:${a.id}`, status: r === 'sent' || r === 'template' ? 'sent' : r === 'failed' ? 'failed' : 'skipped', detail: r === 'sent' || r === 'template' ? null : String(r) });
         if (r === 'sent' || r === 'template') sent++;
       }
     }

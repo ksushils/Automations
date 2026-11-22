@@ -136,8 +136,14 @@ test('instant quotes: AI drafts from the price list, never guesses, team sends, 
   const { quote } = await createQuote(tenants.getTenant(t2.id), { waId: '447700900041', request: 'oak floor' });
   await sendQuote(tenants.getTenant(t2.id), quote.number);
   getDb().prepare("UPDATE quotes SET sent_at = datetime('now', '-3 days') WHERE tenant_id = ?").run(t2.id);
-  assert.equal(await runQuoteFollowUps(), 1);
+  // WhatsApp isn't connected in tests: the follow-up is recorded as failed (never counted as sent), and not retried
   assert.equal(await runQuoteFollowUps(), 0);
+  const { automationLog } = await import('../src/outreach.js');
+  const fl = automationLog(t2.id).find((l) => l.kind === 'quote_followup');
+  assert.equal(fl.status, 'failed');
+  assert.match(fl.detail, /not configured/);
+  assert.equal(await runQuoteFollowUps(), 0);
+  assert.equal(automationLog(t2.id).filter((l) => l.kind === 'quote_followup').length, 1, 'tried once only');
   assert.equal(quoteTotal(cleanItems([{ item: 'a', qty: 2, price: 1.5 }, { item: '', qty: 1, price: 9 }])), 3);
   assert.ok(simplePdf(['hello (world)']).toString('latin1').includes('hello \\(world\\)'));
 })));

@@ -120,14 +120,23 @@ export async function acceptQuote(token) {
 export async function runQuoteFollowUps() {
   const rows = getDb().prepare("SELECT * FROM quotes WHERE status = 'sent' AND followed_up_at IS NULL AND sent_at < datetime('now', '-2 days') AND sent_at > datetime('now', '-14 days') LIMIT 200").all().map(map);
   let n = 0;
+  const { guarded } = await import('./outreach.js');
   for (const q of rows) {
-    getDb().prepare("UPDATE quotes SET followed_up_at = datetime('now') WHERE id = ?").run(q.id);
     const t = getTenant(q.tenant_id);
-    if (!t?.active || t.settings.quotes?.followUp === false) continue;
+    if (!t?.active || t.settings.quotes?.followUp === false) { getDb().prepare("UPDATE quotes SET followed_up_at = datetime('now') WHERE id = ?").run(q.id); continue; }
+    const decided = () => getDb().prepare("UPDATE quotes SET followed_up_at = datetime('now') WHERE id = ?").run(q.id);
     const text = `Hi${q.name ? ` ${String(q.name).split(' ')[0]}` : ''}! Just checking you got your quote Q-${q.number} from ${t.settings.business.name}. Any questions? Reply here, or accept it when you're ready: ${quoteUrl(q)}`;
-    if (q.wa_id) await createSender(t)(q.wa_id, { type: 'text', text }).catch(() => {});
-    if (q.email) await sendEmail({ tenantId: t.id, topic: 'quote_followup', to: q.email, subject: `Your quote Q-${q.number}`, text: `${text}\n\n${t.settings.business.name}` }).catch(() => {});
-    n++;
+    let any = false;
+    if (q.wa_id && !String(q.wa_id).startsWith('web:')) {
+      const r = await guarded(t, q.wa_id, 'quote_followup', `quote:${q.id}`, () => createSender(t)(q.wa_id, { type: 'text', text }), { onDecided: decided });
+      if (r === 'retry') continue; // quiet hours – try again later
+      any = any || r === 'sent';
+    } else decided();
+    if (q.email) {
+      const r = await guarded(t, q.wa_id, 'quote_followup', `quote-email:${q.id}`, async () => { const m = await sendEmail({ tenantId: t.id, topic: 'quote_followup', to: q.email, subject: `Your quote Q-${q.number}`, text: `${text}\n\n${t.settings.business.name}` }); if (!m.ok && !m.retrying) throw new Error(m.error || 'email not sent'); }, { channel: 'email' });
+      any = any || r === 'sent';
+    }
+    if (any) n++;
   }
   return n;
 }

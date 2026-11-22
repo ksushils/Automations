@@ -11,6 +11,7 @@ import { enqueue, recoverUnprocessed } from './whatsapp/webhook.js';
 import { runAbandonedCheckouts } from './routes/storeWebhooks.js';
 import { enforceTrials, enforceGracePeriods } from './platform.js';
 import { track, integrityCheck } from './ops.js';
+import { guarded, purgeAutomationLog } from './outreach.js';
 import { runEmailRetries, purgeEmailLog } from './email.js';
 import { HAS_CONSENT_SQL } from './consent.js';
 import { applyRetention } from './privacy.js';
@@ -58,13 +59,12 @@ export async function runAbandonedCartReminders(now = Date.now()) {
     if (now - Date.parse(row.updated_at + 'Z') < minutes * 60000) continue;
     if (!inServiceWindow(row.tenant_id, row.wa_id)) continue; // only free-form inside the 24h window
     const conv = getConversation(row.tenant_id, row.wa_id);
-    conv.data.reminded = true;
-    saveConversation(conv);
-    await createSender(tenant)(row.wa_id, {
+    const r = await guarded(tenant, row.wa_id, 'abandoned_cart', `cart:${row.wa_id}:${row.updated_at}`, () => createSender(tenant)(row.wa_id, {
       type: 'buttons',
       text: `👋 You left some items in your cart:\n\n${formatCart(conv.cart, tenant.settings.business.currencySymbol)}\n\nReady to complete your order?`,
       buttons: [{ id: 'checkout', title: '✅ Checkout' }, { id: 'cart', title: '🛒 View cart' }],
-    }).then(() => sent++, (e) => console.warn('[abandoned cart]', e.message));
+    }), { onDecided: () => { conv.data.reminded = true; saveConversation(conv); } });
+    if (r === 'sent') sent++;
   }
   return sent;
 }
@@ -103,7 +103,7 @@ export function startJobs() {
     track('weekly-unanswered', H1, () => runWeeklyUnanswered().then(log('unanswered')));
     track('trials', H1, () => log('billing: paused expired trials')(enforceTrials()));
     track('grace-periods', H1, () => log('billing: paused after grace period')(enforceGracePeriods()));
-    track('retention', H1, () => import('./verified.js').then(({ purgeAnswers }) => log('retention')({ ...applyRetention(), emails: purgeEmailLog(), answers: purgeAnswers() })));
+    track('retention', H1, () => import('./verified.js').then(({ purgeAnswers }) => log('retention')({ ...applyRetention(), emails: purgeEmailLog(), answers: purgeAnswers(), automation: purgeAutomationLog() })));
     track('whatsapp-health', H1, () => import('./waHealth.js').then(({ runConnectionChecks }) => runConnectionChecks()).then(log('whatsapp health')));
     track('db-integrity', H1, () => { if (Date.now() - (globalThis.__integrityAt || 0) < 24 * H1) return 'skipped'; globalThis.__integrityAt = Date.now(); return integrityCheck(); });
     // keep knowledge bases in step with the shops' websites (weekly per shop, one shop per hour)
@@ -126,14 +126,14 @@ export async function runPaymentReminders(now = Date.now()) {
     const tenant = getTenant(o.tenant_id);
     const minutes = Number(tenant?.settings.ordering?.paymentReminderMinutes) || 0;
     if (!tenant?.active || !minutes || now - Date.parse(o.created_at + 'Z') < minutes * 60000) continue;
-    getDb().prepare("UPDATE orders SET reminded_at = datetime('now') WHERE id = ?").run(o.id);
+    const decided = () => getDb().prepare("UPDATE orders SET reminded_at = datetime('now') WHERE id = ?").run(o.id);
     const sym = tenant.settings.business.currencySymbol || '£';
     const tpl = tenant.settings.notifications?.templates?.paymentReminder;
     const fallback = tpl ? { name: tpl, params: [(o.customer_name || 'there').split(' ')[0], o.store_order_name, `${sym}${Number(o.subtotal).toFixed(2)}`, o.checkout_url || `${config.publicUrl}/r/${o.receipt_token}`] } : null;
     const msg = o.payment_method === 'payment_link' && o.checkout_url
       ? { type: 'cta', text: `⏰ Friendly reminder: order *${o.store_order_name}* (${sym}${Number(o.subtotal).toFixed(2)}) is waiting for payment.`, buttonText: 'Pay now', url: o.checkout_url }
       : { type: 'text', text: `⏰ Friendly reminder: we haven't received payment for order *${o.store_order_name}* (${sym}${Number(o.subtotal).toFixed(2)}) yet.\n${tenant.settings.ordering.bankDetails || ''}\nReference: ${o.store_order_name}\n\nAlready paid? Just send us the screenshot here 🙏` };
-    await notify(tenant, o.wa_id, msg, fallback).then((r) => r !== 'outside_window' && sent++, (e) => console.warn('[payment reminder]', e.message));
+    if ((await guarded(tenant, o.wa_id, 'payment_reminder', `order:${o.id}`, () => notify(tenant, o.wa_id, msg, fallback), { onDecided: decided })) === 'sent') sent++;
   }
   return sent;
 }
@@ -154,8 +154,9 @@ export async function runWinBack() {
       .all(tenant.id, `-${days} days`, `-${days} days`);
     const send = createSender(tenant);
     for (const r of rows) {
-      getDb().prepare("UPDATE customers SET winback_sent_at = datetime('now') WHERE tenant_id = ? AND wa_id = ?").run(tenant.id, r.wa_id);
-      await send(r.wa_id, { type: 'template', name: W.template, language: W.language || 'en_GB' }).then(() => sent++, (e) => console.warn('[win-back]', e.message));
+      const res = await guarded(tenant, r.wa_id, 'win_back', `winback:${r.wa_id}:${new Date().toISOString().slice(0, 10)}`, () => send(r.wa_id, { type: 'template', name: W.template, language: W.language || 'en_GB' }),
+        { onDecided: () => getDb().prepare("UPDATE customers SET winback_sent_at = datetime('now') WHERE tenant_id = ? AND wa_id = ?").run(tenant.id, r.wa_id) });
+      if (res === 'sent') sent++;
     }
   }
   return sent;

@@ -62,6 +62,7 @@ import { checkConnection, connectionStatus, connectionBanner } from '../waHealth
 import { entitlements, staffSeatsLeft } from '../entitlements.js';
 import { listOpportunities, setOpportunityState } from '../opportunities.js';
 import { listAnswers, answerStats } from '../verified.js';
+import { automationLog } from '../outreach.js';
 import { resultsBreakdown } from '../results.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
@@ -316,6 +317,7 @@ export function adminRouter() {
       res.json(out);
     } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
   });
+  r.get('/tenants/:tenantId/automation-log', requireTenant, (req, res) => res.json({ settings: { maxPerDay: Number(req.tenant.settings.followUps?.maxPerDay) || 2, quietStart: req.tenant.settings.followUps?.quietStart ?? 21, quietEnd: req.tenant.settings.followUps?.quietEnd ?? 8, enabled: req.tenant.settings.followUps?.enabled !== false }, log: automationLog(req.tenant.id, { waId: req.query.waId ? String(req.query.waId) : undefined, limit: req.query.limit }) }));
   r.get('/tenants/:tenantId/answers', requireTenant, (req, res) => res.json({ stats: answerStats(req.tenant.id), answers: listAnswers(req.tenant.id, { flagged: req.query.flagged === '1', limit: req.query.limit }) }));
   r.get('/tenants/:tenantId/results', requireTenant, (req, res) => res.json(resultsBreakdown(req.tenant, req.query.month ? String(req.query.month) : undefined)));
   r.get('/tenants/:tenantId/entitlements', requireTenant, (req, res) => res.json(entitlements(req.tenant)));

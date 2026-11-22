@@ -402,6 +402,20 @@ CREATE TABLE IF NOT EXISTS answer_evidence (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_answer_evidence_tenant ON answer_evidence(tenant_id, id);
+-- every automatic message to a customer (sent / skipped and why / failed) – follow-up guard rails
+CREATE TABLE IF NOT EXISTS automation_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  wa_id TEXT,
+  kind TEXT NOT NULL,
+  ref TEXT,
+  status TEXT NOT NULL,
+  channel TEXT,
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_automation_log_cust ON automation_log(tenant_id, wa_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_automation_log_ref ON automation_log(tenant_id, kind, ref);
 -- Opportunities the owner resolved or snoozed (the items themselves are computed from live records)
 CREATE TABLE IF NOT EXISTS opportunity_state (
   tenant_id TEXT NOT NULL,

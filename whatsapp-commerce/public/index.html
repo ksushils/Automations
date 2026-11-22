@@ -389,6 +389,17 @@ async function tenants() {
 }
 
 // ---------- overview ----------
+// ---------- Automatic messages log (Automations tab) ----------
+async function automationLogCard() {
+  const r = await api(T('/automation-log?limit=60'));
+  const box = await waitFor('#autolog'); if (!box) return;
+  const when = (s) => new Date(s).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' });
+  const st = { sent: 'Sent', skipped: 'Not sent', failed: 'Failed' };
+  box.className = 'card';
+  box.innerHTML = `<h2>📬 Automatic messages</h2><p class="mute">Every follow-up the system sent by itself, and the ones it held back. ${r.settings.enabled ? `Reminders and follow-ups: at most <b>${r.settings.maxPerDay}</b> per customer in 24 hours, none between ${r.settings.quietStart}:00 and ${r.settings.quietEnd}:00. Appointment reminders and alerts the customer asked for (back in stock) are not held back.` : '<b>Automatic follow-ups are switched off.</b>'} Change this in Settings → Automatic follow-ups.</p>
+    ${r.log.length ? `<div class="tablewrap"><table><tr><th>When</th><th>Customer</th><th>Message</th><th>Result</th></tr>${r.log.map((x) => `<tr><td>${when(x.at)}</td><td>${esc(x.customer || x.waId || '–')}</td><td>${esc(x.label)}${x.channel === 'email' ? ' (email)' : ''}</td><td>${x.status === 'sent' ? 'Sent' : `<span class="pill warn">${esc(st[x.status] || x.status)}</span>`}${x.detail ? `<div class="mute" style="font-size:12px">${esc(x.detail)}</div>` : ''}</td></tr>`).join('')}</table></div>` : '<p class="mute">Nothing sent automatically yet.</p>'}`;
+}
+
 // ---------- Results: verified vs assisted vs estimated vs potential (Analytics tab) ----------
 async function resultsCard() {
   const r = await api(T('/results'));
@@ -1004,6 +1015,7 @@ const FIELDS = [
   ['Promo codes & delivery zones', [['ordering.promoCodes', 'Promo codes (JSON) – [{"code":"WELCOME10","type":"percent|fixed|free_delivery","value":10,"minSpend":0,"expires":"2026-12-31","maxUses":0,"oncePerCustomer":true}]', 'json'], ['ordering.deliveryZones', 'Delivery zones (JSON, empty = deliver anywhere) – [{"name":"Central London","postcodes":["SW1","W1","EC"],"fee":3.5,"minOrder":15,"freeOver":50}]', 'json']]],
   ['Delivery / collection time slots', [['ordering.slots.enabled', 'Ask customers to pick a time slot', 'bool'], ['ordering.slots.times', 'Time windows (comma, e.g. 10:00-12:00,14:00-16:00)', 'csv'], ['ordering.slots.days', 'Days ahead to offer', 'number'], ['ordering.slots.leadHours', 'Minimum notice (hours)', 'number'], ['ordering.slots.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum']]],
   ['Card payments (Stripe – built-in catalogue & custom stores)', [['payments.stripe.secretKey', 'Stripe secret key (sk_live_… / rk_live_…)', 'secret'], ['payments.stripe.webhookSecret', 'Stripe webhook signing secret (whsec_…)', 'secret']]],
+  ['Automatic follow-ups', [['followUps.enabled', 'Send automatic follow-ups (cart, payment, quote, review reminders)', 'bool'], ['followUps.maxPerDay', 'Most automatic messages to one customer in 24 hours (default 2)', 'number'], ['followUps.quietStart', 'Quiet hours start (hour, default 21)', 'number'], ['followUps.quietEnd', 'Quiet hours end (hour, default 8)', 'number']]],
   ['Results', [['results.averageJobValue', 'Average job or order value (optional – only used for estimates, always labelled as estimates)', 'number']]],
   ['Notifications', [['notifications.alertEmails', 'Email order alerts to (comma; empty = your sign-up email)', 'csv'], ['notifications.staffWaIds', 'Staff WhatsApp numbers for alerts (comma)', 'csv'], ['notifications.webhookUrl', 'Webhook URL for new leads, bookings and orders (n8n / Zapier / Make)'], ['notifications.abandonedCartMinutes', 'Abandoned cart reminder after minutes (0 = off)', 'number'], ['notifications.winBack.enabled', 'Win-back offers to lapsed customers', 'bool'], ['notifications.winBack.template', 'Win-back template name (approved in Meta)'], ['notifications.winBack.afterDays', 'Send after days without an order', 'number'], ['notifications.defaultCountryCode', 'Default country code for local numbers (44 = UK)']]],
   ['Bookings in the chat', [['bookings.enabled', 'Take bookings in the chat (customers pick a day and time)', 'bool'], ['bookings.services', 'Services (JSON) – [{"name":"Test day","minutes":60,"price":120,"deposit":30}] (deposit needs Stripe)', 'json'], ['bookings.times', 'Start times (comma, e.g. 09:00,11:00,14:00)', 'csv'], ['bookings.days', 'Days ahead to offer (default 14)', 'number'], ['bookings.closedDays', 'Closed days (comma, 0 = Sunday … 6 = Saturday)', 'csvnum'], ['bookings.leadHours', 'Minimum notice (hours)', 'number'], ['bookings.perSlot', 'Bookings per time slot (default 1)', 'number'], ['bookings.autoConfirm', 'Confirm automatically (otherwise you confirm on the Bookings tab)', 'bool'], ['bookings.reminderHours', 'Reminder hours before (0 = off, default 24)', 'number'], ['bookings.reminderTemplate', 'Reminder template for customers outside the 24h window (vars: name, when, shop)'], ['bookings.rebookDays', '"Book again" message days after a visit (0 = off)', 'number'], ['bookings.rebookTemplate', '"Book again" template (approved marketing template, var: name)', ['bookings.secondReminderHours', 'Second reminder this many hours before (e.g. 2; empty = none)', 'number']]]],
@@ -1061,7 +1073,8 @@ async function downloadCsv(kind) {
 // ---------- automations ----------
 async function automations() {
   const { flows } = await api(T('/flows'));
-  $('#app').innerHTML = `<div class="card"><h2>Automations <span class="mute" style="font-weight:400">– keyword auto-replies & chatbot flows</span></h2>
+  automationLogCard().catch(() => {});
+  $('#app').innerHTML = `<div id="autolog"></div><div class="card"><h2>Automations <span class="mute" style="font-weight:400">– keyword auto-replies & chatbot flows</span></h2>
     <p class="mute">Flows start when a customer sends a keyword (e.g. “hi”, “price list”), on their very first message, or when they arrive from a Click-to-WhatsApp ad. Anything not matched goes to the shop bot / AI.</p>
     <p><button class="btn" id="newflow">+ New flow</button> ${FLOW_PRESETS.map((p, i) => `<button class="btn ghost" data-preset="${i}">Use template: ${esc(p.name)}</button>`).join(' ')}</p></div>
     <div class="card"><div class="tablewrap"><table><tr><th>Name</th><th>Triggers</th><th>Blocks</th><th>Runs</th><th>Status</th><th></th></tr>

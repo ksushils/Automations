@@ -21,6 +21,8 @@ export function makeTenant(overrides = {}) {
       },
     },
     ordering: { paymentMethods: ['cod', 'bank_transfer'], fulfilment: ['delivery', 'pickup'], deliveryFee: 3.5, freeDeliveryOver: 50, bankDetails: 'Sort 00-00-00 Acc 12345678' },
+    // no quiet hours in tests (they'd depend on the time of day); the guard rails have their own tests with a fixed clock
+    followUps: { quietStart: 0, quietEnd: 0 },
   });
   return tenants.updateTenantSettings(tenant.id, overrides); // deep-merged on top of the defaults
 }

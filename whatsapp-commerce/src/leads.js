@@ -259,7 +259,8 @@ export async function runLeadNudges(now = Date.now()) {
     }
     if (age >= 1440 && l.email && once(`lead_followup:${l.id}`)) {
       const biz = tenant.settings.business.name;
-      sendEmail({ tenantId: tenant.id, topic: 'lead_followup', to: l.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Following up from ${biz}`, text: `Hi${l.name ? ` ${String(l.name).split(' ')[0]}` : ''},\n\nThanks for getting in touch with ${biz}${l.topic && l.topic !== 'general' ? ` about ${l.topic}` : ''}. Did you get everything you needed? Just reply to this email and we'll help.\n\n${biz}` }).catch(() => {});
+      const { logOutreach } = await import('./outreach.js');
+      sendEmail({ tenantId: tenant.id, topic: 'lead_followup', to: l.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Following up from ${biz}`, text: `Hi${l.name ? ` ${String(l.name).split(' ')[0]}` : ''},\n\nThanks for getting in touch with ${biz}${l.topic && l.topic !== 'general' ? ` about ${l.topic}` : ''}. Did you get everything you needed? Just reply to this email and we'll help.\n\n${biz}` }).catch(() => {}).then((m) => logOutreach(tenant.id, l.wa_id, 'lead_followup', { ref: `lead:${l.id}`, channel: 'email', status: m.ok || m.retrying ? 'sent' : 'failed', detail: m.ok ? null : m.error }), (e) => logOutreach(tenant.id, l.wa_id, 'lead_followup', { ref: `lead:${l.id}`, channel: 'email', status: 'failed', detail: e.message }));
       n++;
     }
   }

@@ -251,8 +251,12 @@ export async function runReviewRequests(now = Date.now()) {
     const rows = getDb().prepare(`SELECT * FROM orders WHERE tenant_id = ? AND status IN ('delivered', 'completed') AND review_sent_at IS NULL
       AND wa_id NOT LIKE 'web:%' AND updated_at > datetime('now', '-3 days') AND updated_at < datetime('now', ?)`).all(t.id, `-${hours * 60} minutes`);
     const send = createSender(t);
+    const { outreachCheck, logOutreach } = await import('./outreach.js');
     for (const o of rows) {
+      const gate = outreachCheck(t, o.wa_id, 'review_request', { ref: `order:${o.id}` });
+      if (!gate.ok && gate.retry) continue; // quiet hours – next run
       getDb().prepare("UPDATE orders SET review_sent_at = datetime('now') WHERE id = ?").run(o.id);
+      if (!gate.ok) { getDb().prepare("UPDATE orders SET review_status = 'skipped_limit' WHERE id = ?").run(o.id); if (!gate.duplicate) logOutreach(t.id, o.wa_id, 'review_request', { ref: `order:${o.id}`, status: 'skipped', detail: gate.reason }); continue; }
       const recent = getDb().prepare("SELECT 1 FROM orders WHERE tenant_id = ? AND wa_id = ? AND id != ? AND review_sent_at > datetime('now', '-30 days') AND review_status = 'sent'").get(t.id, o.wa_id, o.id);
       if (recent) { getDb().prepare("UPDATE orders SET review_status = 'skipped_recent' WHERE id = ?").run(o.id); continue; }
       const first = (o.customer_name || 'there').split(' ')[0];
@@ -262,6 +266,7 @@ export async function runReviewRequests(now = Date.now()) {
       const r = await notify(t, o.wa_id, { type: 'cta', text, buttonText: '⭐ Leave a review', url: C.url }, C.template ? { name: C.template, language: C.language, params: [first, name] } : null, send)
         .catch((e) => { console.warn('[review request]', e.message); return 'failed'; });
       getDb().prepare('UPDATE orders SET review_status = ? WHERE id = ?').run(r === 'sent' || r === 'template' ? 'sent' : r, o.id);
+      logOutreach(t.id, o.wa_id, 'review_request', { ref: `order:${o.id}`, status: r === 'sent' || r === 'template' ? 'sent' : r === 'failed' ? 'failed' : 'skipped', detail: r === 'sent' || r === 'template' ? null : r });
       if (r === 'sent' || r === 'template') sent++;
     }
   }
