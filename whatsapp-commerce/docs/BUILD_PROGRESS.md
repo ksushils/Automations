@@ -4,7 +4,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 13 (choose your stylist, per-staff day view, lost-key recovery, change an automation in plain English), 22 November 2026.
+- **Last batch:** batch 14 (WhatsApp access expiry warning, site assistant on more pages, Instagram/Messenger research), 22 November 2026.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** ✅ **batch 13 deployed to wa.karatit.com on 22 November 2026** (server commit `1e01ed4`; 371/372 tests in the image, 1 skipped; health ok; `/recover` answers honestly that email isn't set up; expired links refused; 12 businesses and 1,060 messages unchanged).
 - **Earlier:** batch 12 deployed to wa.karatit.com on 22 November 2026** (server commit `3a1c687`; 366/367 tests in the image, 1 skipped; health ok; `/examples` shows all 8; `bookings.staff` column present; 12 businesses and 1,060 messages unchanged; no business was affected by the Online-shop menu bug).
@@ -16,8 +16,15 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - **Data:** intact (14 businesses).
   - **Rollback:** `sh scripts/rollback-vps.sh`.
 - **First deploy attempts:** one merge conflict with the demo-engine branch (`server.js` imports; both kept), and a calendar test that was flaky under load (fixed). The script stopped safely each time before restarting anything.
-- **Tests:** 357 of 357 pass locally on Node 24 (batch 13). They run again inside the Node 22 image during the deploy.
+- **Tests:** 358 of 358 pass locally on Node 24 (batch 14). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
+
+## Batch 14: access expiry warning (R0.10), site assistant on more pages, Instagram/Messenger research (R5)
+- **WhatsApp access expiry warning** (`src/waHealth.js`): the daily connection check now also asks Meta (`debug_token`) when the access token – or its data access – ends. Permanent System User tokens never do; tokens from a personal login do. Within 7 days: state `token_expiring`, a dashboard banner, and **one** email per expiry date ("reconnect in Settings before then"), plus a platform alert. The WhatsApp number card shows "WhatsApp access: doesn't expire" or the end date.
+- **Site assistant on more pages:** the site's own chat assistant (when a site-chat business is set) now also appears on `/pricing` and `/examples`; the examples page ends with "Now ask it yourself". **On the live site no site-chat business is set, so it doesn't show yet.**
+- **Instagram and Messenger:** researched before building – see `docs/INSTAGRAM_MESSENGER_RESEARCH.md`.
+- **Checked in a browser** (local test copy): the Account email card from batch 13 (warning when empty, save, warning gone).
+- **Tests:** expiry checks in `test/batch2.test.js` (soonest of the two dates, past dates, one email per date, permanent tokens never warn). Full suite 358/358 locally.
 
 ## Batch 13: choose who (R2.3), lost key (R0.13), change an automation (R3.3)
 - **Customers choose who** (`src/bookings.js`): after picking a service that two or more staff do, the chat asks "Who would you like?" (Anyone, or a name). The times shown are that person's; the booking summary says "With: Amy" and the booking is recorded with them. If they're fully booked: "Anyone else" or talk to a person. A service only one person does skips the question. Settings → Bookings → "Let customers choose who" (on by default; listed in the default-on switches so Save never turns it off).
@@ -26,7 +33,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - Same answer whether or not the email is known; the email is sent in the background so the reply time doesn't give it away. Alert addresses (which may be staff) can't recover.
   - Opening the link changes nothing (so email link scanners can't use it up); pressing the button makes a new admin key, shown once. The old key stops working; the Dify tool key and staff keys are untouched. A second email says the key was changed; both steps are in the audit log. Rate-limited.
   - **Needs email (Resend) to be set up on the server** – until then the form says so plainly and the platform operator can reset a key.
-  - **Account email** (Billing → "🔑 Account email", owners only): none of the 12 live businesses had a sign-up email recorded (they were set up by hand), so recovery couldn't have reached them. Owners can now set it; changing it emails the old address and is audit-logged; Today shows "Add your account email" until it's set. (Checked by tests, not yet in a browser.)
+  - **Account email** (Billing → "🔑 Account email", owners only): none of the 12 live businesses had a sign-up email recorded (they were set up by hand), so recovery couldn't have reached them. Owners can now set it; changing it emails the old address and is audit-logged; Today shows "Add your account email" until it's set. (Checked in a browser in batch 14.)
 - **Change an automation in plain English:** in "Describe an automation", choose "Change ‹name›" and say what to change. The AI gets the current automation and returns the whole updated one, which goes through the same checks and try-out; the draft shows what was added and removed and any trigger-word changes. Approving updates that automation in place (same id, on/off state kept); its own trigger words don't count as a clash.
 - **Roadmap correction:** the plan usage page (Billing → "Your usage this month") and the cancellation reason were already built (batches 2 and 6) – R6 is marked accordingly.
 - **Tests:** `test/recovery.test.js` (2), staff choice in `booking-edge.test.js` (1), automation change in `auto-draft.test.js` (1), `chooseStaff` in `settings-defaults.test.js`. Full suite 356/356 locally. Checked in a browser on a local test copy: day view (Dan / Raj / Not assigned), changing "With" (saved; unknown name refused), "Lost your key?" (shows the email-not-set-up message).

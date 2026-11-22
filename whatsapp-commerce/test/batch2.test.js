@@ -83,7 +83,7 @@ test('connection health: a single failed call to Meta keeps the last good state;
 
 test('connection health job: only connected, active, WhatsApp plans, at most once a day each', async () => {
   let calls = 0;
-  const restore = fakeFetch((u) => { if (u.startsWith('https://graph.facebook.com')) { calls++; return okJson({ status: 'CONNECTED' }); } });
+  const restore = fakeFetch((u) => { if (u.startsWith('https://graph.facebook.com')) { if (!u.includes('/debug_token')) calls++; return okJson({ status: 'CONNECTED' }); } }); // the expiry check is a second call per business
   try {
     for (const r of getDb().prepare('SELECT id FROM tenants').all()) getDb().prepare("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(`wahealth:${r.id}`, JSON.stringify({ state: 'ok', checkedAt: new Date().toISOString() }));
     const a = makeTenant({ whatsapp: { phoneNumberId: 'PN3', accessToken: 'EAAG-a' } });
@@ -95,6 +95,39 @@ test('connection health job: only connected, active, WhatsApp plans, at most onc
     assert.equal(await runConnectionChecks(), 0, 'checked today already');
     assert.equal(calls, 1);
   } finally { restore(); }
+});
+
+test('token expiry: a warning 7 days ahead (banner + one email per expiry date); permanent tokens never warn', async () => {
+  const { expirySoon, tokenExpiry } = await import('../src/waHealth.js');
+  const now = Date.parse('2026-11-22T12:00:00Z');
+  assert.equal(expirySoon({ expiresAt: null, dataAccessExpiresAt: null }, now), null, 'never expires');
+  assert.equal(expirySoon({ expiresAt: '2026-12-20T00:00:00Z' }, now), null, 'weeks away');
+  assert.deepEqual(expirySoon({ expiresAt: '2026-12-20T00:00:00Z', dataAccessExpiresAt: '2026-11-25T12:00:00Z' }, now), { ends: '2026-11-25T12:00:00.000Z', days: 3 }, 'the soonest of the two counts');
+  assert.equal(expirySoon({ expiresAt: '2026-11-01T00:00:00Z' }, now), null, 'already past: that is token_invalid, not a warning');
+  const restoreCfg = emailOn();
+  let exp = Math.floor(Date.now() / 1000) + 3 * 86400;
+  const mails = [];
+  const restore = fakeFetch((u, o) => {
+    if (u.includes('/debug_token')) { assert.ok(!u.includes('undefined')); return okJson({ data: { is_valid: true, expires_at: exp, data_access_expires_at: 0 } }); }
+    if (u.startsWith('https://graph.facebook.com')) return okJson({ status: 'CONNECTED', quality_rating: 'GREEN' });
+    if (u.startsWith('https://api.resend.com')) { mails.push(JSON.parse(o.body).subject); return okJson({ id: 'em' + mails.length }); }
+  });
+  try {
+    const t = makeTenant({ whatsapp: { phoneNumberId: 'PN9', accessToken: 'EAAG-user-token' } });
+    getDb().prepare("UPDATE tenants SET owner_email = 'owner@example.test' WHERE id = ?").run(t.id);
+    let s = await checkConnection(tenants.getTenant(t.id));
+    assert.equal(s.state, 'token_expiring');
+    assert.match(s.detail, /in 3 days/);
+    assert.equal(connectionBanner(t.id).level, 'warn');
+    await checkConnection(tenants.getTenant(t.id));
+    await tick();
+    assert.deepEqual(mails, ['Your WhatsApp connection needs renewing soon'], 'one email, not one a day');
+    exp = 0; // reconnected with a permanent token
+    s = await checkConnection(tenants.getTenant(t.id));
+    assert.equal(s.state, 'ok'); assert.equal(s.tokenExpiresAt, null);
+    assert.equal(connectionBanner(t.id), null);
+    assert.equal((await tokenExpiry({ settings: { whatsapp: {} } })), null);
+  } finally { restore(); restoreCfg(); }
 });
 
 // ---------------- entitlements ----------------

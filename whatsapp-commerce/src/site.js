@@ -83,7 +83,7 @@ function layout(path, body, { ld = [], title, description, noindex = false, extr
   const org = { '@type': 'Organization', name: brand(), url: url('/'), ...(config.supportEmail ? { email: config.supportEmail } : {}), ...(config.contactPhone ? { telephone: config.contactPhone } : {}), ...(l.company ? { legalName: l.company } : {}), ...(l.address ? { address: l.address } : {}) };
   const graph = { '@context': 'https://schema.org', '@graph': [org, { '@type': 'WebSite', name: brand(), url: url('/') }, ...ld] };
   const navItems = [['/#how-it-works', 'How it works'], ['/pricing', 'Pricing'], ['/takeaways', 'For takeaways'], ['/whatsapp-cost-calculator', 'Cost calculator']];
-  const chat = path === '/' && siteChatTenant() ? `<script src="/chat-widget/${esc(siteChatTenant())}.js" async></script>` : '';
+  const chat = ['/', '/examples', '/pricing'].includes(path) && siteChatTenant() ? `<script src="/chat-widget/${esc(siteChatTenant())}.js" async></script>` : '';
   return `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -503,7 +503,7 @@ export function siteRouter() {
   const html = (res, body, status = 200) => res.status(status).type('html').set('Cache-Control', 'public, max-age=300').send(body);
   r.use(instantDemoRouter(layout)); // /try – your assistant in 60 seconds
   r.use(platformHelpRouter(layout)); // /guides – how to use the product
-  r.use(scenariosRouter(layout)); // /examples – scripted scenarios through the real engine, sample business
+  r.use(scenariosRouter(layout, { siteChatOn: () => !!siteChatTenant() })); // /examples – scripted scenarios through the real engine, sample business
   r.use(feeCheckerRouter(layout)); // /whatsapp-fee-checker – what your current provider adds on top of Meta
   r.get('/', (req, res) => html(res, home()));
   r.get('/pricing', (req, res) => html(res, pricing()));

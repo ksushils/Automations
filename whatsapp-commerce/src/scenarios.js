@@ -231,7 +231,7 @@ function scenarioHtml(sc, r) {
 ${r.team.map((t) => `<div class="team"><b>What the team gets: ${esc(t.title)}</b>${fmt(t.text)}</div>`).join('')}</section>`;
 }
 
-export function scenariosRouter(layout) {
+export function scenariosRouter(layout, { siteChatOn = () => false } = {}) {
   const r = express.Router();
   r.get('/examples', async (req, res) => {
     const results = [];
@@ -244,7 +244,8 @@ export function scenariosRouter(layout) {
 <p><span class="sample">Sample business · sample data</span> <span class="mute">${Object.values(BUSINESSES).map((b) => `“${esc(b.name)}”`).join(', ')} aren't real companies. Each conversation is a fixed script run through the same engine that answers live chats; nothing is sent to anyone, and the sample business is deleted after each run. In a live chat, questions typed in the customer's own words are answered by the AI from your own website.</span></p>
 <nav class="sc-nav" aria-label="Scenarios">${results.map(([sc]) => `<a href="#${esc(sc.key)}">${sc.emoji} ${esc(sc.title)}</a>`).join('')}</nav>
 ${results.map(([sc, res]) => scenarioHtml(sc, res)).join('')}
-<p style="margin-top:28px"><a class="btn" href="/try">Try it on your own website</a> <a class="btn ghost" href="/demo">Book a demo</a></p>
+<div class="sc"><h2>💬 Now ask it yourself</h2><p>${siteChatOn() ? 'The chat button in the corner of this page is the real assistant, answering questions about this service – ask it anything.' : ''} <b>Try it on your own website</b> and in about a minute it reads your pages and answers your customers' questions from them.</p>
+<p><a class="btn" href="/try">Try it on your own website</a> <a class="btn ghost" href="/demo">Book a demo</a></p></div>
 </div></section>`;
     res.type('html').set('Cache-Control', 'public, max-age=300').send(layout('/examples', body, { extraHead: `<style>${CSS}</style>`, ld: [{ '@type': 'WebPage', name: 'See it handle real situations', description: 'Scripted examples run through the real assistant engine with a sample business.' }] }));
   });

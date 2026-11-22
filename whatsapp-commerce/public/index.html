@@ -594,6 +594,11 @@ async function overview() {
         <div><div class="mute">Quality rating</div><b>${q}</b></div><div><div class="mute">Daily limit (unique customers)</div><b>${esc(String(x.messaging_limit_tier || '–').replace('TIER_', ''))}</b></div><div><div class="mute">Display name</div><b>${esc(x.name_status || '–')}</b></div></div>
         ${x.quality_rating === 'RED' || x.quality_rating === 'YELLOW' ? '<p class="pill warn">Quality is dropping – send fewer marketing messages and make sure contacts opted in, or Meta may limit the number.</p>' : ''}
         ${S.role === 'owner' ? '<p><button class="btn ghost" id="bprof">Edit WhatsApp business profile</button></p><div id="bpf"></div>' : ''}`;
+      api(T('/whatsapp/connection')).then(({ connection: c }) => { // when WhatsApp access ends (checked daily)
+        if (!c || !('tokenExpiresAt' in c || c.expiresOn)) return;
+        const ends = c.expiresOn || c.tokenExpiresAt;
+        el.insertAdjacentHTML('beforeend', `<p class="${c.state === 'token_expiring' ? 'pill warn' : 'mute'}">🔑 WhatsApp access: ${ends ? `ends ${new Date(ends).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}${c.state === 'token_expiring' ? ' – reconnect WhatsApp in Settings before then' : ''}` : "doesn't expire"}</p>`);
+      }).catch(() => {});
     }
     $('#app').insertBefore(el, $('#app').children[2] || null);
     const bp = el.querySelector('#bprof');

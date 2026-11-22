@@ -46,7 +46,7 @@ Today nothing is **Verified**: no real Stripe, Resend or Meta account has been c
 | Opt-in/opt-out, consent records | Tested | `src/consent.js`, `test/consent.test.js`, `privacy.test.js` | No | Medium | Done |
 | Coexistence, AI pause on human reply | Tested | `test/coexistence.test.js` | Live number | Medium | Blocked |
 | Embedded Signup | Tested | `completeEmbeddedSignup`, `platform.test.js` | Meta app review and Tech Provider status | High | Blocked |
-| Token expiry and connection health alerts | Partial | `/whatsapp/health` endpoint | Proactive daily check plus an owner alert | Medium | P1 |
+| Token expiry and connection health alerts | Built (batches 2 and 14) | Daily check per business (`src/waHealth.js`), owner email + banner on problems, warning 7 days before access ends | – | Medium | P1 |
 | Health endpoint | **Tested (this batch)** | `/health` reports the database and job state with no internal details | External monitor not set up | Medium | P0 |
 | Job failure detection | **Tested (this batch)** | `track()` and `jobHealth()` in `src/ops.js`. Alert after 3 failures in a row. | No | Medium | Done |
 | Database integrity check | **Tested (this batch)** | `integrityCheck()` runs `PRAGMA quick_check` daily and alerts on failure | No | Low | Done |

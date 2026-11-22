@@ -23,7 +23,7 @@ Rules that apply to every item:
 | R0.7 | Stripe test-mode end-to-end with the Stripe CLI (`stripe listen`, `stripe trigger`) | 🔒 needs test keys |
 | R0.8 | Resend live check: verified domain, test send, bounce webhook → `email_log` | Webhook ✅ batch 2. Live check 🔒 needs key and domain. |
 | R0.9 | Decide on SQLite and in-process jobs: **keep for now**. Revisit at about 50 active businesses, or if the job queue lags (overdue jobs > 0 for 10+ min) or `SQLITE_BUSY` errors appear. Move to a durable job table before a second process is added. | ✅ decision recorded |
-| R0.10 | WhatsApp connection health: daily token/number check per business, owner alert on expiry or disconnection, "approval pending" status | ✅ batch 2 |
+| R0.10 | WhatsApp connection health: daily token/number check per business, owner alert on expiry or disconnection, "approval pending" status | ✅ batch 2; batch 14: warning 7 days before access ends |
 | R0.11 | Content-Security-Policy header for the dashboard and public pages (report-only first) | ✅ batch 2 (dashboard: safe directives enforced, full policy report-only) |
 | R0.12 | Entitlement audit: list every plan-gated feature and prove each is enforced on the server (campaigns, seats, knowledge docs, WhatsApp, badge) | ✅ batch 2 (staff seats added; usage card) |
 | R0.13 | Key recovery for owners (email a one-time link to reset the admin key) | ✅ batch 13 (built and tested; sends once a Resend key is set – until then the page says so) |
@@ -71,6 +71,5 @@ Rules that apply to every item:
 ## Next batches
 
 1. **R5:** Instagram/Messenger – compare what Meta allows for small businesses first (research before building).
-2. **R0.10 (rest):** owner alert when the WhatsApp token is about to expire (the daily check exists; add the warning a week ahead).
 3. **R6 (rest):** optional set-up fee at sign-up (Stripe one-off price) – needs the user's decision on the amount.
-4. **R1 (rest):** demo page shows a live "try a question" box beside the examples (uses the instant demo engine).
+4. **Site chat:** switch on the site's own assistant (Setup → site chat business) so the home, pricing and examples pages have a live "ask it anything" chat – the pages already show it when set.
