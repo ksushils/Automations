@@ -9,7 +9,9 @@ import { runCampaign } from './campaigns.js';
 import { resumeFlow } from './bot/engine.js';
 import { enqueue, recoverUnprocessed } from './whatsapp/webhook.js';
 import { runAbandonedCheckouts } from './routes/storeWebhooks.js';
-import { enforceTrials } from './platform.js';
+import { enforceTrials, enforceGracePeriods } from './platform.js';
+import { track, integrityCheck } from './ops.js';
+import { runEmailRetries, purgeEmailLog } from './email.js';
 import { HAS_CONSENT_SQL } from './consent.js';
 import { applyRetention } from './privacy.js';
 import { runWeeklyRefresh } from './refresh.js';
@@ -68,41 +70,45 @@ export async function runAbandonedCartReminders(now = Date.now()) {
 }
 
 export function startJobs() {
+  const M5 = 5 * 60000, M1 = 30000, H1 = 3600000, M10 = 600000;
+  const log = (label) => (n) => { if (n && (typeof n !== 'object' || Object.values(n).some(Boolean))) console.log(`[${label}]`, typeof n === 'object' ? JSON.stringify(n) : n); return n; };
   const timer = setInterval(() => {
-    runAbandonedCartReminders().catch((e) => console.error('[jobs]', e));
-    runPaymentReminders().catch((e) => console.error('[jobs]', e));
-    runAbandonedCheckouts().catch((e) => console.error('[jobs]', e));
-    runReviewRequests().catch((e) => console.error('[jobs]', e));
-    runBookingJobs().catch((e) => console.error('[jobs]', e));
-  }, 5 * 60000);
+    track('abandoned-cart-reminders', M5, () => runAbandonedCartReminders());
+    track('payment-reminders', M5, () => runPaymentReminders());
+    track('abandoned-checkouts', M5, () => runAbandonedCheckouts());
+    track('review-requests', M5, () => runReviewRequests());
+    track('booking-jobs', M5, () => runBookingJobs());
+  }, M5);
   const minutely = setInterval(() => {
-    runScheduled().catch((e) => console.error('[jobs]', e));
-    recoverUnprocessed().then((n) => n && console.log(`[recovery] replayed ${n} unfinished message(s)`), (e) => console.error('[recovery]', e));
+    track('scheduled', M1, () => runScheduled());
+    track('message-recovery', M1, () => recoverUnprocessed().then((n) => { if (n) console.log(`[recovery] replayed ${n} unfinished message(s)`); return n; }));
+    track('email-retries', M1, () => runEmailRetries().then(log('email retries')));
     // leads still waiting for a reply: nudge the team (every 10 minutes)
-    if (Date.now() - (globalThis.__leadNudgeAt || 0) > 600000) { globalThis.__leadNudgeAt = Date.now(); import('./leads.js').then(({ runLeadNudges }) => runLeadNudges()).then((n) => n && console.log(`[leads] ${n} nudge(s)`), (e) => console.error('[lead nudges]', e.message)); }
-  }, 30000);
+    if (Date.now() - (globalThis.__leadNudgeAt || 0) > M10) { globalThis.__leadNudgeAt = Date.now(); track('lead-nudges', M10, () => import('./leads.js').then(({ runLeadNudges }) => runLeadNudges()).then(log('leads nudges'))); }
+  }, M1);
   // also right after start-up (messages interrupted by the previous deploy/crash)
-  setTimeout(() => recoverUnprocessed({ olderThanSec: 0 }).catch((e) => console.error('[recovery]', e)), 5000).unref();
+  setTimeout(() => track('message-recovery', M1, () => recoverUnprocessed({ olderThanSec: 0 })), 5000).unref();
   minutely.unref();
   const daily = setInterval(() => {
-    runWinBack().catch((e) => console.error('[jobs]', e));
-    runWeeklyQuality().then((q) => q && console.log('[quality]', q.score), (e) => console.error('[quality]', e.message));
-    runMorningBriefings().then((n) => n && console.log(`[briefing] sent ${n}`), (e) => console.error('[briefing]', e));
-    runStockAlerts().then((n) => n && console.log(`[back in stock] told ${n} customer(s)`), (e) => console.error('[stock alerts]', e));
-    runAppReminders().then((n) => n && console.log(`[keep your number] reminded ${n} shop(s) to open the Business app`), (e) => console.error('[coexistence]', e));
-    try { const n = cleanupDemos(); if (n) console.log(`[instant demo] deleted ${n} expired demo(s)`); } catch (e) { console.error('[instant demo]', e); }
-    runMonthlyReports().then((n) => n && console.log(`[value report] emailed ${n} shop(s)`), (e) => console.error('[value report]', e));
-    import('./learn.js').then(({ improveTradeTemplates }) => improveTradeTemplates()).then((n) => n && console.log(`[learn] improved ${n} trade template(s)`), (e) => console.error('[learn]', e.message));
-    import('./insights.js').then(({ runWeeklyDigests }) => runWeeklyDigests()).then((n) => n && console.log(`[digest] sent ${n}`), (e) => console.error('[digest]', e.message));
-    import('./quotes.js').then(({ runQuoteFollowUps }) => runQuoteFollowUps()).then((n) => n && console.log(`[quotes] followed up ${n}`), (e) => console.error('[quotes]', e.message));
-    runWeeklyUnanswered().then((n) => n && console.log(`[unanswered] emailed ${n} shop(s)`), (e) => console.error('[unanswered]', e));
-    try { const n = enforceTrials(); if (n) console.log(`[billing] paused ${n} expired trial(s)`); } catch (e) { console.error('[jobs]', e); }
-    try { const r = applyRetention(); if (Object.values(r).some(Boolean)) console.log('[retention]', JSON.stringify(r)); } catch (e) { console.error('[jobs]', e); }
+    track('win-back', H1, () => runWinBack());
+    track('weekly-quality', H1, () => runWeeklyQuality().then((q) => { if (q) console.log('[quality]', q.score); return q?.score ?? 0; }));
+    track('morning-briefings', H1, () => runMorningBriefings().then(log('briefing')));
+    track('stock-alerts', H1, () => runStockAlerts().then(log('back in stock')));
+    track('app-reminders', H1, () => runAppReminders().then(log('keep your number')));
+    track('demo-cleanup', H1, () => log('instant demo cleanup')(cleanupDemos()));
+    track('monthly-reports', H1, () => runMonthlyReports().then(log('value report')));
+    track('learn-templates', H1, () => import('./learn.js').then(({ improveTradeTemplates }) => improveTradeTemplates()).then(log('learn')));
+    track('weekly-digests', H1, () => import('./insights.js').then(({ runWeeklyDigests }) => runWeeklyDigests()).then(log('digest')));
+    track('quote-follow-ups', H1, () => import('./quotes.js').then(({ runQuoteFollowUps }) => runQuoteFollowUps()).then(log('quotes')));
+    track('weekly-unanswered', H1, () => runWeeklyUnanswered().then(log('unanswered')));
+    track('trials', H1, () => log('billing: paused expired trials')(enforceTrials()));
+    track('grace-periods', H1, () => log('billing: paused after grace period')(enforceGracePeriods()));
+    track('retention', H1, () => log('retention')({ ...applyRetention(), emails: purgeEmailLog() }));
+    track('db-integrity', H1, () => { if (Date.now() - (globalThis.__integrityAt || 0) < 24 * H1) return 'skipped'; globalThis.__integrityAt = Date.now(); return integrityCheck(); });
     // keep knowledge bases in step with the shops' websites (weekly per shop, one shop per hour)
-    import('./dify/provision.js').then(({ knowledgeChanged }) => runWeeklyRefresh({ onChange: (id) => knowledgeChanged(id) }))
-      .then((r) => r && console.log('[kb refresh]', JSON.stringify({ updated: r.updated, added: r.added, removed: r.removed, failed: r.failed })))
-      .catch((e) => console.error('[kb refresh]', e.message));
-  }, 3600000);
+    track('kb-refresh', H1, () => import('./dify/provision.js').then(({ knowledgeChanged }) => runWeeklyRefresh({ onChange: (id) => knowledgeChanged(id) }))
+      .then((r) => { if (r) console.log('[kb refresh]', JSON.stringify({ updated: r.updated, added: r.added, removed: r.removed, failed: r.failed })); return r ? { updated: r.updated, failed: r.failed } : null; }));
+  }, H1);
   timer.unref();
   daily.unref();
   return timer;

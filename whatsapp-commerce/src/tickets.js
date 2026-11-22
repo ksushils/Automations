@@ -85,7 +85,7 @@ export async function updateTicket(tenant, number, { status, priority, assignedT
 async function tellCustomer(tenant, t, text) {
   const out = { chat: false, email: false };
   if (t.wa_id) out.chat = await createSender(tenant)(t.wa_id, { type: 'text', text, staff: 'Team' }).then(() => true, () => false);
-  if (t.email) out.email = await sendEmail({ to: t.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Ticket #${t.number}: ${t.subject}`, text: `${text}\n\n${tenant.settings.business.name}` }).then((r) => !!r?.ok, () => false);
+  if (t.email) out.email = await sendEmail({ tenantId: tenant.id, topic: 'ticket', to: t.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Ticket #${t.number}: ${t.subject}`, text: `${text}\n\n${tenant.settings.business.name}` }).then((r) => !!r?.ok, () => false);
   return out;
 }
 

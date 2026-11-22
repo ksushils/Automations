@@ -65,7 +65,9 @@ test('Stripe auto-setup creates 3 plans and the webhook, and reuses them the sec
     if (u.includes('/prices') && opts.method === 'GET') { const p = prices[q.get('lookup_keys[0]')]; return ok({ data: p ? [p] : [] }); }
     if (u.includes('/prices')) { const p = { id: 'price_' + body.get('lookup_key') }; prices[body.get('lookup_key')] = p; return ok(p); }
     if (u.includes('/webhook_endpoints') && opts.method === 'GET') return ok({ data: hooks });
-    if (u.includes('/webhook_endpoints') && opts.method === 'POST') { const h = { id: 'we_1', url: body.get('url'), secret: 'whsec_test123' }; hooks = [h]; return ok(h); }
+    const events = [...body.entries()].filter(([k]) => k.startsWith('enabled_events')).map(([, v]) => v);
+    if (u.includes('/webhook_endpoints/') && opts.method === 'POST') { hooks[0].enabled_events = events; return ok(hooks[0]); }
+    if (u.includes('/webhook_endpoints') && opts.method === 'POST') { const h = { id: 'we_1', url: body.get('url'), secret: 'whsec_test123', enabled_events: events }; hooks = [h]; return ok(h); }
     return ok({});
   };
   const oldUrl = config.publicUrl;
@@ -83,5 +85,12 @@ test('Stripe auto-setup creates 3 plans and the webhook, and reuses them the sec
     assert.equal(calls.filter((c) => c === 'POST /prices').length, 3, 'no duplicate plans');
     assert.equal(calls.filter((c) => c === 'POST /webhook_endpoints').length, 1, 'no duplicate webhook');
     assert.ok(r.done.some((d) => /already/.test(d)));
+    for (const e of ['invoice.payment_failed', 'invoice.paid', 'customer.subscription.trial_will_end']) assert.ok(hooks[0].enabled_events.includes(e), `webhook listens to ${e}`);
+    // a webhook made by an older version (fewer events) is topped up, not duplicated
+    hooks[0].enabled_events = ['checkout.session.completed', 'customer.subscription.updated'];
+    r = await (await fetch(`${base}/api/system/setup/stripe-auto`, { method: 'POST', headers: SUPER })).json();
+    assert.ok(r.done.some((d) => /Webhook updated.*invoice\.payment_failed/.test(d)), JSON.stringify(r.done));
+    assert.ok(hooks[0].enabled_events.includes('invoice.payment_failed'));
+    assert.equal(calls.filter((c) => c === 'POST /webhook_endpoints').length, 1, 'still one webhook');
   } finally { globalThis.fetch = realFetch; config.publicUrl = oldUrl; }
 }));

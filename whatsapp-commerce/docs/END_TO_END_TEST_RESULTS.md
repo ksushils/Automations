@@ -1,0 +1,47 @@
+# End-to-end test results
+
+**"Faked"** means the outside service (Stripe, Resend, Meta, the AI) was replaced by a test double inside the automated tests.
+
+**"Live"** means the real service was used. **No scenario has been run live yet.**
+
+## Critical scenarios (master plan section 17)
+
+| Scenario | Faked (automated) | Live | Notes |
+|---|---|---|---|
+| A. Website lead | ✅ `webchat.test.js`, `leads.test.js`, `sales.test.js` | ❌ not run | Owner email is now recorded in `email_log`. Live run needs Resend. |
+| B. WhatsApp lead and takeover | ✅ `http.test.js` (signed webhook, dedupe), `engine.test.js`, `coexistence.test.js` | ❌ blocked | Needs a Meta app and number |
+| C. Booking | ✅ `bookings-voice.test.js`, `booking-honesty.test.js` | ❌ not run | Google Calendar and deposits only faked |
+| D. Photo quote | 🟡 quote module tested (`growth.test.js`). Photo understanding tested separately. | ❌ | The photo isn't linked to the quote yet (roadmap R2.1) |
+| E. Subscription | ✅ `platform.test.js`, `phase0.test.js` (checkout, trial, events in the wrong order, replays, failed payment → grace → pause → recovery, cancellation) | ❌ needs Stripe test keys | Run with the Stripe CLI once keys exist |
+| F. Business owner (opportunities, copilot) | ❌ not built | ❌ | Roadmap R3.1 and R3.2 |
+| G. Failure and recovery | 🟡 see below | ❌ | |
+
+## Scenario G detail (batch 1)
+
+| Failure | Result | Evidence |
+|---|---|---|
+| App restart with messages half-handled | ✅ replayed on start-up | `recoverUnprocessed` (covered in `consent.test.js`) |
+| Webhook replay (Meta) | ✅ stored once | `coexistence.test.js` |
+| Webhook replay (Stripe) | ✅ handled once, one email | `phase0.test.js` |
+| Stripe events out of order | ✅ newer state kept | `phase0.test.js` |
+| Email provider down or rate-limited | ✅ retried with back-off, then delivered | `phase0.test.js` |
+| Email permanently rejected | ✅ marked failed and alerted; can be retried by hand | `phase0.test.js` |
+| Background job keeps failing | ✅ alert after 3 failures; `/health` shows "degraded" | `phase0.test.js` |
+| AI provider unavailable | 🟡 keyword-search fallback exists | `direct.test.js` |
+| Calendar conflict | 🟡 slot capacity check (no live calendar conflict test) | `bookings-voice.test.js`, `smart.test.js` |
+| Interrupted payment | ❌ not tested yet | |
+
+## Restore drill: 22 November 2026, local copy
+
+1. Took a snapshot of the local test database with `ops.backup()` (`VACUUM INTO`).
+2. Sealed it with `sealBackup()`: gzip plus AES-256-GCM, with a test passphrase. The sealed file was 17,579 bytes.
+3. Restored it with `BACKUP_PASSPHRASE=… node src/cli/restoreBackup.js drill.enc restored.db`.
+4. **Result:** the restored file was 356,352 bytes. Both the live and restored copies had 1 tenant and 19 messages, and `PRAGMA integrity_check` returned `ok`.
+5. **Still to do:** the same drill on the live server, using a file downloaded from the off-server bucket, once the bucket is set up.
+
+## Automated test suite
+
+| Date | Where | Result |
+|---|---|---|
+| 22 November 2026 | Local, Node 24 | 272 tests, 272 pass, 0 fail |
+| Before deploy | Server image, Node 22 | Not run yet for batch 1 |

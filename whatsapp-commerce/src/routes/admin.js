@@ -4,7 +4,7 @@ import { getDb, redactSettings, json } from '../db.js';
 import { safeEqual, sha256 } from '../crypto.js';
 import { onboardingStatus, connectShopStripe } from '../onboarding.js';
 import { refreshWebsite, refreshRunning, lastRefresh } from '../refresh.js';
-import { sendEmail, alertEmails, emailConfigured } from '../email.js';
+import { sendEmail, alertEmails, emailConfigured, emailLog, retryEmail } from '../email.js';
 import { siteAssistantKnowledge } from '../site.js';
 import { setupStatus, savePlatformSetup, testAi, autoSetupStripe } from '../platformSetup.js';
 import {
@@ -57,6 +57,7 @@ import { resumeAi } from '../coexistence.js';
 import { estimateCampaign, monthEstimate } from '../metaPricing.js';
 import { recordConsent, consentHistory, HAS_CONSENT_SQL } from '../consent.js';
 import { createTopupCheckout } from '../platform.js';
+import { billingHistory } from '../platform.js';
 import { billingInfo, createSubscriptionCheckout, createBillingPortal, billingConfigured, completeEmbeddedSignup, activateNumber, embeddedSignupConfigured, billingBanner } from '../platform.js';
 import { rateLimit } from './web.js';
 import { systemStatus, backup, alert } from '../ops.js';
@@ -230,6 +231,8 @@ export function adminRouter() {
   });
   r.post('/tenants/:tenantId/rotate-keys', requireSuper, (req, res) => res.json(rotateKeys(req.params.tenantId)));
   r.get('/system/status', requireSuper, (req, res) => res.json(systemStatus()));
+  r.get('/system/email-log', requireSuper, (req, res) => res.json({ configured: emailConfigured(), emails: emailLog({ status: req.query.status ? String(req.query.status) : undefined, limit: 200 }) }));
+  r.post('/system/email-log/:id/retry', requireSuper, wrap(async (req, res) => { try { res.json(await retryEmail(req.params.id)); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } }));
   r.get('/system/audit', requireSuper, (req, res) => res.json({ audit: listAudit(null, { limit: 500 }) }));
   r.post('/system/rotate-encryption', requireSuper, (req, res) => res.json({ ok: true, keyId: currentKeyId(), ...rotateEncryption() }));
   r.get('/system/dead-letters', requireSuper, (req, res) => res.json({ messages: getDb().prepare("SELECT tenant_id, wa_id, wa_message_id, attempts, created_at, body FROM messages WHERE direction = 'in' AND processed = -1 ORDER BY id DESC LIMIT 200").all().map((m) => ({ ...m, body: json(m.body, {}) })) }));
@@ -299,7 +302,9 @@ export function adminRouter() {
   }));
 
   // ----- billing (your SaaS subscription) -----
-  r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS }));
+  r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS, history: billingHistory(req.tenant.id) }));
+  // emails sent for this business (alerts, quotes, tickets, follow-ups): status only, never other businesses' mail
+  r.get('/tenants/:tenantId/email-log', requireTenant, requireOwner, (req, res) => res.json({ configured: emailConfigured(), emails: emailLog({ tenantId: req.tenant.id, limit: 50 }) }));
   r.post('/tenants/:tenantId/billing/checkout', requireTenant, requireOwner, wrap(async (req, res) => {
     try { res.json({ url: await createSubscriptionCheckout(req.tenant, req.body?.plan) }); } catch (e) { res.status(400).json({ error: e.message }); }
   }));

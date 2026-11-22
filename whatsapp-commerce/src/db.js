@@ -365,6 +365,37 @@ CREATE TABLE IF NOT EXISTS consents (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_consents ON consents(tenant_id, wa_id, id);
+-- every email the platform tries to send (transactional / marketing / system), with retries
+CREATE TABLE IF NOT EXISTS email_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT,
+  kind TEXT NOT NULL DEFAULT 'transactional',
+  topic TEXT,
+  to_addr TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body_text TEXT,
+  body_html TEXT,
+  reply_to TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  provider_id TEXT,
+  error TEXT,
+  next_try_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_email_log_status ON email_log(status, next_try_at);
+CREATE INDEX IF NOT EXISTS idx_email_log_tenant ON email_log(tenant_id, id);
+-- Stripe Billing webhook events already handled (idempotency + a readable history)
+CREATE TABLE IF NOT EXISTS billing_events (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  tenant_id TEXT,
+  created INTEGER,
+  note TEXT,
+  received_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_billing_events_tenant ON billing_events(tenant_id, created);
 CREATE TABLE IF NOT EXISTS usage (
   tenant_id TEXT NOT NULL,
   period TEXT NOT NULL,
@@ -385,7 +416,7 @@ const MIGRATIONS = {
   conversations: { assigned_to: 'TEXT', ai_paused_until: 'TEXT' }, // ai_paused_until: owner replied from the phone (coexistence)
   messages: { processed: 'INTEGER NOT NULL DEFAULT 1', attempts: 'INTEGER NOT NULL DEFAULT 0', source: 'TEXT' }, // source: phone_app | history (coexistence)
   usage: { ai_tokens: 'INTEGER NOT NULL DEFAULT 0', ai_cost_micro: 'INTEGER NOT NULL DEFAULT 0', site_cart_adds: 'INTEGER NOT NULL DEFAULT 0' }, // micro-USD; site_cart_adds: items the chat put in the shop's own basket
-  tenants: { referred_by: 'TEXT', referral_code: 'TEXT', owner_email: 'TEXT', stripe_customer_id: 'TEXT', subscription_id: 'TEXT', subscription_status: 'TEXT', trial_ends_at: 'TEXT' },
+  tenants: { billing_event_at: 'INTEGER', payment_failed_at: 'TEXT', referred_by: 'TEXT', referral_code: 'TEXT', owner_email: 'TEXT', stripe_customer_id: 'TEXT', subscription_id: 'TEXT', subscription_status: 'TEXT', trial_ends_at: 'TEXT' },
 };
 
 export function initDb(file = config.databasePath) {

@@ -12,7 +12,7 @@ import { startJobs } from './jobs.js';
 import { publicRouter, customDomainMiddleware } from './routes/public.js';
 import { webRouter, rateLimit } from './routes/web.js';
 import { webchatRouter } from './routes/webchat.js';
-import { securityHeaders, installCrashAlerts, alert, backup } from './ops.js';
+import { securityHeaders, installCrashAlerts, alert, backup, jobHealth } from './ops.js';
 import { getDb } from './db.js';
 import { loadPlatformSetup } from './platformSetup.js';
 import { trackingRouter } from './tracking.js';
@@ -31,7 +31,7 @@ export function createApp() {
 
   app.use(securityHeaders);
   app.get('/health', (req, res) => {
-    try { getDb().prepare('SELECT 1').get(); res.json({ ok: true }); } catch (e) { res.status(503).json({ ok: false, error: e.message }); }
+    try { getDb().prepare('SELECT 1').get(); const bad = jobHealth().filter((j) => j.state === 'failing' || j.state === 'stale').length; res.json({ ok: true, jobs: bad ? 'degraded' : 'ok' }); } catch (e) { res.status(503).json({ ok: false, error: 'database unavailable' }); }
   });
   app.use(customDomainMiddleware());
   app.use(trackingRouter()); // /go/:code – counted links to the shop's own website
@@ -72,7 +72,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // …and an encrypted copy off the server when BACKUP_S3_* is set (src/offsite.js)
   const doBackup = () => {
     let b = null;
-    try { b = backup(); if (b) console.log('[backup]', b.file); } catch (e) { alert(`Backup failed: ${e.message}`); }
+    try { b = backup(); if (b) console.log('[backup]', b.file); getDb().prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('backup:local', JSON.stringify({ ok: true, file: b?.file, at: new Date().toISOString() })); } catch (e) { alert(`Backup failed: ${e.message}`); try { getDb().prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run('backup:local', JSON.stringify({ ok: false, error: e.message, at: new Date().toISOString() })); } catch {} }
     if (b) import('./offsite.js').then(({ uploadBackup }) => uploadBackup(b.file)).then((u) => {
       if (!u) return;
       console.log('[backup] off-server copy', u.key, u.bytes);

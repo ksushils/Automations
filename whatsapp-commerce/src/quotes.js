@@ -97,7 +97,7 @@ export async function sendQuote(tenant, number, { by = 'Team', skipChat = false 
   const text = `📝 Your quote *Q-${q.number}* from ${tenant.settings.business.name}\n\n${q.items.map((x) => `• ${x.qty > 1 ? `${x.qty} × ` : ''}${x.item}: ${x.price === null ? 'to confirm' : money(x.price * x.qty, sym)}`).join('\n')}\n\n*Total: ${money(q.total, sym)}*${q.items.some((x) => x.price === null) ? ' (plus items to confirm)' : ''}\nValid until ${q.valid_until}.\n\nSee it, download the PDF or accept it here: ${quoteUrl(q)}`;
   const out = { chat: false, email: false };
   if (q.wa_id && !skipChat) out.chat = await createSender(tenant)(q.wa_id, { type: 'text', text, staff: by === 'auto' ? undefined : by }).then(() => true, () => false);
-  if (q.email) out.email = await sendEmail({ to: q.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Your quote Q-${q.number} from ${tenant.settings.business.name}`, text: `${text.replace(/\*/g, '')}\n\n${tenant.settings.business.name}` }).then((r) => !!r?.ok, () => false);
+  if (q.email) out.email = await sendEmail({ tenantId: tenant.id, topic: 'quote', to: q.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Your quote Q-${q.number} from ${tenant.settings.business.name}`, text: `${text.replace(/\*/g, '')}\n\n${tenant.settings.business.name}` }).then((r) => !!r?.ok, () => false);
   return { quote: getQuote(tenant.id, number), delivered: out, message: text };
 }
 
@@ -126,7 +126,7 @@ export async function runQuoteFollowUps() {
     if (!t?.active || t.settings.quotes?.followUp === false) continue;
     const text = `Hi${q.name ? ` ${String(q.name).split(' ')[0]}` : ''}! Just checking you got your quote Q-${q.number} from ${t.settings.business.name}. Any questions? Reply here, or accept it when you're ready: ${quoteUrl(q)}`;
     if (q.wa_id) await createSender(t)(q.wa_id, { type: 'text', text }).catch(() => {});
-    if (q.email) await sendEmail({ to: q.email, subject: `Your quote Q-${q.number}`, text: `${text}\n\n${t.settings.business.name}` }).catch(() => {});
+    if (q.email) await sendEmail({ tenantId: t.id, topic: 'quote_followup', to: q.email, subject: `Your quote Q-${q.number}`, text: `${text}\n\n${t.settings.business.name}` }).catch(() => {});
     n++;
   }
   return n;

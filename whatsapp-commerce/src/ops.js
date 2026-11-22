@@ -22,6 +22,52 @@ export function installCrashAlerts() {
   });
 }
 
+// ---------- background job health ----------
+/*
+ * Every background job runs through track(name, everyMs, fn): it records the last run, last success, the last error
+ * and how many runs in a row failed. 3 failures in a row → alert (then again every 24). A job that hasn't started for
+ * 3x its interval is "stale" (e.g. the timer died). Shown in System health and summarised by /health.
+ */
+const JOBS = new Map();
+export async function track(name, everyMs, fn) {
+  const j = JOBS.get(name) || { name, runs: 0, failures: 0, lastStart: null, lastOk: null, lastError: null, lastErrorAt: null, lastResult: null };
+  JOBS.set(name, j);
+  j.everyMs = everyMs;
+  j.lastStart = Date.now();
+  try {
+    const r = await fn();
+    j.runs++; j.failures = 0; j.lastOk = Date.now();
+    j.lastResult = typeof r === 'number' ? r : r && typeof r === 'object' ? JSON.stringify(r).slice(0, 200) : null;
+    return r;
+  } catch (e) {
+    j.failures++;
+    j.lastError = String(e?.message || e).slice(0, 300);
+    j.lastErrorAt = Date.now();
+    console.error(`[job ${name}]`, j.lastError);
+    if (j.failures === 3 || (j.failures > 3 && j.failures % 24 === 0)) alert(`Background job "${name}" failed ${j.failures} times in a row: ${j.lastError}`, { key: `job:${name}`, throttleMs: 0 });
+    return undefined;
+  }
+}
+export function jobHealth(now = Date.now()) {
+  return [...JOBS.values()].map((j) => ({
+    name: j.name, runs: j.runs, failures: j.failures, lastResult: j.lastResult, lastError: j.lastError,
+    lastStart: j.lastStart && new Date(j.lastStart).toISOString(), lastOk: j.lastOk && new Date(j.lastOk).toISOString(), lastErrorAt: j.lastErrorAt && new Date(j.lastErrorAt).toISOString(),
+    state: j.failures ? 'failing' : j.lastStart && now - j.lastStart > j.everyMs * 3 ? 'stale' : j.lastOk ? 'ok' : 'running',
+  })).sort((a, b) => a.name.localeCompare(b.name));
+}
+export const _resetJobs = () => JOBS.clear(); // tests
+
+// ---------- database integrity ----------
+let lastIntegrity = null;
+/** PRAGMA quick_check (read-only, fast). Anything but "ok" alerts the platform owner. */
+export function integrityCheck() {
+  const rows = getDb().prepare('PRAGMA quick_check').all().map((r) => Object.values(r)[0]);
+  const ok = rows.length === 1 && rows[0] === 'ok';
+  lastIntegrity = { ok, at: new Date().toISOString(), detail: ok ? 'ok' : rows.slice(0, 5).join('; ').slice(0, 500) };
+  if (!ok) alert(`Database integrity check failed: ${lastIntegrity.detail}`, { key: 'db-integrity' });
+  return lastIntegrity;
+}
+
 // ---------- backups (consistent SQLite snapshot via VACUUM INTO) ----------
 export function backup({ dir = config.backupDir, keep = config.backupKeep } = {}) {
   if (config.databasePath === ':memory:') return null;
@@ -65,5 +111,11 @@ export function systemStatus() {
     deadLetters: one("SELECT COUNT(*) FROM messages WHERE direction = 'in' AND processed = -1"),
     backups: listBackups().slice(0, 5),
     offsiteBackup: (() => { try { return JSON.parse(getDb().prepare("SELECT value FROM kv WHERE key = 'backup:offsite'").get()?.value || 'null'); } catch { return null; } })(), // null = not set up yet
+    jobs: jobHealth(),
+    integrity: lastIntegrity,
+    emails: (() => { const rows = d.prepare("SELECT status, COUNT(*) AS n FROM email_log WHERE created_at > datetime('now', '-7 days') GROUP BY status").all(); return Object.fromEntries(rows.map((r) => [r.status, Number(r.n)])); })(),
+    billingWebhook: d.prepare('SELECT type, received_at FROM billing_events ORDER BY received_at DESC LIMIT 1').get() || null,
+    emailConfigured: !!(config.resendApiKey && config.emailFrom),
+    alertsConfigured: !!config.alertWebhookUrl,
   };
 }

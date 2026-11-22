@@ -259,7 +259,7 @@ export async function runLeadNudges(now = Date.now()) {
     }
     if (age >= 1440 && l.email && once(`lead_followup:${l.id}`)) {
       const biz = tenant.settings.business.name;
-      sendEmail({ to: l.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Following up from ${biz}`, text: `Hi${l.name ? ` ${String(l.name).split(' ')[0]}` : ''},\n\nThanks for getting in touch with ${biz}${l.topic && l.topic !== 'general' ? ` about ${l.topic}` : ''}. Did you get everything you needed? Just reply to this email and we'll help.\n\n${biz}` }).catch(() => {});
+      sendEmail({ tenantId: tenant.id, topic: 'lead_followup', to: l.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Following up from ${biz}`, text: `Hi${l.name ? ` ${String(l.name).split(' ')[0]}` : ''},\n\nThanks for getting in touch with ${biz}${l.topic && l.topic !== 'general' ? ` about ${l.topic}` : ''}. Did you get everything you needed? Just reply to this email and we'll help.\n\n${biz}` }).catch(() => {});
       n++;
     }
   }

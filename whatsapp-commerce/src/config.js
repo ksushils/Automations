@@ -85,6 +85,7 @@ Object.assign(config, {
   aiProviderOrder: (env.AI_PROVIDER_ORDER || '').split(',').map((s) => s.trim()).filter(Boolean),
   aiZeroRetention: env.AI_ZERO_RETENTION !== 'false',
   // Voice notes: a model that accepts audio (WhatsApp sends OGG/Opus). Empty AI_AUDIO_MODEL = voice notes off.
+  billingGraceDays: Number(env.BILLING_GRACE_DAYS ?? 7), // days a shop keeps working after a failed subscription payment
   referralPercent: Number(env.REFERRAL_PERCENT ?? 20), // partners and referring businesses earn this % of each referred plan
   aiAudioModel: env.AI_AUDIO_MODEL ?? 'google/gemini-2.5-flash',
   aiAudioProviders: (env.AI_AUDIO_PROVIDERS || '').split(',').map((s) => s.trim()).filter(Boolean),

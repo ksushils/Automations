@@ -351,13 +351,14 @@ async function setup() {
 // ---------- super admin ----------
 async function tenants() {
   const { tenants } = await api('/tenants');
+  setTimeout(() => systemHealth().catch(() => {}), 0);
   setTimeout(async () => {
     let box = document.getElementById('partnersbox'); if (!box) { box = document.createElement('div'); box.className = 'card'; box.id = 'partnersbox'; $('#app').appendChild(box); }
     const r = await api('/system/referrals').catch(() => null); if (!r) return;
     box.innerHTML = `<h2>🤝 Partners and referrals</h2><p class="mute">Agencies and businesses that send you customers earn ${r.percent}% of each referred plan while it pays (set REFERRAL_PERCENT on the server). You pay them – this keeps the numbers.</p>
       <div class="row"><div><label>Partner name</label><input id="pn" placeholder="Bright Web Design"></div><div><label>Email</label><input id="pe"></div><div><label>Code (optional)</label><input id="pc" placeholder="BRIGHTWEB"></div></div><p><button class="btn ghost" id="padd">Add partner</button></p>
       <div class="tablewrap"><table><tr><th>Who</th><th>Link</th><th>Sign-ups</th><th>Paying</th><th>Owed / month</th></tr>${[...r.partners.map((p) => ({ who: `🤝 ${p.name}`, link: p.link, ...p })), ...r.businesses.map((b) => ({ who: `🏪 ${b.referrer}`, link: '', ...b }))].map((x) => `<tr><td>${esc(x.who)}</td><td style="font-size:12px">${esc(x.link)}</td><td>${x.signups}</td><td>${x.paying}</td><td>£${x.monthlyEarnings}</td></tr>`).join('') || '<tr><td colspan="5" class="mute">None yet</td></tr>'}</table></div>`;
-    document.getElementById('padd').onclick = async () => { try { const p = await api('/system/partners', { method: 'POST', body: { name: $('#pn').value, email: $('#pe').value, code: $('#pc').value } }); toast(`Partner link: ${p.link}`); tenants(); } catch (e) { toast(e.message); } };
+    box.querySelector('#padd').onclick = async () => { try { const p = await api('/system/partners', { method: 'POST', body: { name: $('#pn').value, email: $('#pe').value, code: $('#pc').value } }); toast(`Partner link: ${p.link}`); tenants(); } catch (e) { toast(e.message); } };
   }, 0);
   const { plans } = await api('/plans');
   const st = S.setup;
@@ -1494,7 +1495,7 @@ async function embeddedSignupButton(s) {
 
 // ---------- billing ----------
 async function billing() {
-  const { billing: b, plans } = await api(T('/billing'));
+  const { billing: b, plans, history = [] } = await api(T('/billing'));
   const rf = S.role === 'owner' ? await api(T('/referrals')).catch(() => null) : null;
   setTimeout(() => { const c = document.getElementById('refcopy'); if (c) c.onclick = () => navigator.clipboard.writeText($('#reflink').value).then(() => toast('Link copied'), () => $('#reflink').select()); }, 0);
   const status = b.subscription_status || 'none';
@@ -1513,6 +1514,39 @@ async function billing() {
   $('#app').querySelectorAll('[data-topup]').forEach((x) => (x.onclick = async () => { try { location.href = (await api(T('/billing/topup'), { method: 'POST', body: { usd: Number(x.dataset.topup) } })).url; } catch (e) { toast(e.message); } }));
   $('#app').querySelectorAll('[data-plan]').forEach((x) => (x.onclick = async () => { try { location.href = (await api(T('/billing/checkout'), { method: 'POST', body: { plan: x.dataset.plan } })).url; } catch (e) { toast(e.message); } }));
   if ($('#portal')) $('#portal').onclick = async () => { try { location.href = (await api(T('/billing/portal'), { method: 'POST' })).url; } catch (e) { toast(e.message); } };
+  billingExtras(b, history).catch(() => {});
+}
+
+async function billingExtras(b, history) {
+  const when = (s) => new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const em = await api(T('/email-log')).catch(() => null);
+  let html = '';
+  if (b.payment_failed_at) html += `<div class="card"><h2>⚠️ Payment problem</h2><p>Your last payment didn't go through. ${b.graceEndsAt && Date.parse(b.graceEndsAt) > Date.now() ? `Your assistant keeps working until <b>${when(b.graceEndsAt)}</b>.` : 'Your assistant is paused until the payment goes through.'} Use <b>Manage billing, invoices & card</b> to update your card.</p></div>`;
+  if (history.length) html += `<div class="card"><h2>Billing history</h2><div class="tablewrap"><table><tr><th>Date</th><th>What happened</th></tr>${history.map((h) => `<tr><td>${when(h.at)}</td><td>${esc(h.note || h.type)}</td></tr>`).join('')}</table></div><p class="mute">Invoices and receipts are in "Manage billing". WhatsApp (Meta) message fees are billed to you by Meta, separately from this plan.</p></div>`;
+  if (em) {
+    const label = { sent: 'Sent', retrying: 'Retrying', failed: 'Not delivered', skipped: 'Not sent (email not set up)', queued: 'Sending' };
+    html += `<div class="card"><h2>Emails sent for you</h2>${em.emails.length ? `<div class="tablewrap"><table><tr><th>Date</th><th>To</th><th>Subject</th><th>Status</th></tr>${em.emails.slice(0, 15).map((m) => `<tr><td>${when(m.created_at.replace(' ', 'T') + 'Z')}</td><td>${esc(m.to_addr)}</td><td>${esc(m.subject)}</td><td>${m.status === 'sent' ? 'Sent' : `<span class="pill warn">${esc(label[m.status] || m.status)}</span>`}${m.error && m.status !== 'sent' ? `<div class="mute" style="font-size:12px">${esc(m.error)}</div>` : ''}</td></tr>`).join('')}</table></div>` : '<p class="mute">No emails yet. Order, lead, quote and ticket emails will show here with their delivery status.</p>'}</div>`;
+  }
+  if (html) $('#app').insertAdjacentHTML('beforeend', html);
+}
+
+// ---------- super admin: system health (jobs, emails, backups, billing webhook) ----------
+async function systemHealth() {
+  const st = await api('/system/status');
+  let box = document.getElementById('healthbox'); if (!box) { box = document.createElement('div'); box.className = 'card'; box.id = 'healthbox'; $('#app').prepend(box); }
+  const bad = st.jobs.filter((j) => j.state === 'failing' || j.state === 'stale');
+  const e = st.emails || {};
+  const fl = (e.failed || 0) ? await api('/system/email-log?status=failed').catch(() => ({ emails: [] })) : { emails: [] };
+  const when = (s) => (s ? new Date(s).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' }) : '–');
+  box.innerHTML = `<h2>🩺 System health</h2>
+    <p>${bad.length ? `<span class="pill warn">${bad.length} background job${bad.length === 1 ? '' : 's'} need attention</span>` : '<span class="pill">Background jobs OK</span>'}
+      ${st.integrity ? (st.integrity.ok ? ' <span class="pill">Database check OK</span>' : ' <span class="pill warn">Database check failed</span>') : ' <span class="pill">Database check runs daily</span>'}
+      ${st.emailConfigured ? '' : ' <span class="pill warn">Email not set up</span>'}${st.alertsConfigured ? '' : ' <span class="pill warn">No alert webhook</span>'}
+      ${st.offsiteBackup ? '' : ' <span class="pill warn">No off-server backup</span>'}</p>
+    <p class="mute">Emails (7 days): ${e.sent || 0} sent · ${e.retrying || 0} retrying · ${e.failed || 0} failed · ${e.skipped || 0} not sent (email not set up). Last billing webhook: ${st.billingWebhook ? esc(st.billingWebhook.type) + ' at ' + when(st.billingWebhook.received_at.replace(' ', 'T') + 'Z') : 'none yet'}. Up ${Math.round(st.uptimeSec / 3600)} h · ${st.memoryMb} MB · ${st.deadLetters} stuck message(s).</p>
+    ${bad.length ? `<div class="tablewrap"><table><tr><th>Job</th><th>State</th><th>Failures in a row</th><th>Last error</th><th>Last OK</th></tr>${bad.map((j) => `<tr><td>${esc(j.name)}</td><td>${esc(j.state)}</td><td>${j.failures}</td><td>${esc(j.lastError || '')}</td><td>${when(j.lastOk)}</td></tr>`).join('')}</table></div>` : ''}
+    ${fl.emails.length ? `<h3>Emails not delivered</h3><div class="tablewrap"><table><tr><th>When</th><th>To</th><th>Subject</th><th>Error</th><th></th></tr>${fl.emails.slice(0, 20).map((m) => `<tr><td>${when(m.created_at.replace(' ', 'T') + 'Z')}</td><td>${esc(m.to_addr)}</td><td>${esc(m.subject)}</td><td>${esc(m.error || '')}</td><td><button class="btn ghost" data-eretry="${m.id}" style="width:auto">Retry</button></td></tr>`).join('')}</table></div>` : ''}`;
+  box.querySelectorAll('[data-eretry]').forEach((b) => (b.onclick = async () => { try { const r = await api(`/system/email-log/${b.dataset.eretry}/retry`, { method: 'POST' }); toast(r.ok ? 'Sent' : r.retrying ? 'Still failing – will retry automatically' : r.error || 'Not sent'); systemHealth(); } catch (x) { toast(x.message); } }));
 }
 
 // ---------- grow: links, QR, widget, storefront ----------

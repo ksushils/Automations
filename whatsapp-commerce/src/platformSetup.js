@@ -177,7 +177,7 @@ export async function stripe(method, path, body, query, key = config.platformStr
   return data;
 }
 
-export const STRIPE_EVENTS = ['checkout.session.completed', 'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'];
+export const STRIPE_EVENTS = ['checkout.session.completed', 'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted', 'customer.subscription.trial_will_end', 'invoice.paid', 'invoice.payment_failed'];
 
 /**
  * One click: make sure the 3 monthly plans and the webhook exist in the Stripe account whose key is saved.
@@ -206,7 +206,12 @@ export async function autoSetupStripe() {
   if (!/^https:\/\//.test(url)) throw new Error('This server needs a public https:// address before Stripe can send it updates');
   const hooks = await stripe('GET', '/webhook_endpoints', null, { limit: 100 });
   const existing = (hooks.data || []).filter((h) => h.url === url);
-  if (existing.length && config.platformStripeWebhookSecret) done.push('Webhook already existed');
+  if (existing.length && config.platformStripeWebhookSecret) {
+    // webhooks made by older versions listen to fewer events (no failed payments / trial ending): add the missing ones
+    const missing = STRIPE_EVENTS.filter((e) => !(existing[0].enabled_events || []).includes(e) && !(existing[0].enabled_events || []).includes('*'));
+    if (missing.length) { await stripe('POST', `/webhook_endpoints/${existing[0].id}`, { enabled_events: [...new Set([...(existing[0].enabled_events || []), ...STRIPE_EVENTS])] }); done.push(`Webhook updated to also tell us about: ${missing.join(', ')}`); }
+    else done.push('Webhook already existed');
+  }
   else {
     // A webhook's signing secret is only shown when it's created, so replace any old one we don't have the secret for.
     for (const h of existing) await stripe('DELETE', `/webhook_endpoints/${h.id}`);
