@@ -45,3 +45,27 @@
 |---|---|---|
 | 22 November 2026 | Local, Node 24 | 272 tests, 272 pass, 0 fail |
 | Before deploy | Server image, Node 22 | Not run yet for batch 1 |
+
+## Performance baseline (22 November 2026, local)
+
+How to repeat: `node --disable-warning=ExperimentalWarning scripts/loadtest.js --businesses 20 --chats 200 --concurrency 20`.
+
+Run conditions: Node 24 on the development PC, an in-memory database, and a fake AI that answers instantly, with 20 businesses, 200 requests per test and 20 at a time. These numbers measure the app's own code, not the AI provider (which typically adds 1–4 s per reply) or the network. **They are not a claim about maximum capacity.**
+
+| Test | p50 | p95 | max | requests per second |
+|---|---|---|---|---|
+| Website widget script | 18.8 ms | 61.1 ms | 71.5 ms | 762 |
+| `/health` | 10.3 ms | 14.7 ms | 15.3 ms | 1,868 |
+| Knowledge search (full-text) | 18.2 ms | 22.5 ms | 25 ms | 1,044 |
+| Website chat message → reply (fake AI) | 103.8 ms | 180.8 ms | 188 ms | 176 |
+| Database read (messages per business) | 0.3 ms | 0.4 ms | 0.5 ms | — |
+
+Memory after the run: 157 MB RSS (44 MB heap). Still to do: the same run on the VPS (Node 22, file database) once it is reachable.
+
+## AI evaluation (batch 8)
+
+| Date | Where | Mode | Result |
+|---|---|---|---|
+| 22 November 2026 | Local, in-memory database, no AI key | Guard cases only | 6/6 passed |
+| 22 November 2026 | Automated tests, fake AI giving deliberately bad answers | Guard cases | 6/6 passed |
+| — | Server with the real model | All 15 cases | **Not run yet.** Command: `docker exec whatsapp-commerce node --disable-warning=ExperimentalWarning src/cli/runEvals.js` |
