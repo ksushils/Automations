@@ -297,7 +297,7 @@ export function tradeSettings(key, S = {}) {
   const type = S.store?.type || 'manual';
   const connected = ['shopify', 'shopify_public', 'woocommerce', 'custom'].includes(type);
   const storeType = T.store === null || connected ? type : T.store;
-  const hasShop = storeType !== 'none' && (connected || T.store === 'manual');
+  const hasShop = storeType !== 'none' && (connected || storeType === 'manual'); // the built-in catalogue counts too (it didn't for the "Online shop" template)
   const menu = menuFor(T, { hasShop });
   const patch = {
     trade: key,

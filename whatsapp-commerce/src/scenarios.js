@@ -23,15 +23,18 @@ import { sampleRun } from './sampleRun.js';
  */
 export const SAMPLE = { name: 'Northside Plumbing & Heating', areas: ['LS1', 'LS2', 'LS3', 'LS4', 'LS5', 'LS6', 'LS7'], hours: 'Mon–Sat 8am–6pm' };
 const CUSTOMER = 'Sam';
+/** The sample businesses (none of them real). */
+export const BUSINESSES = {
+  plumber: { name: SAMPLE.name, trade: 'plumber', settings: { business: { serviceAreas: SAMPLE.areas, supportHours: SAMPLE.hours }, store: { type: 'none' } } },
+  salon: { name: 'Willow Hair Studio', trade: 'hair', settings: { business: { supportHours: 'Tue–Sat 9am–6pm' }, store: { type: 'none' }, bookings: { enabled: true, autoConfirm: false, services: [{ name: 'Cut and finish', minutes: 60, price: 45 }, { name: 'Full colour', minutes: 120, price: 95 }, { name: 'Blow dry', minutes: 45, price: 30 }], times: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00'], closedDays: [0, 1], days: 14, perSlot: 1, leadHours: 2, reminderHours: 24, staff: [{ name: 'Amy', days: [2, 3, 4, 5, 6] }, { name: 'Priya', days: [2, 3, 4, 5, 6], services: ['Cut and finish', 'Blow dry'] }] } } },
+  shop: { name: 'Peak Outdoor Supplies', trade: 'shop', settings: { business: { supportHours: 'Mon–Fri 9am–5pm' }, store: { type: 'manual', manual: { categories: [{ id: 'socks', title: 'Walking socks' }, { id: 'kit', title: 'Bottles & flasks' }], products: [{ id: 'sock', title: 'Merino walking socks', price: 16, category: 'socks', description: 'Cushioned merino blend', variants: [{ id: 'sock-m', title: 'Size 6–8', price: 16 }, { id: 'sock-l', title: 'Size 9–11', price: 16 }] }, { id: 'flask', title: 'Steel trail flask 500ml', price: 18, category: 'kit', description: 'Keeps drinks hot for 12 hours' }] } }, ordering: { paymentMethods: ['cod', 'bank_transfer'], fulfilment: ['delivery', 'pickup'], deliveryFee: 3.95, freeDeliveryOver: 50, bankDetails: 'Sample bank details – shown here as an example only' } } },
+};
 
-const sampleSettings = (extra = {}) => ({
-  business: { name: SAMPLE.name, serviceAreas: SAMPLE.areas, supportHours: SAMPLE.hours, currencySymbol: '£' },
-  store: { type: 'none' },
-  followUps: { quietStart: 0, quietEnd: 0 },
-  notifications: { alertEmails: [], staffWaIds: [], webhookUrl: '' },
-  teamHours: { enabled: false }, // no team hours: "talk to a person" hands over at any time of day
-  ...extra,
-});
+const sampleSettings = (biz, extra = {}) => {
+  const B = BUSINESSES[biz];
+  const base = { business: { name: B.name, currencySymbol: '£', ...(B.settings.business || {}) }, followUps: { quietStart: 0, quietEnd: 0 }, notifications: { alertEmails: [], staffWaIds: [], webhookUrl: '' }, teamHours: { enabled: false } }; // no team hours: "talk to a person" hands over at any time of day
+  return { ...B.settings, ...base, ...extra };
+};
 
 export const SCENARIOS = [
   {
@@ -67,6 +70,16 @@ export const SCENARIOS = [
     settings: { quotes: { enabled: true } },
     steps: [{ tap: /quote/i, start: true }, { say: 'Please quote for a new kitchen mixer tap, fitted' }, { team: 'send_quote' }, { later: '2 days later, no reply yet', run: 'quote_follow_ups' }],
   },
+  {
+    key: 'salon_booking', emoji: '💇', title: 'Salon: colour booking', channel: 'website', business: 'salon',
+    blurb: 'A full colour booked from the real free times. It goes to the stylist who does colour and is free then – a 2-hour colour blocks the whole 2 hours.',
+    steps: [{ action: 'book', label: '📅 Book now' }, { tap: /Full colour/ }, { pick: 0 }, { say: 'Sam, 07700 900123' }, { tap: /book|confirm|yes/i }],
+  },
+  {
+    key: 'shop_order', emoji: '🛍️', title: 'Shop: order on WhatsApp', channel: 'whatsapp', business: 'shop',
+    blurb: 'Browse, choose a size, pay on delivery – an order in a minute of taps, then "where\'s my order?" answered from the order itself.',
+    steps: [{ say: 'Hi' }, { tap: /Browse/ }, { tap: /Walking socks/ }, { tap: /Merino/ }, { tap: /9–11/ }, { tap: /^2$/ }, { tap: /Checkout/ }, { tap: /Delivery/ }, { say: 'Sam Example, 12 High Street, Leeds LS1 1AA' }, { tap: /Pay on delivery/ }, { tap: /Place order/ }, { tap: /Order status/ }],
+  },
 ];
 
 const strip = (s) => String(s || '').replace(/^[^\p{L}\p{N}]+/u, '').trim();
@@ -81,14 +94,16 @@ export function runScenario(key) {
 async function playScenario(key) {
   const sc = SCENARIOS.find((s) => s.key === key);
   if (!sc) return null;
-  const { tenant } = createTenant({ name: `${SAMPLE.name} (sample)`, plan: 'pro' });
+  const biz = sc.business || 'plumber';
+  const { tenant } = createTenant({ name: `${BUSINESSES[biz].name} (sample)`, plan: 'pro' });
   const id = tenant.id;
   const transcript = [];
   const team = [];
   try {
     updateTenantSettings(id, { demo: { sample: true, scenario: key, expiresAt: new Date(Date.now() + 15 * 60000).toISOString() } });
-    applyTrade(id, 'plumber');
-    updateTenantSettings(id, sampleSettings(sc.settings));
+    updateTenantSettings(id, sampleSettings(biz, sc.settings)); // first, so the trade's menu fits (e.g. a shop gets Browse)
+    applyTrade(id, BUSINESSES[biz].trade);
+    updateTenantSettings(id, sampleSettings(biz, sc.settings));
     const waId = sc.channel === 'website' ? `web:sample${crypto.randomBytes(8).toString('hex')}` : `447700900${String(crypto.randomInt(0, 1000)).padStart(3, '0')}`; // 07700 900xxx: Ofcom's numbers for drama – nobody's
     let last = [];
     const sink = [];
@@ -113,7 +128,7 @@ async function playScenario(key) {
         if (st.start) c = (await startChoices(id, waId)).find((x) => st.tap.test(x.title));
         else if (st.pick != null) c = choices(last)[st.pick];
         else c = choices(last).find((x) => st.tap.test(x.title));
-        if (!c) throw new Error(`scenario ${key}: no choice matching ${st.tap || st.pick}`);
+        if (!c) throw new Error(`scenario ${key}: no choice matching ${st.tap || st.pick} (last reply: ${JSON.stringify(last.map((m) => [String(m.text || '').slice(0, 80), choices([m]).map((x) => x.title)]))})`);
         transcript.push({ from: 'customer', text: c.title, tap: true });
         await play({ kind: 'action', id: c.id, text: c.title });
         continue;
@@ -141,7 +156,7 @@ async function playScenario(key) {
   } finally {
     try { deleteTenant(id); } catch (e) { console.warn('[scenario] cleanup', e.message); }
   }
-  return { key, title: sc.title, channel: sc.channel, business: SAMPLE.name, sample: true, transcript, team, ranAt: new Date().toISOString() };
+  return { key, title: sc.title, channel: sc.channel, business: BUSINESSES[biz].name, sample: true, transcript, team, ranAt: new Date().toISOString() };
 }
 
 /** The first menu a customer sees (welcome menu) – for scripts that start by tapping an option. */
@@ -160,7 +175,11 @@ function teamView(id, waId) {
     const area = json(l.area, null);
     out.push({ kind: 'lead', title: `${l.urgent ? '🚨 Urgent lead' : '📇 New lead'} – the team is alerted straight away (email, plus WhatsApp to staff numbers you add)`, text: leadSummary(null, lead) + (area?.covered === false ? `\n⚠️ ${area.postcode} is outside the areas you cover` : area?.covered ? `\n✅ ${area.postcode} is in your area` : '') });
   }
-  for (const b of d.prepare('SELECT * FROM bookings WHERE tenant_id = ?').all(id)) out.push({ kind: 'booking', title: b.status === 'confirmed' ? '📅 Booking confirmed' : '📅 Booking request – waiting for the team to confirm', text: `${b.service ? `${b.service} · ` : ''}${whenText(b)}${b.name ? ` · ${b.name}` : ''}` });
+  for (const b of d.prepare('SELECT * FROM bookings WHERE tenant_id = ?').all(id)) out.push({ kind: 'booking', title: b.status === 'confirmed' ? '📅 Booking confirmed' : '📅 Booking request – waiting for the team to confirm', text: `${b.service ? `${b.service} · ` : ''}${whenText(b)}${b.name ? ` · ${b.name}` : ''}${b.staff ? ` · with ${b.staff}` : ''}` });
+  for (const o of d.prepare('SELECT * FROM orders WHERE tenant_id = ?').all(id)) {
+    const items = json(o.items, []);
+    out.push({ kind: 'order', title: '📦 New order – in Orders, with an email alert to the team', text: `${items.map((i) => `${i.quantity || i.qty || 1} × ${i.title}`).join(', ')}\n${o.fulfilment === 'delivery' ? '🚚 Delivery' : '🏬 Collection'} · ${o.payment_method === 'cod' ? 'pay on delivery' : o.payment_method || ''} · ${o.payment_status}` });
+  }
   for (const q of listQuotes(id)) {
     const photos = q.photos || [];
     out.push({ kind: 'quote', title: q.status === 'draft' ? '📝 Draft quote – the team adds prices and approves it' : `📝 Quote Q-${q.number} – ${q.status}`, text: `Q-${q.number}: "${String(q.request || '').slice(0, 160)}"${photos.length ? `\n📷 ${photos.length} photo attached from the chat` : ''}${q.followed_up_at ? '\n🔁 One follow-up sent' : ''}` });
@@ -185,7 +204,7 @@ export async function scenarioResult(key, { fresh = false } = {}) {
   getDb().prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, JSON.stringify(v));
   return v;
 }
-const VERSION = 2;
+const VERSION = 3;
 
 export const scenarioList = () => SCENARIOS.map(({ key, emoji, title, blurb, channel }) => ({ key, emoji, title, blurb, channel }));
 
@@ -207,7 +226,7 @@ function scenarioHtml(sc, r) {
     if (m.from === 'team' || m.from === 'time') return `<div class="note">${m.from === 'time' ? '⏱️ ' : '👩‍🔧 '}${esc(m.text)}</div>`;
     return `<div class="b a">${fmt(m.text)}${m.choices?.length ? `<div class="ch">${m.choices.map((c) => `<span>${esc(c)}</span>`).join('')}</div>` : ''}</div>`;
   }).join('');
-  return `<section class="sc" id="${esc(sc.key)}"><h2>${sc.emoji} ${esc(sc.title)}</h2><p class="mute" style="margin:0">${esc(sc.blurb)} <span class="mute">· ${sc.channel === 'website' ? '🌐 Website chat' : '📱 WhatsApp'}</span></p>
+  return `<section class="sc" id="${esc(sc.key)}"><h2>${sc.emoji} ${esc(sc.title)}</h2><p class="mute" style="margin:0 0 4px;font-size:14px">${esc(BUSINESSES[sc.business || 'plumber'].name)} <span class="sample">sample</span></p><p class="mute" style="margin:0">${esc(sc.blurb)} <span class="mute">· ${sc.channel === 'website' ? '🌐 Website chat' : '📱 WhatsApp'}</span></p>
 <div class="chat" role="log" aria-label="${esc(sc.title)} conversation">${bubbles}</div>
 ${r.team.map((t) => `<div class="team"><b>What the team gets: ${esc(t.title)}</b>${fmt(t.text)}</div>`).join('')}</section>`;
 }
@@ -221,8 +240,8 @@ export function scenariosRouter(layout) {
     }
     const body = `<section class="hero"><div class="wrap" style="max-width:820px">
 <h1>See it handle real situations</h1>
-<p class="lead">Six everyday moments for a trades business – an emergency, a photo, a booking, someone outside your area – played through the real assistant, step by step, with what your team receives at the end.</p>
-<p><span class="sample">Sample business · sample data</span> <span class="mute">“${esc(SAMPLE.name)}” isn't a real company. Each conversation is a fixed script run through the same engine that answers live chats; nothing is sent to anyone, and the sample business is deleted after each run. In a live chat, questions typed in the customer's own words are answered by the AI from your own website.</span></p>
+<p class="lead">Everyday moments for a plumber, a hair salon and an online shop – an emergency, a photo, a booking, an order, someone outside your area – played through the real assistant, step by step, with what the team receives at the end.</p>
+<p><span class="sample">Sample business · sample data</span> <span class="mute">${Object.values(BUSINESSES).map((b) => `“${esc(b.name)}”`).join(', ')} aren't real companies. Each conversation is a fixed script run through the same engine that answers live chats; nothing is sent to anyone, and the sample business is deleted after each run. In a live chat, questions typed in the customer's own words are answered by the AI from your own website.</span></p>
 <nav class="sc-nav" aria-label="Scenarios">${results.map(([sc]) => `<a href="#${esc(sc.key)}">${sc.emoji} ${esc(sc.title)}</a>`).join('')}</nav>
 ${results.map(([sc, res]) => scenarioHtml(sc, res)).join('')}
 <p style="margin-top:28px"><a class="btn" href="/try">Try it on your own website</a> <a class="btn ghost" href="/demo">Book a demo</a></p>

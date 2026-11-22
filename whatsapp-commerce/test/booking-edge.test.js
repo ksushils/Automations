@@ -89,3 +89,37 @@ test('in the chat: after picking a long service, times it would clash with are n
   const offered = ids(r).filter((x) => x.startsWith('bslot:') && x.includes(tomorrow));
   assert.ok(!offered.includes(`bslot:${tomorrow}T10:00`), '10:00–12:00 would clash with the 11:00 cut');
 });
+
+test('bookings stored the usual way ("YYYY-MM-DD HH:MM:SS", UTC) are read as UTC whatever the server time zone', () => {
+  const t = salon();
+  const day = '2027-07-05'; // summer: 10:00 London = 09:00 UTC
+  getDb().prepare("INSERT INTO bookings (tenant_id, wa_id, service, day, time, starts_at, status) VALUES (?, 'x', 'Colour', ?, '10:00', '2027-07-05 09:00:00', 'requested')").run(t.id, day);
+  assert.deepEqual(freeTimes(t, day, EARLY, { service: 'Cut' }).slice(0, 2), ['09:00', '12:00']);
+});
+
+test('named staff: each booking goes to a free person who does the service; a busy person frees no slot for others', async () => {
+  const { assignStaff } = await import('../src/bookings.js');
+  const t = salon({ staff: [{ name: 'Amy', days: [] }, { name: 'Cara', days: [], services: ['Cut'] }] });
+  const day = '2027-02-08';
+  assert.equal(assignStaff(t, day, '10:00', 'Colour'), 'Amy', 'only Amy colours');
+  getDb().prepare("INSERT INTO bookings (tenant_id, wa_id, service, day, time, starts_at, status, staff) VALUES (?, 'x', 'Colour', ?, '10:00', ?, 'confirmed', 'Amy')").run(t.id, day, zonedToUtc(day, '10:00', 'Europe/London').toISOString());
+  assert.equal(assignStaff(t, day, '11:00', 'Cut'), 'Cara', 'Amy is mid-colour at 11:00');
+  assert.ok(freeTimes(t, day, EARLY, { service: 'Cut' }).includes('11:00'));
+  assert.ok(!freeTimes(t, day, EARLY, { service: 'Colour' }).includes('11:00'), 'nobody else colours');
+  assert.equal(assignStaff(t, day, '11:00', 'Colour'), null);
+  // with no staff listed, nothing is assigned (as before)
+  assert.equal(assignStaff(salon(), day, '10:00', 'Cut'), null);
+});
+
+test('in the chat, a confirmed booking records who it is with', async () => {
+  const t = salon({ staff: [{ name: 'Amy', days: [] }], times: ['09:00', '10:00', '11:00'], days: 3 });
+  const wa = '447700900952';
+  await say(t, wa, { action: 'book' });
+  let r = await say(t, wa, { action: 'bsvc:1' }); // Cut
+  const slot = ids(r).find((x) => x.startsWith('bslot:'));
+  r = await say(t, wa, { action: slot });
+  if (ids(r).includes('bconfirm')) r = await say(t, wa, { action: 'bconfirm' });
+  else { await say(t, wa, 'Jo'); await say(t, wa, { action: 'bconfirm' }); }
+  const b = getDb().prepare('SELECT staff, service FROM bookings WHERE tenant_id = ? AND wa_id = ?').get(t.id, wa);
+  assert.deepEqual([b.service, b.staff], ['Cut', 'Amy']);
+});

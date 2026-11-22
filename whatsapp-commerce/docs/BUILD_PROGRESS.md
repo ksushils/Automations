@@ -4,7 +4,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 11 (lead questions one at a time, scripted demo scenarios, booking availability, JSON logs), 22 November 2026.
+- **Last batch:** batch 12 (automations from plain English, "To do now", named staff on bookings, salon and shop examples), 22 November 2026.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** ✅ **batch 11 deployed to wa.karatit.com on 22 November 2026** (server commit `a565f41`; 354/355 tests in the image, 1 skipped; health ok; `/examples` live with all six scenarios and no sample business left behind; new `chat_leads.answers`/`urgent` columns present; no business had any of the four default-on settings switched off; the 5 live businesses intact – the 2 fewer since batch 10 are unclaimed instant demos that expired and were cleaned up as designed).
 - **Earlier:** batch 10 deployed to wa.karatit.com on 22 November 2026** (server commit `e7f0fd2`; 333/334 tests in the image, 1 skipped; health ok; 14 businesses and 1,110 messages intact; `PRAGMA synchronous` = NORMAL live). Batches 1–9 were deployed earlier the same day (server commit `0e50038`), with `scripts/deploy-vps.sh`:
@@ -14,8 +14,23 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - **Data:** intact (14 businesses).
   - **Rollback:** `sh scripts/rollback-vps.sh`.
 - **First deploy attempts:** one merge conflict with the demo-engine branch (`server.js` imports; both kept), and a calendar test that was flaky under load (fixed). The script stopped safely each time before restarting anything.
-- **Tests:** 340 of 340 pass locally on Node 24 (batch 11). They run again inside the Node 22 image during the deploy.
+- **Tests:** 352 of 352 pass locally on Node 24 (batch 12). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
+
+## Batch 12: automations from plain English (R3.3), "To do now" (R4), named staff (R2.3), more examples (R1.3)
+- **Automations from plain English** (`src/autoDraft.js`; Automations tab → "✨ Describe an automation"): the owner writes what they want; the AI (one call) drafts either a chat flow, a change to the built-in follow-ups, or an honest "can't do that here – use Campaigns/…".
+  - **Allowed steps only:** message, question, list, tag, hand-over, hand back to the assistant (menu/browse/status/cart), delay (≤ 24 h), go to, end. Webhooks, templates, forms and product ids are removed and listed as problems. **Allowed settings only:** review requests (+ hours), unfinished-basket reminder (shops), appointment reminders and "book again" (bookings on), quote follow-up, lead reminders, per-customer daily cap, quiet hours – numbers kept within limits; "already set" and missing review link flagged.
+  - **Checks:** the flow builder's own validation, trigger words that clash with another automation, and everyday words ("hi", "menu", "stop") block approval.
+  - **Try-out:** a flow is played through the real engine on a throwaway copy of the business (no WhatsApp, no email, no AI; deleted after) – one run per first choice, shown as chat bubbles; a settings change shows now → after.
+  - **Approval:** owners only; checks run again at approval (e.g. a trigger word taken since); the flow then appears in Automations (active) and can be edited or deleted as usual. Drafts are kept (last 20) with who approved and when.
+  - Without an AI key: a clear "needs the AI" message. Rate limit 20 drafts an hour.
+- **"To do now" on Today** (`src/today.js`, `GET /api/tenants/:id/today`): chats waiting for a person, urgent leads to call, new leads, booking requests to confirm, today's appointments, quotes to price, orders to prepare (shops), open tickets, unanswered questions this week, automation drafts to review – urgent first, each linking to its page; rows only for features the business uses; "All clear" when nothing waits. Staff only see rows for pages they can open.
+- **Named staff on bookings:** with staff listed, each booking made in the chat goes to a free member of staff who does that service (the one with fewest bookings that day); a busy stylist no longer leaves a slot "free" for a service only they do. Bookings tab: a "With" column to change it. Additive column `bookings.staff`.
+- **More examples on `/examples`:** a hair salon (a full colour booked, given to the stylist who does colour) and an online shop (browse → size → pay on delivery → order, then "order status" answered from the order). 8 scenarios, three sample businesses, all labelled.
+- **Fixes found on the way:**
+  - Booking overlap check (batch 11) read stored start times ("YYYY-MM-DD HH:MM:SS", UTC) as server-local time – right on the UTC server, wrong elsewhere; now always UTC (test added).
+  - The "Online shop" trade template dropped "Browse products" and "Track my order" from the menu for businesses on the built-in catalogue; fixed (test added). Existing menus aren't changed automatically.
+- **Tests:** `test/auto-draft.test.js` (5), `test/today.test.js` (3), 3 more in `booking-edge.test.js`, salon/shop checks in `scenarios.test.js`, 1 in `trades.test.js`. Full suite 352/352 locally. Checked in a browser on a local test copy: To do now (and its link), the Automations card with and without AI, a draft with problems listed and two try-out paths, Approve → flow active in the list.
 
 ## Batch 11: lead questions (R2.2), demo scenarios (R1.3), booking availability (R2.3), JSON logs (R0.15)
 - **Questions one at a time** (`src/qualify.js`): when someone asks for a call back or details, the assistant asks what this trade needs, one short question per message with a Skip – e.g. a plumber: the problem → the postcode → how soon (🚨 Today – urgent / This week); a travel agent: where → when → how many → budget. Up to 4 questions, up to 2 tap-to-answer choices each.

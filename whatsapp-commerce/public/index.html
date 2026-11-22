@@ -544,7 +544,7 @@ async function overview() {
   const t = (S.tenant = (await api(T(''))).tenant);
   const lim = t.planLimits || {};
   const s = t.settings;
-  $('#app').innerHTML = `${S.role === 'owner' ? '<div id="guide"><div class="card"><h2>Loading your steps…</h2></div></div>' : ''}<div class="row">
+  $('#app').innerHTML = `<div id="todo"></div>${S.role === 'owner' ? '<div id="guide"><div class="card"><h2>Loading your steps…</h2></div></div>' : ''}<div class="row">
       <div class="card"><div class="mute">Messages in (month)</div><div class="stat">${t.usage.inbound}${lim.monthlyConversationsIn ? ` / ${lim.monthlyConversationsIn}` : ''}</div></div>
       <div class="card"><div class="mute">Orders (month)</div><div class="stat">${t.usage.orders}</div></div>
       <div class="card"><div class="mute">AI replies (month)</div><div class="stat">${t.usage.ai_calls}${lim.aiCalls ? ` / ${lim.aiCalls}` : ''}</div><div class="mute">AI spend $${((t.usage.ai_cost_micro || 0) / 1e6).toFixed(2)}${lim.aiBudgetUsd != null ? ` of $${(s.ai?.budgetUsd ?? lim.aiBudgetUsd)} cap` : ''}</div></div>
@@ -564,6 +564,12 @@ async function overview() {
       <div><button class="btn ghost" data-test="store">Test store</button></div>
       <div><button class="btn ghost" data-test="dify">Test Dify</button></div>
       <div><input id="tw" placeholder="Your WhatsApp no. e.g. 447700900123"><button class="btn ghost" data-test="whatsapp" style="margin-top:6px">Send test WhatsApp</button></div></div><pre id="tr" class="mute"></pre></details>`;
+  api(T('/today')).then((td) => {
+    if (S.role !== 'owner' && !S.super) td.items = td.items.filter((i) => STAFF_TABS.has(i.tab)); // staff only see what they can open
+    const col = { urgent: '#b42318', todo: '#d4a017', info: '#5d6b63' };
+    $('#todo').innerHTML = `<div class="card"><h2>${td.allClear ? '✅ All clear for now' : '📋 To do now'}</h2>${td.items.length ? td.items.map((i) => `<a href="#" data-todo="${esc(i.tab)}" style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line);text-decoration:none;color:inherit"><span style="font-size:20px">${i.icon}</span><span style="flex:1"><b style="color:${col[i.level]}">${esc(i.title)}</b><br><span class="mute">${esc(i.detail || '')}</span></span><span class="mute">Open →</span></a>`).join('') : '<p class="mute">Nothing waiting – no chats for a person, no new leads, nothing to confirm. New ones show here as they arrive.</p>'}</div>`;
+    $('#todo').querySelectorAll('[data-todo]').forEach((a) => (a.onclick = (e) => { e.preventDefault(); S.tab = a.dataset.todo; store.set('wc_tab', S.tab); render(); }));
+  }).catch(() => {});
   if (S.role === 'owner') shopGuide(t).catch((e) => { if ($('#guide')) $('#guide').innerHTML = `<div class="card"><p class="pill warn">${esc(e.message)}</p></div>`; });
   api(T('/whatsapp/checklist')).then((c) => {
     const icon = (d) => (d === true ? '✅' : d === false ? '⬜' : '❔');
@@ -965,6 +971,7 @@ async function bookings() {
   const { bookings: list } = await api(T(`/bookings${past ? '?past=1' : ''}`));
   const sym = S.tenant.settings.business.currencySymbol || '£';
   const on = S.tenant.settings.bookings?.enabled;
+  const team = (S.tenant.settings.bookings?.staff || []).map((p) => p?.name).filter(Boolean);
   const pill = { requested: '<span class="pill warn">to confirm</span>', awaiting_deposit: '<span class="pill">awaiting deposit</span>', confirmed: '<span class="pill ok">confirmed</span>', cancelled: '<span class="pill">cancelled</span>', completed: '<span class="pill ok">done</span>', no_show: '<span class="pill warn">no-show</span>' };
   const day = (b) => new Date(b.day + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
   const actions = (b) => (b.status === 'requested' ? [['confirmed', '✅ Confirm'], ['cancelled', 'Decline']] : b.status === 'confirmed' ? [['completed', 'Done'], ['no_show', 'No-show'], ['cancelled', 'Cancel']] : b.status === 'awaiting_deposit' ? [['confirmed', 'Confirm anyway'], ['cancelled', 'Cancel']] : [])
@@ -973,9 +980,10 @@ async function bookings() {
       <div><button class="btn ${past ? 'ghost' : ''}" data-bp="0">Upcoming</button> <button class="btn ${past ? '' : 'ghost'}" data-bp="1">Past</button></div></div>
     <div id="gcalcard"></div>
     ${on ? '' : '<p class="mute">Bookings in the chat are off. Switch them on in Settings → Bookings in the chat: add your start times (and services), and customers can book by typing <b>book</b>.</p>'}
-    <div class="tablewrap"><table><tr><th>When</th><th>Customer</th><th>Service</th><th>Status</th><th></th></tr>
-    ${list.map((b) => `<tr><td><b>${esc(day(b))}</b> ${esc(b.time)}</td><td>${esc(b.name || '')}<div class="mute">${String(b.wa_id).startsWith('web:') ? 'website chat' : '+' + esc(b.wa_id)}</div></td><td>${esc(b.service || '–')}${b.deposit ? `<div class="mute">deposit ${sym}${Number(b.deposit).toFixed(2)} ${b.deposit_paid ? '✅ paid' : 'unpaid'}</div>` : ''}</td><td>${pill[b.status] || esc(b.status)}${b.reminded_at ? '<div class="mute">reminded</div>' : ''}</td><td style="white-space:nowrap">${actions(b)}</td></tr>`).join('') || `<tr><td colspan="5" class="mute">No ${past ? 'past' : 'upcoming'} bookings</td></tr>`}</table></div></div>`;
+    <div class="tablewrap"><table><tr><th>When</th><th>Customer</th><th>Service</th>${team.length ? '<th>With</th>' : ''}<th>Status</th><th></th></tr>
+    ${list.map((b) => `<tr><td><b>${esc(day(b))}</b> ${esc(b.time)}</td><td>${esc(b.name || '')}<div class="mute">${String(b.wa_id).startsWith('web:') ? 'website chat' : '+' + esc(b.wa_id)}</div></td><td>${esc(b.service || '–')}${b.deposit ? `<div class="mute">deposit ${sym}${Number(b.deposit).toFixed(2)} ${b.deposit_paid ? '✅ paid' : 'unpaid'}</div>` : ''}</td>${team.length ? `<td><select data-bstaff="${b.id}" style="width:auto"><option value="">Anyone</option>${team.map((n) => `<option ${b.staff === n ? 'selected' : ''}>${esc(n)}</option>`).join('')}${b.staff && !team.includes(b.staff) ? `<option selected>${esc(b.staff)}</option>` : ''}</select></td>` : ''}<td>${pill[b.status] || esc(b.status)}${b.reminded_at ? '<div class="mute">reminded</div>' : ''}</td><td style="white-space:nowrap">${actions(b)}</td></tr>`).join('') || `<tr><td colspan="5" class="mute">No ${past ? 'past' : 'upcoming'} bookings</td></tr>`}</table></div></div>`;
   gcalCard();
+  $('#app').querySelectorAll('[data-bstaff]').forEach((el) => (el.onchange = async () => { try { await api(T(`/bookings/${el.dataset.bstaff}/staff`), { method: 'POST', body: { staff: el.value } }); toast('Saved'); } catch (e) { toast(e.message); } }));
   $('#app').querySelectorAll('[data-bp]').forEach((b) => (b.onclick = () => { store.set('wc_bpast', b.dataset.bp === '1' ? '1' : null); bookings(); }));
   $('#app').querySelectorAll('[data-bs]').forEach((b) => (b.onclick = async () => {
     try { await api(T(`/bookings/${b.dataset.bs}/status`), { method: 'POST', body: { status: b.dataset.st } }); toast(b.dataset.st === 'confirmed' ? 'Confirmed – the customer has been told' : b.dataset.st === 'cancelled' ? 'Cancelled – the customer has been told' : 'Updated'); bookings(); } catch (e) { toast(e.message); }
@@ -1141,10 +1149,46 @@ async function downloadCsv(kind) {
 }
 
 // ---------- automations ----------
+// ---------- automations from plain English: AI draft → checks → try-out → approve (src/autoDraft.js) ----------
+async function autoDraftCard() {
+  const box = $('#autodraft');
+  if (!box) return;
+  const { drafts, aiReady } = await api(T('/automation-drafts'));
+  const owner = S.role === 'owner' || S.super;
+  const bubble = (m) => m.from === 'customer' ? `<div style="text-align:right;margin:4px 0"><span style="display:inline-block;background:#128c4a;color:#fff;border-radius:10px;padding:5px 10px;max-width:80%">${esc(m.text)}</span></div>`
+    : m.from === 'note' ? `<div class="mute" style="text-align:center;font-size:13px;margin:4px 0">⏱️ ${esc(m.text)}</div>`
+    : `<div style="margin:4px 0"><span style="display:inline-block;background:var(--card,#fff);border:1px solid #dfe5e1;border-radius:10px;padding:5px 10px;max-width:80%;white-space:pre-wrap">${esc(m.text)}</span>${(m.choices || []).length ? `<div style="margin-top:3px">${m.choices.map((c) => `<span class="pill">${esc(c)}</span>`).join(' ')}</div>` : ''}</div>`;
+  const draftHtml = (d) => `<div class="card" style="border-left:4px solid ${d.status === 'approved' ? '#128c4a' : d.ok ? '#d4a017' : '#b42318'}">
+    <p class="mute" style="margin:0">“${esc(d.text)}”</p>
+    <h3 style="margin:6px 0">${d.status === 'approved' ? '✅ Switched on' : d.type === 'cannot' ? '🚫 Not something automations can do' : '📝 Draft – not live yet'}: ${esc(d.summary || '')}</h3>
+    ${d.type === 'cannot' ? `<p>${esc(d.reason || '')}</p>` : ''}
+    ${(d.issues || []).length ? `<ul style="margin:6px 0">${d.issues.map((x) => `<li>⚠️ ${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${d.type === 'flow' ? `<p><b>Starts when a customer types:</b> ${(d.flow.triggers.keywords || []).map((k) => `<span class="pill">${esc(k)}</span>`).join(' ')} <span class="mute">· ${d.flow.steps.length} steps</span></p>` : ''}
+    ${d.tryout?.runs?.length ? `<details ${d.status === 'draft' ? 'open' : ''}><summary><b>Try-out</b> – played through the real assistant on a test copy of your business (nothing sent)</summary><div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">${d.tryout.runs.map((run, i) => `<div style="flex:1;min-width:240px;background:var(--bg,#f5f7f6);border-radius:10px;padding:8px"><div class="mute" style="font-size:12px">Path ${i + 1}</div>${run.map(bubble).join('')}</div>`).join('')}</div></details>` : ''}
+    ${d.type === 'settings' && (d.changes || []).length ? `<table><tr><th>Setting</th><th>Now</th><th>After</th></tr>${d.changes.map((c) => `<tr><td>${esc(c.label)}</td><td>${esc(String(c.before ?? '–'))}</td><td><b>${esc(String(c.after))}</b></td></tr>`).join('')}</table>` : ''}
+    ${d.status === 'draft' && owner ? `<p>${d.ok ? `<button class="btn" data-adok="${d.id}">✅ Approve and switch on</button> ` : ''}<button class="btn ghost" data-addel="${d.id}">Discard</button></p>` : ''}
+    ${d.status === 'approved' && d.type === 'flow' ? '<p class="mute">It\'s in the list below – edit or switch it off there.</p>' : ''}</div>`;
+  box.innerHTML = `<div class="card"><h2>✨ Describe an automation</h2>
+    <p class="mute">Say what you want in your own words – e.g. <i>“when someone types prices, ask which service and pass them to the team”</i> or <i>“remind people the day before their appointment and 2 hours before”</i>. You get a draft made only from safe, allowed steps, tried out on a test copy of your business. Nothing changes until you approve it.</p>
+    ${!aiReady ? '<p class="mute">⚠️ This needs the AI, which isn\'t set up on this server yet.</p>' : owner ? `<textarea id="adtext" maxlength="600" style="min-height:70px" placeholder="When someone…"></textarea><p><button class="btn" id="adgo">Draft it</button> <span id="admsg" class="mute"></span></p>` : '<p class="mute">Only the owner can create automations.</p>'}
+  </div>${drafts.slice(0, 5).map(draftHtml).join('')}`;
+  if ($('#adgo')) $('#adgo').onclick = async () => {
+    const text = $('#adtext').value.trim();
+    if (text.length < 8) return toast('Describe it in a sentence or two');
+    $('#adgo').disabled = true; $('#admsg').textContent = 'Drafting and trying it out… (about 10 seconds)';
+    try { await api(T('/automation-drafts'), { method: 'POST', body: { text } }); await autoDraftCard(); } catch (e) { toast(e.message); $('#adgo').disabled = false; $('#admsg').textContent = ''; }
+  };
+  box.querySelectorAll('[data-adok]').forEach((b) => (b.onclick = async () => {
+    try { await api(T(`/automation-drafts/${b.dataset.adok}/approve`), { method: 'POST', body: {} }); toast('Switched on'); if (S.tab === 'automations') automations(); } catch (e) { toast(e.message); }
+  }));
+  box.querySelectorAll('[data-addel]').forEach((b) => (b.onclick = async () => { await api(T(`/automation-drafts/${b.dataset.addel}`), { method: 'DELETE' }); autoDraftCard(); }));
+}
+
 async function automations() {
   const { flows } = await api(T('/flows'));
+  setTimeout(() => autoDraftCard().catch(() => {}), 0);
   automationLogCard().catch(() => {});
-  $('#app').innerHTML = `<div id="autolog"></div><div class="card"><h2>Automations <span class="mute" style="font-weight:400">– keyword auto-replies & chatbot flows</span></h2>
+  $('#app').innerHTML = `<div id="autodraft"></div><div id="autolog"></div><div class="card"><h2>Automations <span class="mute" style="font-weight:400">– keyword auto-replies & chatbot flows</span></h2>
     <p class="mute">Flows start when a customer sends a keyword (e.g. “hi”, “price list”), on their very first message, or when they arrive from a Click-to-WhatsApp ad. Anything not matched goes to the shop bot / AI.</p>
     <p><button class="btn" id="newflow">+ New flow</button> ${FLOW_PRESETS.map((p, i) => `<button class="btn ghost" data-preset="${i}">Use template: ${esc(p.name)}</button>`).join(' ')}</p></div>
     <div class="card"><div class="tablewrap"><table><tr><th>Name</th><th>Triggers</th><th>Blocks</th><th>Runs</th><th>Status</th><th></th></tr>

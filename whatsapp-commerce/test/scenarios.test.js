@@ -55,6 +55,14 @@ test('the scenarios show what they promise', async () => {
   assert.ok(fu.transcript.some((m) => m.from === 'time'));
   assert.match(all(fu), /Just checking you got your quote/);
   assert.match(fu.team[0].text, /One follow-up sent/);
+  const salon = await runScenario('salon_booking');
+  assert.equal(salon.business, 'Willow Hair Studio');
+  assert.match(salon.team[0].text, /Full colour · .* · with Amy/, 'only Amy does colour');
+  const shop = await runScenario('shop_order');
+  assert.match(all(shop), /Browse products/, 'the shop menu has Browse');
+  assert.match(all(shop), /Order \*WA-\d+\* confirmed/);
+  assert.match(all(shop), /received/, 'order status answered from the order');
+  assert.match(shop.team.find((t) => t.kind === 'order').text, /2 × Merino walking socks \(Size 9–11\)[\s\S]*pay on delivery/);
 });
 
 test('nothing can be emailed during a sample run', async () => {

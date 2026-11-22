@@ -63,6 +63,8 @@ import { entitlements, staffSeatsLeft } from '../entitlements.js';
 import { listOpportunities, setOpportunityState } from '../opportunities.js';
 import { buildTwin } from '../businessTwin.js';
 import { qualifyFor, parseQualifyText, qualifyText } from '../qualify.js';
+import { createDraft, approveDraft, listDrafts, discardDraft } from '../autoDraft.js';
+import { todayList } from '../today.js';
 import { listAnswers, answerStats } from '../verified.js';
 import { automationLog } from '../outreach.js';
 import { askCopilot, SUGGESTIONS } from '../copilot.js';
@@ -313,6 +315,7 @@ export function adminRouter() {
   // ----- billing (your SaaS subscription) -----
   r.get('/tenants/:tenantId/billing', requireTenant, requireOwner, (req, res) => res.json({ billing: billingInfo(req.tenant.id), plans: PLANS, history: billingHistory(req.tenant.id) }));
   r.get('/tenants/:tenantId/twin', requireTenant, (req, res) => res.json(buildTwin(req.tenant)));
+  r.get('/tenants/:tenantId/today', requireTenant, (req, res) => res.json(todayList(req.tenant))); // what needs doing now (src/today.js)
   r.get('/tenants/:tenantId/opportunities', requireTenant, (req, res) => res.json(listOpportunities(req.tenant, { includeClosed: req.query.all === '1' })));
   r.post('/tenants/:tenantId/opportunities/:key/:action', requireTenant, (req, res) => {
     try {
@@ -383,6 +386,13 @@ export function adminRouter() {
   });
   r.delete('/tenants/:tenantId/staff/:staffId', requireTenant, requireOwner, (req, res) => { deleteStaff(req.tenant.id, Number(req.params.staffId)); res.json({ ok: true }); });
 
+  // ----- automations from plain English (src/autoDraft.js): AI draft → server checks → try-out → owner approves -----
+  r.get('/tenants/:tenantId/automation-drafts', requireTenant, (req, res) => res.json({ drafts: listDrafts(req.tenant.id), aiReady: directConfigured() }));
+  r.post('/tenants/:tenantId/automation-drafts', requireTenant, requireOwner, rateLimit({ windowMs: 3600000, max: 20 }), wrap(async (req, res) => { try { res.json({ draft: await createDraft(req.tenant, String(req.body?.text || '')) }); } catch (e) { res.status(e.status || 502).json({ error: e.status ? e.message : 'The AI could not draft this just now – please try again.' }); } }));
+  r.post('/tenants/:tenantId/automation-drafts/:draftId/approve', requireTenant, requireOwner, (req, res) => {
+    try { res.json(approveDraft(req.tenant, req.params.draftId, { by: req.isSuper ? 'platform' : 'owner' })); } catch (e) { res.status(e.status || 500).json({ error: e.message, issues: e.issues }); }
+  });
+  r.delete('/tenants/:tenantId/automation-drafts/:draftId', requireTenant, requireOwner, (req, res) => { discardDraft(req.tenant.id, req.params.draftId); res.json({ ok: true }); });
   // ----- automations (flow builder) -----
   r.get('/tenants/:tenantId/flows', requireTenant, (req, res) => res.json({ flows: listFlows(req.tenant.id) }));
   r.get('/tenants/:tenantId/flows/:flowId', requireTenant, (req, res) => {
@@ -568,6 +578,15 @@ export function adminRouter() {
   }));
   // Bookings taken in the chat
   r.get('/tenants/:tenantId/bookings', requireTenant, (req, res) => res.json({ bookings: listBookings(req.tenant.id, { past: req.query.past === '1' }) }));
+  // who a booking is with (Settings → Bookings → Staff); '' = anyone
+  r.post('/tenants/:tenantId/bookings/:id/staff', requireTenant, (req, res) => {
+    const name = String(req.body?.staff ?? '').trim();
+    const names = (req.tenant.settings.bookings?.staff || []).map((p) => String(p?.name || '')).filter(Boolean);
+    if (name && !names.includes(name)) return res.status(400).json({ error: 'Not one of your staff (Settings → Bookings → Staff)' });
+    const r2 = getDb().prepare('UPDATE bookings SET staff = ? WHERE tenant_id = ? AND id = ?').run(name || null, req.tenant.id, Number(req.params.id));
+    if (!r2.changes) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true, staff: name || null });
+  });
   r.post('/tenants/:tenantId/bookings/:id/status', requireTenant, wrap(async (req, res) => {
     const b = await setBookingStatus(req.tenant, req.params.id, String(req.body?.status || ''));
     if (!b) return res.status(404).json({ error: 'not found' });

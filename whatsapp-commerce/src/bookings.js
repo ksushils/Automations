@@ -56,21 +56,46 @@ const slotMinutes = (B) => Number(B.slotMinutes) || Math.max(0, ...(B.services |
 /** Minutes a booking of this service takes (unknown service: the longest, to be safe). */
 export const serviceMinutes = (B, name) => Number((B.services || []).find((s) => s?.name && s.name === name)?.minutes) || slotMinutes(B);
 /** How many bookings can run at once on this day (for this service). */
-export function capacity(B, day, service = null) {
-  const staff = (Array.isArray(B.staff) ? B.staff : []).filter((p) => p && (p.name || p.days));
-  if (!staff.length) return Math.max(1, Number(B.perSlot) || 1);
+const staffList = (B) => (Array.isArray(B.staff) ? B.staff : []).filter((p) => p && p.name);
+/** Staff working that day, not away, who do this service. */
+export function staffOn(B, day, service = null) {
   const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
-  return staff.filter((p) => (!Array.isArray(p.days) || !p.days.length || p.days.map(Number).includes(dow))
+  return staffList(B).filter((p) => (!Array.isArray(p.days) || !p.days.length || p.days.map(Number).includes(dow))
     && !(p.away || []).includes(day)
-    && (!service || !Array.isArray(p.services) || !p.services.length || p.services.includes(service))).length;
+    && (!service || !Array.isArray(p.services) || !p.services.length || p.services.includes(service))).map((p) => String(p.name));
 }
+export function capacity(B, day, service = null) {
+  if (!staffList(B).length) return Math.max(1, Number(B.perSlot) || 1);
+  return staffOn(B, day, service).length;
+}
+/** "2026-11-23 08:00:00" (stored without a zone, always UTC) or ISO → ms. */
+const utcMs = (s) => Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(String(s)) ? s : `${String(s).replace(' ', 'T')}Z`);
 /** Bookings holding time on this day (and the day before, for anything running past midnight), as UTC ranges. */
 function heldRanges(tenant, day) {
   const B = tenant.settings.bookings || {};
   const buf = Math.max(0, Number(B.bufferMinutes) || 0) * 60000;
   const prev = new Date(Date.parse(`${day}T12:00:00Z`) - 864e5).toISOString().slice(0, 10);
-  return getDb().prepare("SELECT service, starts_at FROM bookings WHERE tenant_id = ? AND day IN (?, ?) AND status NOT IN ('cancelled', 'no_show')").all(tenant.id, prev, day)
-    .map((b) => { const s = Date.parse(b.starts_at); return [s, s + serviceMinutes(B, b.service) * 60000 + buf]; });
+  return getDb().prepare("SELECT id, service, starts_at, staff FROM bookings WHERE tenant_id = ? AND day IN (?, ?) AND status NOT IN ('cancelled', 'no_show')").all(tenant.id, prev, day)
+    .map((b) => { const s = utcMs(b.starts_at); return [s, s + serviceMinutes(B, b.service) * 60000 + buf, b.staff || null, b.id]; });
+}
+/** Who is free for this slot: eligible staff minus those with an overlapping booking, minus one per unassigned overlap. */
+function freeStaff(B, day, service, held, s, len, buf, { exceptId = null } = {}) {
+  const names = staffOn(B, day, service);
+  const over = held.filter(([a, b, , id]) => id !== exceptId && s < b && a < s + len + buf);
+  const busy = new Set(over.map((h) => h[2]).filter((n) => n && names.includes(n)));
+  const unassigned = over.filter((h) => !h[2] || !staffList(B).some((p) => p.name === h[2])).length;
+  const free = names.filter((n) => !busy.has(n));
+  return free.length - unassigned > 0 ? free : [];
+}
+/** Give a new booking to a free member of staff who does the service (the one with the fewest bookings that day). */
+export function assignStaff(tenant, day, time, service, { exceptId = null } = {}) {
+  const B = tenant.settings.bookings || {};
+  if (!staffList(B).length) return null;
+  const held = heldRanges(tenant, day);
+  const s = zonedToUtc(day, time, tz(tenant.settings)).getTime();
+  const free = freeStaff(B, day, service, held, s, serviceMinutes(B, service) * 60000, Math.max(0, Number(B.bufferMinutes) || 0) * 60000, { exceptId });
+  const load = (n) => held.filter((h) => h[2] === n).length;
+  return free.sort((a, b) => load(a) - load(b))[0] || null;
 }
 /** Free times for one day (notice period, overlapping bookings, buffers, staff on that day, Google Calendar). */
 export function freeTimes(tenant, day, now = new Date(), { service = null } = {}) {
@@ -84,7 +109,7 @@ export function freeTimes(tenant, day, now = new Date(), { service = null } = {}
   const held = heldRanges(tenant, day);
   return (B.times || []).map(startTime).filter((t) => /^\d{1,2}:\d{2}$/.test(t))
     .filter((t) => zonedToUtc(day, t, tz(tenant.settings)).getTime() >= now.getTime() + lead)
-    .filter((t) => { const s = zonedToUtc(day, t, tz(tenant.settings)).getTime(); return held.filter(([a, b]) => s < b && a < s + len + buf).length < cap; })
+    .filter((t) => { const s = zonedToUtc(day, t, tz(tenant.settings)).getTime(); return staffList(B).length ? freeStaff(B, day, service, held, s, len, buf).length > 0 : held.filter(([a, b]) => s < b && a < s + len + buf).length < cap; })
     .filter((t) => { const s = zonedToUtc(day, t, tz(tenant.settings)).getTime(); return !isBusy(tenant.id, s, s + len); }); // Google Calendar busy times
 }
 
@@ -326,8 +351,9 @@ async function confirmDraft(ctx) {
   const deposit = b.deposit && stripeKey ? b.deposit : 0;
   const status = deposit ? 'awaiting_deposit' : S.bookings?.autoConfirm ? 'confirmed' : 'requested';
   const startsAt = zonedToUtc(b.day, b.time, tz(S)).toISOString().replace('T', ' ').slice(0, 19);
-  const id = Number(getDb().prepare('INSERT INTO bookings (tenant_id, wa_id, name, service, day, time, starts_at, status, deposit, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(ctx.tenant.id, ctx.conv.waId, b.name || ctx.customer.name || null, b.service, b.day, b.time, startsAt, status, deposit, b.phone ? `Phone: ${b.phone}` : null).lastInsertRowid);
+  const staff = assignStaff(ctx.tenant, b.day, b.time, b.service); // null when no staff are listed
+  const id = Number(getDb().prepare('INSERT INTO bookings (tenant_id, wa_id, name, service, day, time, starts_at, status, deposit, notes, staff) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(ctx.tenant.id, ctx.conv.waId, b.name || ctx.customer.name || null, b.service, b.day, b.time, startsAt, status, deposit, b.phone ? `Phone: ${b.phone}` : null, staff).lastInsertRowid);
   delete ctx.conv.data.booking;
   const booking = getBooking(ctx.tenant.id, id);
   if (b.rescheduleOf) {

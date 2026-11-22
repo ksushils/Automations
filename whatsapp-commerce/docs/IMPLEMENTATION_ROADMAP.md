@@ -37,7 +37,7 @@ Rules that apply to every item:
 |---|---|---|
 | R1.1 | Business Twin: show what was learnt, with source pages; flag uncertain or missing facts; real progress steps; keep the approved configuration when the demo is claimed | ✅ batch 10 |
 | R1.2 | Trade variants (plumber, electrician, heating, handyman, property maintenance) and beauty variants (hair, barber, beauty, nails) on top of the existing templates | ✅ batch 7 |
-| R1.3 | Scripted demo scenarios (emergency plumber, photo, quote, service area, booking, human, follow-up) running through the real engine, with sample data labelled as such | ✅ batch 11 (`/examples`: 6 scenarios) |
+| R1.3 | Scripted demo scenarios (emergency plumber, photo, quote, service area, booking, human, follow-up) running through the real engine, with sample data labelled as such | ✅ batch 11 (`/examples`: 6 scenarios); batch 12: + salon and shop (8) |
 
 ## Phase 2: AI receptionist
 
@@ -45,7 +45,7 @@ Rules that apply to every item:
 |---|---|---|
 | R2.1 | Photo-to-quote: link the photo to the quote request; postcode and service-area check; urgency; owner approval by default | ✅ service area (batch 7), photos attached to quotes (batch 9) |
 | R2.2 | Per-trade qualification rules (one question at a time) | ✅ batch 11 |
-| R2.3 | Booking: tests across the daylight-saving change, configurable buffers, staff or resource availability | ✅ batch 11 (overlap-aware, buffers, staff capacity) |
+| R2.3 | Booking: tests across the daylight-saving change, configurable buffers, staff or resource availability | ✅ batch 11 (overlap-aware, buffers, staff capacity); batch 12: bookings assigned to a named member of staff |
 | R2.4 | Follow-up engine: one log of automatic actions, a per-customer cap, quiet hours | ✅ batch 5 |
 
 ## Phase 3: owner experience
@@ -54,7 +54,7 @@ Rules that apply to every item:
 |---|---|---|
 | R3.1 | **Opportunities** view: un-quoted requests, unanswered callbacks, unfinished bookings, gaps in the assistant's knowledge. Each shows its evidence and suggested actions. | ✅ batch 3 |
 | R3.2 | Owner copilot in the dashboard and owner WhatsApp: read-only answers straight away; any action needs confirmation; everything logged | ✅ batch 6 (read-only; actions still go through the normal screens) |
-| R3.3 | Natural-language automation drafts → checked against a fixed list of allowed steps → simulation → approval | ⬜ |
+| R3.3 | Natural-language automation drafts → checked against a fixed list of allowed steps → simulation → approval | ✅ batch 12 |
 | R3.4 | Verified answers: owner can see each answer's source and date; stale sources flagged | ✅ batch 4 (plus figure checks) |
 | R3.5 | Results dashboard: verified, attributed, estimated and opportunity figures kept apart, each traceable to its records | ✅ batch 4 |
 
@@ -62,7 +62,7 @@ Rules that apply to every item:
 
 | ID | Item |
 |---|---|
-| R4 | Simple owner navigation ✅ batch 10 (grouped menu, pages hidden that don't fit the business); industry-aware dashboard 🟡; UX polish; first-run onboarding checklist (exists: 9-step guide) |
+| R4 | Simple owner navigation ✅ batch 10 (grouped menu, pages hidden that don't fit the business); industry-aware dashboard ✅ batch 12 ("To do now" on Today, fitted to the business); UX polish; first-run onboarding checklist (exists: 9-step guide) |
 | R5 | Voice receptionist (compare providers first); Instagram and Messenger; light CRM pipeline; Zapier/Make/n8n; agency mode; multi-branch |
 | R6 | Plan entitlements made clear; usage page; optional setup fee; cancellation flow with a churn reason |
 | R7 | Marketing site repositioned (receptionist and sales assistant), trades/salon/ecommerce pages, no made-up claims, real case studies only |
@@ -70,7 +70,7 @@ Rules that apply to every item:
 
 ## Next batches
 
-1. **R3.3:** natural-language automation drafts → allowed steps only → simulation → approval.
-2. **R4 (rest):** industry-aware "Today" page (what needs doing now: urgent leads, unconfirmed bookings, draft quotes).
-3. **R2.3 (rest):** choose a named staff member when booking, and show bookings per staff member on the Bookings tab.
-4. **R1.3 (rest):** scenarios for a salon and a shop (the six today use a trades business).
+1. **R2.3 (rest):** let the customer choose a stylist/engineer in the chat ("Any" or a name), and a per-staff day view on the Bookings tab.
+2. **R6:** usage page per plan (what's included, what's used) and a cancellation flow that asks why.
+3. **R3.3 (rest):** "edit this draft" (describe a change to an existing automation) and drafts for the morning briefing.
+4. **R5:** Instagram/Messenger – compare what Meta allows for small businesses first (research before building).

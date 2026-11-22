@@ -92,3 +92,11 @@ test('trade guess from the business name', () => {
   assert.equal(guessTrade('Travel Rise'), 'travel');
   assert.equal(guessTrade('Acme Widgets Ltd'), null);
 });
+
+test('"Online shop" template on the built-in catalogue keeps Browse and Track my order in the menu', async () => {
+  const { tradeSettings } = await import('../src/trades.js');
+  const actions = tradeSettings('shop', { store: { type: 'manual', manual: { products: [{ id: 'a', title: 'A', price: 1 }] } } }).welcomeMenu.options.map((o) => o.action);
+  assert.ok(actions.includes('browse') && actions.includes('status'), actions.join(','));
+  const none = tradeSettings('plumber', { store: { type: 'none' } }).welcomeMenu.options.map((o) => o.action);
+  assert.ok(!none.includes('browse'), 'enquiry businesses still get no Browse');
+});
