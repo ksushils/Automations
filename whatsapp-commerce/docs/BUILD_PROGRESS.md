@@ -6,7 +6,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 - **Last batch:** batch 10 (Business Twin, simple menu, load test + SQLite tuning), 22 November 2026.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
-- **Deploy:** ✅ **deployed to wa.karatit.com on 22 November 2026** (server commit `0e50038`), with `scripts/deploy-vps.sh`:
+- **Deploy:** ✅ **batch 10 deployed to wa.karatit.com on 22 November 2026** (server commit `e7f0fd2`; 333/334 tests in the image, 1 skipped; health ok; 14 businesses and 1,110 messages intact; `PRAGMA synchronous` = NORMAL live). Batches 1–9 were deployed earlier the same day (server commit `0e50038`), with `scripts/deploy-vps.sh`:
   - **Database snapshots:** taken first, in `/root/wa-backups/predeploy-20261122-*.db`.
   - **Tests:** run inside the Node 22 image.
   - **Health:** `/health` returned `{"ok":true,"jobs":"ok"}`.

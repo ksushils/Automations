@@ -45,6 +45,8 @@
 |---|---|---|
 | 22 November 2026 | Local, Node 24 | 272 tests, 272 pass, 0 fail |
 | 22 November 2026 | Server image, Node 22, inside `deploy-vps.sh` | 326 tests, 325 pass, 0 fail, 1 skipped (the deploy-script check, because `scripts/` isn't in the image) |
+| 22 November 2026 (batch 10) | Local, Node 24 | 319 tests, 319 pass |
+| 22 November 2026 (batch 10) | Server image, Node 22, inside `deploy-vps.sh` | 334 tests, 333 pass, 0 fail, 1 skipped |
 
 ## Performance baseline (22 November 2026, local)
 
@@ -72,6 +74,8 @@ Memory after the run: 157 MB RSS (44 MB heap).
 | WhatsApp webhook acknowledged, p50 / p95 | 492.4 / 602.3 ms | 214.4 / 270.4 ms |
 | WhatsApp messages fully answered (200 chats) | 200/200 in 5.0 s (40 per second) | 200/200 in 2.3 s (87 per second) |
 | Knowledge search, p50 | 29.5 ms | 23.6 ms |
+
+**On the VPS** (22 November 2026, Node 22, same command in a throwaway container with its own temporary database; the live app and database were not touched): chat reply p50 239 ms / p95 375 ms (80 per second); webhook acknowledged p50 190 ms / p95 396 ms; 200/200 WhatsApp chats fully answered in 2.4 s (84 per second); knowledge search p50 44 ms; 173 MB RSS.
 
 Acknowledgements stay far inside Meta's ~10 s limit. Not a claim about maximum capacity; the AI provider adds 1–4 s per real reply.
 
