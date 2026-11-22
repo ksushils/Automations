@@ -99,7 +99,9 @@ test('Google Calendar: signed sign-in link; busy times are kept free; confirmed 
     _setBusyForTest(t.id, []);
     const id = Number(getDb().prepare("INSERT INTO bookings (tenant_id, wa_id, name, service, day, time, starts_at, status, deposit) VALUES (?, ?, 'Sam', 'Planning call', ?, '14:00', ?, 'requested', 0)").run(t.id, wa, day, zonedToUtc(day, '14:00', 'Europe/London').toISOString().replace('T', ' ').slice(0, 19)).lastInsertRowid);
     await setBookingStatus(tenants.getTenant(t.id), id, 'confirmed');
-    await new Promise((r) => setTimeout(r, 50));
+    // the calendar sync runs in the background: wait for it (up to 3 s – a busy server can take longer than 50 ms)
+    for (let i = 0; i < 60 && !calls.some((c) => c[0] === 'event'); i++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 50)); // and make sure a second, duplicate call would have arrived too
     const ev = calls.filter((c) => c[0] === 'event');
     assert.equal(ev.length, 1);
     assert.match(ev[0][1].summary, /Planning call – Sam \(via chat\)/);
