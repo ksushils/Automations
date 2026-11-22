@@ -194,10 +194,97 @@ export const TRADES = {
   },
 };
 
+// ---------- specialist versions of the two launch verticals: UK home-service trades, and hair & beauty ----------
+// Each builds on its parent template (trades / salon) and adds what that trade's customers ask and what the AI must
+// never say. Facts (prices, areas, hours, registrations) still come only from the business's own information.
+const GAS = 'If someone smells gas or thinks there is a gas leak, tell them to leave the property, not to use switches or flames, and call the National Gas Emergency number on 0800 111 999 straight away.';
+const CO = 'If a carbon monoxide alarm is going off or someone feels dizzy, sick or drowsy near a boiler or fire, tell them to get into fresh air and call 0800 111 999 (and 999 if anyone is unwell).';
+const ELEC = 'For electrical danger (sparks, burning smell, shocks, water near electrics) tell them to switch off at the consumer unit (fuse box) only if it is safe to reach, keep away, and call 105 if there is a power cut or damage to the supply.';
+const NO_PRICE = 'Never give a firm price without seeing the job unless the information lists a fixed price; you may share listed call-out fees and hourly rates exactly as written. Never say a photo shows the cause of a fault – say an engineer will confirm.';
+const REG = (body) => `Only say the business is ${body} if the information says so.`;
+const variant = (parent, o) => ({ ...TRADES[parent], parent, ...o });
+Object.assign(TRADES, {
+  plumber: variant('trades', {
+    label: 'Plumber', emoji: '🚿', blurb: 'Leaks, blocked drains, bathrooms, call-outs',
+    greeting: '🚿 Hi! Got a leak or need a plumber? Tell us what\'s happening – a photo helps.',
+    menu: [{ label: '🚨 Emergency leak', action: 'callback' }, { label: '📝 Get a quote', action: 'quote' }, ask('📍 Areas covered', 'Which areas do you cover?'), ask('💷 Call-out fee', 'Is there a call-out fee and what is your hourly rate?'), ask('🛁 Bathroom fitting', 'Do you fit bathrooms?')],
+    requirement: 'What\'s the problem, and what\'s your postcode? A photo helps – tap 📎 to send one.',
+    instructions: `For an active leak, suggest turning off the water at the stopcock if they can do it safely. ${GAS} ${NO_PRICE}`,
+    questions: ['Is there a call-out fee?', 'Can you come out today for a leak?', 'Do you unblock drains?', 'Do you cover my area?', 'Do you fit bathrooms?', 'Are you insured?'],
+  }),
+  electrician: variant('trades', {
+    label: 'Electrician', emoji: '💡', blurb: 'Faults, rewires, EV chargers, EICR certificates',
+    greeting: '💡 Hi! Need an electrician? Tell us what\'s going on and your postcode.',
+    menu: [{ label: '⚡ Fault or power loss', action: 'callback' }, { label: '📝 Get a quote', action: 'quote' }, ask('📋 EICR certificates', 'Do you do EICR certificates for landlords?'), ask('🔌 EV charger', 'Do you install EV chargers?'), ask('📍 Areas covered', 'Which areas do you cover?')],
+    requirement: 'What do you need doing, and what\'s your postcode? A photo of the fuse box or fault helps.',
+    instructions: `${ELEC} ${REG('NICEIC, NAPIT or Part P registered')} ${NO_PRICE}`,
+    questions: ['Can you do an EICR for my rental?', 'Do you install EV chargers?', 'My power keeps tripping – can you come?', 'Are you NICEIC registered?', 'How much is a rewire?', 'Do you cover my area?'],
+  }),
+  heating: variant('trades', {
+    label: 'Heating engineer (gas, boilers)', emoji: '🔥', blurb: 'Boiler repairs, servicing, installs, landlord gas certificates',
+    greeting: '🔥 Hi! Boiler trouble, a service or a new boiler? Tell us what you need.',
+    menu: [{ label: '🚨 No heating/hot water', action: 'callback' }, { label: '🛠️ Boiler service', action: 'book' }, { label: '📝 New boiler quote', action: 'quote' }, ask('📋 Gas safety (CP12)', 'Do you do landlord gas safety certificates (CP12)?'), ask('📍 Areas covered', 'Which areas do you cover?')],
+    requirement: 'What\'s happening with your heating or boiler (make and model if you know it), and your postcode?',
+    instructions: `${GAS} ${CO} Gas work must only be done by a Gas Safe registered engineer: never suggest the customer opens or repairs a gas appliance. ${REG('Gas Safe registered')} ${NO_PRICE}`,
+    questions: ['How much is a boiler service?', 'My boiler is showing an error code – can you help?', 'Do you do landlord gas certificates?', 'Are you Gas Safe registered?', 'Do you offer finance on new boilers?', 'Can you come today? I have no hot water.'],
+    bookings: { services: [{ name: 'Boiler service', minutes: 60 }, { name: 'Gas safety check (CP12)', minutes: 45 }], times: ['08:00', '10:00', '12:00', '14:00', '16:00'], closedDays: [0], leadHours: 24 },
+  }),
+  handyman: variant('trades', {
+    label: 'Handyman', emoji: '🧰', blurb: 'Odd jobs, flat-pack, shelves, small repairs',
+    greeting: '🧰 Hi! What odd jobs can we help with? Send a photo if it helps.',
+    menu: [{ label: '📝 Get a quote', action: 'quote' }, ask('🛠️ Jobs we do', 'What kind of jobs do you do?'), ask('💷 Prices', 'Do you charge by the hour or by the job?'), ask('📍 Areas covered', 'Which areas do you cover?')],
+    requirement: 'What jobs need doing, and what\'s your postcode? A photo or two helps.',
+    instructions: `Gas and most electrical work needs a registered engineer: only say the business does it if the information says so. ${ELEC} ${NO_PRICE}`,
+    questions: ['Do you charge by the hour?', 'Can you build flat-pack furniture?', 'Do you have a minimum charge?', 'Can you put up shelves and TVs?', 'Do you cover my area?'],
+  }),
+  property_maintenance: variant('trades', {
+    label: 'Property maintenance', emoji: '🏢', blurb: 'Repairs for landlords, agents and tenants, planned maintenance',
+    greeting: '🏢 Hi! Report a repair or ask about maintenance for your property.',
+    menu: [{ label: '🛠️ Report a repair', action: 'ticket' }, { label: '🚨 Urgent repair', action: 'callback' }, { label: '📝 Get a quote', action: 'quote' }, ask('🏠 Landlord contracts', 'Do you offer maintenance contracts for landlords and letting agents?')],
+    requirement: 'What needs repairing, the property address or postcode, and how we can arrange access?',
+    instructions: `For tenants, ask who manages the property (landlord or agent) – don't promise work is approved until the landlord or agent confirms. ${GAS} ${ELEC} ${NO_PRICE}`,
+    questions: ['How do I report a repair?', 'Do you work with letting agents?', 'How quickly can you attend an urgent repair?', 'Do you offer planned maintenance contracts?', 'Who pays for the repair?'],
+    tickets: true,
+  }),
+  hair: variant('salon', {
+    label: 'Hair salon', emoji: '💇‍♀️', blurb: 'Cuts, colour, stylists, patch tests',
+    greeting: '💇‍♀️ Hi! See our prices or book your next cut or colour?',
+    requirement: 'Which service would you like (and a stylist, if you have one in mind), and when suits you?',
+    instructions: 'Colour services usually need a skin (patch) test at least 48 hours before: mention it when someone books colour, if the information says so. New colour clients may need a consultation first. Quote prices exactly as listed, including "from" prices and stylist levels.',
+    questions: ['How much is a cut and blow dry?', 'Do I need a patch test for colour?', 'Can I choose my stylist?', 'How long does balayage take?', 'What is your cancellation policy?', 'Do you take deposits?'],
+    bookings: { services: [{ name: 'Cut and finish', minutes: 60 }, { name: 'Colour (roots)', minutes: 90 }, { name: 'Full colour', minutes: 120 }, { name: 'Blow dry', minutes: 45 }], times: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'], closedDays: [0, 1], leadHours: 2 },
+  }),
+  barber: variant('salon', {
+    label: 'Barber', emoji: '💈', blurb: 'Cuts, fades, beard trims, walk-ins',
+    greeting: '💈 Alright! Book a cut, or ask about walk-ins and prices.',
+    menu: [{ label: '📅 Book a cut', action: 'book' }, ask('💷 Prices', 'What are your prices?'), ask('🚶 Walk-ins', 'Do you take walk-ins? How busy are you?'), ask('🕒 Opening hours', 'What are your opening hours?')],
+    requirement: 'Which cut would you like, and when suits you?',
+    instructions: 'Only say how busy the shop is right now if the information gives live waiting times – otherwise say walk-ins are welcome when the information says so. Quote prices exactly as listed.',
+    questions: ['Do you take walk-ins?', 'How much is a skin fade?', 'Do you do beard trims?', 'Do you cut kids\' hair?', 'Are you open on Sunday?'],
+    bookings: { services: [{ name: 'Haircut', minutes: 30 }, { name: 'Skin fade', minutes: 40 }, { name: 'Beard trim', minutes: 15 }, { name: 'Cut and beard', minutes: 45 }], times: ['09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00'], closedDays: [0], leadHours: 1 },
+  }),
+  beauty: variant('salon', {
+    label: 'Beauty salon', emoji: '💅', blurb: 'Facials, lashes, brows, waxing, treatments',
+    greeting: '💖 Hi! Browse treatments, prices or book your appointment.',
+    requirement: 'Which treatment would you like, and when suits you?',
+    instructions: `Lash, brow tint and some skin treatments need a patch test 24–48 hours before: mention it when someone books one, if the information says so. Never say whether a treatment is safe for them (pregnancy, skin conditions, medication, allergies): say the therapist will check at a consultation. ${'Quote prices exactly as listed.'}`,
+    questions: ['Do I need a patch test for lash extensions?', 'How much is a facial?', 'Can I have treatments while pregnant?', 'How long do lash extensions last?', 'Do you sell gift vouchers?'],
+    bookings: { services: [{ name: 'Facial', minutes: 60 }, { name: 'Lash extensions', minutes: 90 }, { name: 'Brow shape and tint', minutes: 30 }, { name: 'Waxing', minutes: 30 }], times: ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'], closedDays: [0], leadHours: 4 },
+  }),
+  nails: variant('salon', {
+    label: 'Nail salon', emoji: '💅', blurb: 'Gel, acrylics, infills, manicures, pedicures',
+    greeting: '💅 Hi! Book your nails or see our price list.',
+    requirement: 'Which nail service would you like (and do you need a removal first), and when suits you?',
+    instructions: 'Ask whether they need an existing gel or acrylic removing, as it changes the appointment time, if the information mentions removals. For allergies or nail infections, say the technician will check first. Quote prices exactly as listed.',
+    questions: ['How much is a gel manicure?', 'Do you do acrylic infills?', 'Do you charge for removal?', 'How long does a full set take?', 'Do you take walk-ins?'],
+    bookings: { services: [{ name: 'Gel manicure', minutes: 45 }, { name: 'Acrylic full set', minutes: 90 }, { name: 'Infills', minutes: 60 }, { name: 'Pedicure', minutes: 60 }], times: ['09:30', '10:30', '11:30', '12:30', '13:30', '14:30', '15:30', '16:30', '17:30'], closedDays: [0], leadHours: 2 },
+  }),
+});
+
 export const TRADE_KEYS = Object.keys(TRADES);
 
 /** The public list for the sign-up page and dashboard (no internal fields). */
-export const tradeList = () => TRADE_KEYS.map((k) => ({ key: k, label: TRADES[k].label, emoji: TRADES[k].emoji, blurb: TRADES[k].blurb }));
+export const tradeList = () => TRADE_KEYS.map((k) => ({ key: k, label: TRADES[k].label, emoji: TRADES[k].emoji, blurb: TRADES[k].blurb, ...(TRADES[k].parent ? { parent: TRADES[k].parent } : {}) }));
 
 /** Menu options valid for this shop: browse/status only with products. ("book" without bookings switched on links to
  * the shop's booking page, and "callback" starts the call-back request.) */
@@ -252,7 +339,7 @@ export function applyTrade(tenantId, key, { force = false } = {}) {
 /** A best guess at the trade from what auto-setup saw (the AI's answer, else the business name and pages). */
 export function guessTrade(text) {
   const s = String(text || '').toLowerCase();
-  const rules = [['it_support', /\b(it support|it services|managed services|msp|tech support|computer repair|software|saas|helpdesk)\b/], ['garage', /\bgarage|\bmot\b|car service|auto(motive)? (repair|centre)|tyres?\b|motors\b/], ['property', /estate agent|letting|lettings|property management|properties\b/], ['fitness', /\bgym\b|fitness|pilates|yoga|crossfit|personal train/], ['education', /nursery|tutor|tuition|school|academy|driving school|preschool/], ['hospitality', /\bhotel|b&b|bed and breakfast|guest ?house|holiday (let|cottage)|\binn\b|lodge\b/], ['venue', /wedding venue|event venue|banqueting|function room|venue\b/], ['dental', /\bdent(al|ist|istry)|orthodont|invisalign/], ['clinic', /physio|chiropract|osteopath|aesthetic|botox|optician|veterinar|\bvets?\b|clinic|therap/], ['salon', /salon|barber|hair|beauty|nails?\b|lash|brow|spa\b/], ['takeaway', /takeaway|restaurant|pizza|kebab|curry|cafe|café|grill|kitchen|food|burger|sushi|bakery/], ['travel', /travel|holiday|tours?\b|visa|flights?|cruise/], ['trades', /plumb|electric|builder|roof|heating|boiler|locksmith|clean(ing|ers)|gardener|handyman|decorat/], ['experiences', /experience|activity|activities|escape room|driving day|track day|workshop|classes/], ['professional', /accountan|solicitor|law(yer)?\b|estate agent|letting|consult|bookkeep|mortgage/]];
+  const rules = [['it_support', /\b(it support|it services|managed services|msp|tech support|computer repair|software|saas|helpdesk)\b/], ['garage', /\bgarage|\bmot\b|car service|auto(motive)? (repair|centre)|tyres?\b|motors\b/], ['property', /estate agent|letting|lettings|property management|properties\b/], ['fitness', /\bgym\b|fitness|pilates|yoga|crossfit|personal train/], ['education', /nursery|tutor|tuition|school|academy|driving school|preschool/], ['hospitality', /\bhotel|b&b|bed and breakfast|guest ?house|holiday (let|cottage)|\binn\b|lodge\b/], ['venue', /wedding venue|event venue|banqueting|function room|venue\b/], ['dental', /\bdent(al|ist|istry)|orthodont|invisalign/], ['clinic', /physio|chiropract|osteopath|aesthetic|botox|optician|veterinar|\bvets?\b|clinic|therap/], ['barber', /barber/], ['nails', /\bnails?\b|manicure|pedicure/], ['hair', /hair ?(salon|dresser|stylist)|hairdress|\bhair\b/], ['beauty', /beauty|lash|brow|wax(ing)?\b|facials?\b|spa\b/], ['salon', /salon/], ['takeaway', /takeaway|restaurant|pizza|kebab|curry|cafe|café|grill|kitchen|food|burger|sushi|bakery/], ['travel', /travel|holiday|tours?\b|visa|flights?|cruise/], ['heating', /boiler|heating engineer|gas engineer|central heating|gas safe/], ['plumber', /plumb/], ['electrician', /electric/], ['property_maintenance', /property maintenance|maintenance (services|company)|facilities management/], ['handyman', /handyman|odd jobs/], ['trades', /builder|roof|locksmith|clean(ing|ers)|gardener|decorat/], ['experiences', /experience|activity|activities|escape room|driving day|track day|workshop|classes/], ['professional', /accountan|solicitor|law(yer)?\b|estate agent|letting|consult|bookkeep|mortgage/]];
   for (const [k, re] of rules) if (re.test(s)) return k;
   return null;
 }

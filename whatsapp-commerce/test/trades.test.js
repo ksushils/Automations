@@ -85,8 +85,10 @@ test('sign-up with a business type (also from ?trade= links): takeaway gets menu
 
 test('trade guess from the business name', () => {
   assert.equal(guessTrade('Neem Dental Clinic Harrow'), 'dental');
-  assert.equal(guessTrade('Smith & Sons Plumbing and Heating'), 'trades');
-  assert.equal(guessTrade('Bella Hair Salon'), 'salon');
+  assert.equal(guessTrade('Smith & Sons Plumbing and Heating'), 'plumber'); // specialist template since batch 7
+  assert.equal(guessTrade('Smith & Sons Builders'), 'trades');
+  assert.equal(guessTrade('Bella Hair Salon'), 'hair');
+  assert.equal(guessTrade('The Salon Room'), 'salon');
   assert.equal(guessTrade('Travel Rise'), 'travel');
   assert.equal(guessTrade('Acme Widgets Ltd'), null);
 });

@@ -155,7 +155,14 @@ export async function leadText(ctx, text) {
     lead.name = v.replace(/^(i'?m|my name is|it'?s|this is)\s+/i, '').slice(0, 60); lead.done.push('name'); return continueLead(ctx);
   }
   if (step === 'when') { if (looksLikeQuestion) { ctx.conv.state = 'idle'; return false; } lead.callTime = v.slice(0, 60); lead.done.push('when'); return continueLead(ctx); }
-  if (step === 'msg') { lead.message = v.slice(0, 1000); lead.done.push('msg'); return continueLead(ctx); }
+  if (step === 'msg') {
+    lead.message = v.slice(0, 1000); lead.done.push('msg');
+    const { checkServiceArea } = await import('./serviceArea.js');
+    const area = checkServiceArea(ctx.S, v);
+    if (area.postcode || area.covered != null) lead.area = { postcode: area.postcode || null, covered: area.covered };
+    if (area.covered === false) await ctx.reply({ type: 'text', text: `Thanks – ${area.postcode} may be outside the areas we usually cover, but the team will check and let you know.` });
+    return continueLead(ctx);
+  }
   return false;
 }
 
@@ -167,6 +174,7 @@ export function saveChatLead(tenant, conv, lead, customer) {
   if (conv.data?.utm) source = { ...(source || {}), ...conv.data.utm };
   const id = Number(getDb().prepare(`INSERT INTO chat_leads (tenant_id, wa_id, channel, kind, topic, name, email, phone, message, call_time, page, source)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(tenant.id, conv.waId, String(conv.waId).startsWith('web:') ? 'web' : 'whatsapp', lead.kind, lead.topic || null, lead.name || customer?.name || null, lead.email || null, lead.phone || null, lead.message || null, lead.callTime || null, page, source ? JSON.stringify(source) : null).lastInsertRowid);
+  if (lead.area) getDb().prepare('UPDATE chat_leads SET area = ? WHERE id = ?').run(JSON.stringify(lead.area), id);
   if (lead.email) getDb().prepare('UPDATE customers SET email = COALESCE(email, ?) WHERE tenant_id = ? AND wa_id = ?').run(lead.email, tenant.id, conv.waId);
   if (lead.name) getDb().prepare('UPDATE customers SET name = COALESCE(name, ?) WHERE tenant_id = ? AND wa_id = ?').run(lead.name, tenant.id, conv.waId);
   return id;

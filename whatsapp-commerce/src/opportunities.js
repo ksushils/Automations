@@ -29,7 +29,7 @@ export function listOpportunities(tenant, { now = Date.now(), includeClosed = fa
     add({
       key: `lead:${l.id}`, type: call ? 'callback' : 'enquiry', at,
       title: call ? 'Callback requested – nobody has replied yet' : 'Customer asked for details – not contacted yet',
-      reason: `${call ? 'Asked to be called' : 'Left their details'}${l.topic ? ` about “${clip(l.topic, 60)}”` : ''}${l.call_time ? ` (best time: ${clip(l.call_time, 40)})` : ''}.`,
+      reason: `${call ? 'Asked to be called' : 'Left their details'}${l.topic ? ` about “${clip(l.topic, 60)}”` : ''}${l.call_time ? ` (best time: ${clip(l.call_time, 40)})` : ''}.${(() => { const a = json(l.area, null); return a?.postcode ? ` Postcode ${a.postcode}${a.covered === false ? ' – outside your listed areas' : a.covered ? ' – inside your areas' : ''}.` : ''; })()}`,
       evidence: clip(l.summary || l.message || l.topic, 240), source: { kind: 'lead', id: l.id },
       next: call ? 'Call them back' : 'Send them the details',
       priority: call || now - at > 4 * HOUR ? 'high' : 'medium',
