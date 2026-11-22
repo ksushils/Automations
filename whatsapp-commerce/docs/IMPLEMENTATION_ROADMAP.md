@@ -63,9 +63,9 @@ Rules that apply to every item:
 | ID | Item |
 |---|---|
 | R4 | Simple owner navigation ✅ batch 10 (grouped menu, pages hidden that don't fit the business); industry-aware dashboard ✅ batch 12 ("To do now" on Today, fitted to the business); UX polish; first-run onboarding checklist (exists: 9-step guide) |
-| R5 | Voice receptionist (compare providers first); Instagram and Messenger; light CRM pipeline; Zapier/Make/n8n; agency mode; multi-branch |
+| R5 | Voice receptionist (compare providers first); Instagram and Messenger (researched, needs Meta App Review); light CRM pipeline ✅ batch 15; Zapier/Make/n8n ✅ (lead/booking/order webhooks + Google Sheets); agency mode; multi-branch |
 | R6 | Plan entitlements made clear ✅ batch 2; usage page ✅ (Billing → Your usage this month); optional setup fee; cancellation flow with a churn reason ✅ batch 6 |
-| R7 | Marketing site repositioned (receptionist and sales assistant), trades/salon/ecommerce pages, no made-up claims, real case studies only |
+| R7 | Marketing site repositioned (receptionist and sales assistant), trades/salon/ecommerce pages (trades and salons ✅ batch 15; takeaways earlier), no made-up claims, real case studies only |
 | R8 | AI evaluation suite (model, cost, latency, evidence recorded): ✅ batch 8, plus the price guard and emergency notices; real-model run 🔒 on the server. Repeatable load tests and benchmarks: ✅ batch 10 (webhook throughput, on-disk database; SQLite tuned) |
 
 ## Next batches

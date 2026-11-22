@@ -446,7 +446,7 @@ export async function setBookingStatus(tenant, id, status) {
   if (!['requested', 'confirmed', 'cancelled', 'completed', 'no_show'].includes(status)) throw Object.assign(new Error('invalid status'), { status: 400 });
   const b = getBooking(tenant.id, id);
   if (!b) return null;
-  getDb().prepare("UPDATE bookings SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, b.id);
+  getDb().prepare("UPDATE bookings SET status = ?, updated_at = datetime('now'), completed_at = CASE WHEN ? = 'completed' THEN COALESCE(completed_at, datetime('now')) ELSE completed_at END WHERE id = ?").run(status, status, b.id); // completed_at: when to ask for a review
   const after = getBooking(tenant.id, b.id);
   if (status === 'confirmed') syncBookingToCalendar(tenant, b.id).catch(() => {});
   if (STATUS_MSG[status] && b.status !== status && !String(b.wa_id).startsWith('web:')) {

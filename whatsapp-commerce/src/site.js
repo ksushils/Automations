@@ -33,6 +33,8 @@ export const PAGES = [
   { path: '/takeaways', title: () => `WhatsApp ordering for UK takeaways | ${brand()}`, description: 'Take orders and answer questions on WhatsApp automatically. No commission per order, unlike the delivery apps.' },
   { path: '/whatsapp-cost-calculator', title: () => 'WhatsApp Business API cost calculator (UK, 2026)', description: 'Work out what Meta will charge you per month. Current UK rates, free service-message allowance included.' },
   { path: '/whatsapp-fee-checker', title: () => 'WhatsApp fee checker: how much is your provider adding? (UK)', description: "See how much your WhatsApp platform adds on top of Meta's own UK message fees, per month and per year: markups, per-message fees and per-user fees." },
+  { path: '/trades', title: () => `AI receptionist for plumbers, electricians and trades | ${brand()}`, description: 'Answers enquiries on your website and WhatsApp, takes the job details one question at a time, checks your area, flags emergencies and turns photos into draft quotes you approve.' },
+  { path: '/salons', title: () => `Chat bookings for hair, beauty and barbers | ${brand()}`, description: 'Customers book from your real free times in the chat, choose their stylist, get reminders and a "book again" nudge. Answers price-list questions exactly as you list them.' },
   { path: '/examples', title: () => `See it handle real situations | ${brand()}`, description: 'An emergency call-out, a photo quote, a booking and more – played through the real assistant with a sample business, plus what your team receives.' },
   { path: '/demo', title: () => `Book a demo | ${brand()}`, description: `Book 20 minutes. We load your website into ${brand()} live on the call and you ask it what your customers ask you.` },
   ...COMPARISONS.map((c) => ({ path: `/${c.slug}`, title: () => c.title(brand()), description: c.description })),
@@ -106,7 +108,7 @@ function layout(path, body, { ld = [], title, description, noindex = false, extr
 <main>${body}</main>
 <footer><div class="wrap">
 <div><b style="color:var(--ink)">${esc(brand())}</b><p>An assistant for your website and WhatsApp that answers customers, takes orders and hands the tricky ones to you. Set up for you.</p></div>
-<div><ul><li><a href="/#how-it-works">How it works</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/takeaways">For takeaways</a></li><li><a href="/whatsapp-cost-calculator">WhatsApp cost calculator</a></li><li><a href="/whatsapp-fee-checker">WhatsApp fee checker</a></li><li><a href="/examples">See it handle real situations</a></li><li><a href="/demo">Book a demo</a></li></ul><p style="margin:14px 0 6px;color:var(--ink)"><b>Compare</b></p><ul>${COMPARISONS.map((c) => `<li><a href="/${c.slug}">${esc(c.name)} alternative</a></li>`).join('')}</ul></div>
+<div><ul><li><a href="/#how-it-works">How it works</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/takeaways">For takeaways</a></li><li><a href="/trades">For trades</a></li><li><a href="/salons">For salons and barbers</a></li><li><a href="/whatsapp-cost-calculator">WhatsApp cost calculator</a></li><li><a href="/whatsapp-fee-checker">WhatsApp fee checker</a></li><li><a href="/examples">See it handle real situations</a></li><li><a href="/demo">Book a demo</a></li></ul><p style="margin:14px 0 6px;color:var(--ink)"><b>Compare</b></p><ul>${COMPARISONS.map((c) => `<li><a href="/${c.slug}">${esc(c.name)} alternative</a></li>`).join('')}</ul></div>
 <div><ul><li><a href="/legal/privacy">Privacy</a></li><li><a href="/legal/terms">Terms</a></li><li><a href="/legal/dpa">Data processing agreement</a></li>${config.supportEmail ? `<li><a href="mailto:${esc(config.supportEmail)}">${esc(config.supportEmail)}</a></li>` : ''}${config.contactPhone ? `<li><a href="tel:${esc(config.contactPhone.replace(/[^\d+]/g, ''))}">${esc(config.contactPhone)}</a></li>` : ''}</ul></div>
 <div>${l.company ? `<p>${esc(l.company)}${l.number ? `<br>Registered in England and Wales, company no. ${esc(l.number)}` : ''}${l.address ? `<br>${esc(l.address)}` : ''}</p>` : ''}</div>
 </div></footer>${chat}
@@ -456,6 +458,100 @@ function comparePage(c) {
 </div></section>`, { ld: [faqLd(faq), { '@type': 'WebPage', name: c.title(brand()), url: url(`/${c.slug}`), dateModified: BUILT, about: [{ '@type': 'SoftwareApplication', name: c.name, url: c.pricingUrl.replace(/\/pricing$/, '') }, { '@type': 'SoftwareApplication', name: brand(), url: url('/') }] }] });
 }
 
+// ---------------- Trades and salons (R7: only what the product really does; no invented numbers or testimonials) ----------------
+const TRADES_FAQ = [
+  ['Will it give prices without seeing the job?', "Only prices you've written down (a call-out fee, an hourly rate, a fixed-price job). Otherwise it says an engineer will confirm, and takes the details so you can quote."],
+  ['What happens with an emergency?', 'It asks how urgent the job is, and an urgent call-back is flagged 🚨 in your email and WhatsApp alert and at the top of your Today list. For gas, it tells the customer to call the National Gas Emergency number straight away.'],
+  ['What if someone is outside my area?', "List the postcodes or towns you cover. If a customer is outside them, the assistant tells them kindly that it may be outside your usual area, and you still get the lead to decide."],
+  ['Can customers send photos?', 'Yes, in the website chat and on WhatsApp. Photos are attached to their quote request, so you see the job before you price it. You approve every quote before it is sent.'],
+  ['Do I need WhatsApp Business API?', "Not to start: the website chat works on its own. WhatsApp can be added later; Meta bills its own message fees to you directly, and the cost calculator shows what to expect."],
+]
+const SALON_FAQ = [
+  ['Does it replace my booking system?', "It can take bookings itself, from the start times and services you set, or send people to your existing booking page. Bookings stay off until you switch them on, so it never offers times you don't have."],
+  ['Can clients choose their stylist?', 'Yes. List your staff, which days they work and which services they do. When two or more people do a service, the chat asks who they would like, and only shows that person\'s free times.'],
+  ['Will it double-book a long colour?', "No. Each booking blocks its own service's length (a two-hour colour blocks two hours), plus any gap you set between appointments."],
+  ['What about patch tests?', "If your price list or policies say a patch test is needed, it mentions it when someone books that service. It never says whether a treatment is safe for someone: it says the therapist will check."],
+  ['Does it send reminders?', "Yes: a reminder before the appointment (and a second one if you want), and an optional \"book again\" message a set number of days later. Messages respect quiet hours and a daily limit per client."],
+]
+
+function trades() {
+  const B = esc(brand());
+  return layout('/trades', `
+<section class="hero"><div class="wrap">
+<h1>Every enquiry answered, even when you're on a job.</h1>
+<p class="lead">${B} answers customers on your website and WhatsApp from your own website's information, takes the job details one question at a time, and sends you a tidy lead – urgent ones flagged.</p>
+<p><a class="btn" href="/examples#emergency">See it handle an emergency call-out</a> <a class="btn ghost" href="/try">Try it on your website</a></p>
+</div></section>
+
+<section><div class="wrap">
+<h2>Sound familiar?</h2>
+<ul class="plain">
+<li>You're under a sink when the phone rings, and by the time you call back they've found someone else.</li>
+<li>"How much for…?" messages that need a visit before you can say.</li>
+<li>Enquiries from miles outside the area you cover.</li>
+<li>Quotes sent and never heard of again.</li>
+</ul></div></section>
+
+<section><div class="wrap">
+<h2>What it does</h2>
+<ul class="ticks">
+<li>Asks what the job is, the postcode and how soon – one short question at a time, with a Skip – so you get the details you'd have asked for.</li>
+<li>Checks the postcode against the areas you cover and says so honestly when it's outside them.</li>
+<li>Flags urgent jobs 🚨 in your email and WhatsApp alert, and reminds you if a lead is still waiting after 30 minutes.</li>
+<li>Takes photos and attaches them to a quote request; you price and approve it, the customer gets a quote page to accept, and one friendly reminder two days later if they haven't.</li>
+<li>Never gives a firm price without a visit unless you've listed one; gas and electrical safety advice is built in.</li>
+<li>A simple board of your leads (new, contacted, won, lost) with the job values you enter.</li>
+</ul>
+<p><a href="/examples">See six real situations played through the assistant</a></p></div></section>
+
+<section><div class="wrap"><h2>Trades ask</h2>${faqHtml(TRADES_FAQ)}</div></section>
+
+<section><div class="wrap">
+<h2>See it on your own business</h2>
+<p class="lead">Put your website address in and it reads your pages in about a minute. Then ask it what your customers ask you.</p>
+<p><a class="btn" href="/try">Try it on your website</a> <a class="btn ghost" href="/pricing">See pricing</a></p>
+</div></section>`, { ld: [faqLd(TRADES_FAQ), { '@type': 'Service', name: 'AI receptionist for trades businesses', provider: { '@type': 'Organization', name: brand() }, areaServed: 'GB', serviceType: 'Website and WhatsApp enquiry handling' }] });
+}
+
+function salons() {
+  const B = esc(brand());
+  return layout('/salons', `
+<section class="hero"><div class="wrap">
+<h1>Bookings in the chat, while you're with a client.</h1>
+<p class="lead">${B} answers price-list questions exactly as you list them and books clients from your real free times – with the stylist they want – on your website and WhatsApp.</p>
+<p><a class="btn" href="/examples#salon_booking">See a colour booking</a> <a class="btn ghost" href="/try">Try it on your website</a></p>
+</div></section>
+
+<section><div class="wrap">
+<h2>Sound familiar?</h2>
+<ul class="plain">
+<li>Your phone buzzes mid-cut and you can't answer it.</li>
+<li>"Have you got anything Saturday?" messages at 11pm.</li>
+<li>A long colour booked into a slot that was only an hour.</li>
+<li>Clients who forget, and clients who don't come back.</li>
+</ul></div></section>
+
+<section><div class="wrap">
+<h2>What it does</h2>
+<ul class="ticks">
+<li>Books from the services, start times and staff you set: clients can choose who, and only see that person's free times.</li>
+<li>Knows how long each service takes, so a two-hour colour blocks two hours, with any gap you want between clients.</li>
+<li>Sends a reminder before the appointment (and a second if you like), and an optional "book again" message weeks later.</li>
+<li>Answers prices exactly as listed, including "from" prices; mentions patch tests when your information says they're needed.</li>
+<li>Bookings wait for you to confirm (or confirm automatically, if you prefer), with a day view per stylist.</li>
+<li>After a visit, it can ask happy clients for a Google review.</li>
+</ul>
+<p><a href="/examples">See real situations played through the assistant</a></p></div></section>
+
+<section><div class="wrap"><h2>Salon owners ask</h2>${faqHtml(SALON_FAQ)}</div></section>
+
+<section><div class="wrap">
+<h2>See it on your own salon</h2>
+<p class="lead">Put your website address in and it reads your price list and pages in about a minute.</p>
+<p><a class="btn" href="/try">Try it on your website</a> <a class="btn ghost" href="/pricing">See pricing</a></p>
+</div></section>`, { ld: [faqLd(SALON_FAQ), { '@type': 'Service', name: 'Chat bookings for salons and barbers', provider: { '@type': 'Organization', name: brand() }, areaServed: 'GB', serviceType: 'Website and WhatsApp booking assistant' }] });
+}
+
 // ---------------- Demo ----------------
 function demo({ sent = false, error = '' } = {}) {
   const B = esc(brand());
@@ -508,6 +604,8 @@ export function siteRouter() {
   r.get('/', (req, res) => html(res, home()));
   r.get('/pricing', (req, res) => html(res, pricing()));
   r.get('/takeaways', (req, res) => html(res, takeaways()));
+  r.get('/trades', (req, res) => html(res, trades()));
+  r.get('/salons', (req, res) => html(res, salons()));
   r.get('/whatsapp-cost-calculator', (req, res) => html(res, calculator(req.query)));
   r.get('/demo', (req, res) => html(res, demo()));
   for (const c of COMPARISONS) r.get(`/${c.slug}`, (req, res) => html(res, comparePage(comparison(c.slug))));

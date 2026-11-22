@@ -4,7 +4,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 14 (WhatsApp access expiry warning, site assistant on more pages, Instagram/Messenger research), 22 November 2026.
+- **Last batch:** batch 15 (lead board, review requests after visits, trades and salons pages, audit brought up to date), 22 November 2026.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** ✅ **batch 14 deployed to wa.karatit.com on 22 November 2026** (server commit `c73d241`; 372/373 tests in the image, 1 skipped; health ok; 12 businesses and 1,060 messages unchanged; no live business has WhatsApp connected yet, so no expiry warnings are due).
 - **Earlier:** batch 13 deployed to wa.karatit.com on 22 November 2026** (server commit `1e01ed4`; 371/372 tests in the image, 1 skipped; health ok; `/recover` answers honestly that email isn't set up; expired links refused; 12 businesses and 1,060 messages unchanged).
@@ -17,8 +17,16 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - **Data:** intact (14 businesses).
   - **Rollback:** `sh scripts/rollback-vps.sh`.
 - **First deploy attempts:** one merge conflict with the demo-engine branch (`server.js` imports; both kept), and a calendar test that was flaky under load (fixed). The script stopped safely each time before restarting anything.
-- **Tests:** 358 of 358 pass locally on Node 24 (batch 14). They run again inside the Node 22 image during the deploy.
+- **Tests:** 362 of 362 pass locally on Node 24 (batch 15). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
+
+## Batch 15: lead board (R5 light CRM), review requests after visits, trades and salons pages (R7), audit refresh
+- **Lead board** (Leads tab → Board): New · Contacted · Won · Lost columns, each lead with an optional value and notes entered by the team, buttons to move it on, and per-column totals. Above the list: "Open: N worth £X · Won this month: N worth £Y" – from entered values only, never estimated. Additive columns `chat_leads.value`, `notes`, `won_at`; CSV now has Status, Value and Notes. Another business can't change your leads (tested).
+- **Review requests after visits:** review requests went out only for delivered orders. Now a booking marked **Done** also gets one (same rules: once per visit, at most one per customer every 30 days across orders and visits, quiet hours, inside the WhatsApp window or with an approved template). Additive columns `bookings.completed_at`, `review_sent_at`, `review_status`. Found while fact-checking the salon page, which would otherwise have claimed something the product didn't do; the batch 12 automation label that said "or a visit is done" is now true as well.
+- **Marketing pages** `/trades` and `/salons`: what the product really does for each (taken from built features, each linked to a live example), honest FAQs, no numbers or testimonials (a test checks). In the sitemap and footer.
+- **Audit brought up to date** (`PRODUCT_BUILD_AUDIT.md`): the phase summary still said "missing" for things built since batch 3; rollback, CSP and prompt-injection rows corrected.
+- **Checked in a browser** (local test copy): board (value saved, moved to Contacted, totals updated, no sideways scroll), `/salons` and `/trades` at phone width.
+- **Tests:** `test/pipeline.test.js` (2), visit review requests in `insights.test.js` (1), `test/marketing-pages.test.js` (1). Full suite 362/362 locally.
 
 ## Batch 14: access expiry warning (R0.10), site assistant on more pages, Instagram/Messenger research (R5)
 - **WhatsApp access expiry warning** (`src/waHealth.js`): the daily connection check now also asks Meta (`debug_token`) when the access token – or its data access – ends. Permanent System User tokens never do; tokens from a personal login do. Within 7 days: state `token_expiring`, a dashboard banner, and **one** email per expiry date ("reconnect in Settings before then"), plus a platform alert. The WhatsApp number card shows "WhatsApp access: doesn't expire" or the end date.

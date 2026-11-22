@@ -36,7 +36,7 @@ import { audit, listAudit, exportPerson, erasePerson, isSuppressed, rotateEncryp
 import { currentKeyId } from '../crypto.js';
 import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
-import { listChatLeads, setLeadStatus, leadSpeed } from '../leads.js';
+import { listChatLeads, setLeadStatus, leadSpeed, updateLead, pipeline } from '../leads.js';
 import { sendHook, SHEETS_SCRIPT } from '../hooks.js';
 import { TRADES, tradeList, applyTrade } from '../trades.js';
 import { ratingSummary, ratingAsk, ratingsOn } from '../ratings.js';
@@ -772,7 +772,7 @@ export function adminRouter() {
     const out = await autoSetup(req.tenant.id, { force: req.body?.force === true });
     res.json({ ...out, tenant: (await import('../tenants.js')).getTenant(req.tenant.id) });
   }));
-  r.get('/tenants/:tenantId/leads', requireTenant, (req, res) => res.json({ leads: listChatLeads(req.tenant.id), speed: leadSpeed(req.tenant.id) }));
+  r.get('/tenants/:tenantId/leads', requireTenant, (req, res) => res.json({ leads: listChatLeads(req.tenant.id), speed: leadSpeed(req.tenant.id), pipeline: pipeline(req.tenant.id) }));
   // A/B test of the pop-up greeting: visits, chats, leads and orders per variant (H = 10% who saw no greeting)
   r.get('/tenants/:tenantId/ab', requireTenant, (req, res) => {
     const O = req.tenant.settings.webchat?.opener || {};
@@ -790,7 +790,7 @@ export function adminRouter() {
   });
   r.get('/tenants/:tenantId/export/leads.csv', requireTenant, (req, res) => {
     const cell = (v) => { const s = String(v ?? '').replace(/^[=+\-@\t\r]/, "'$&"); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const cols = [['created_at', 'Date'], ['kind', 'Wants'], ['topic', 'Topic'], ['name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['call_time', 'Best time'], ['message', 'Message'], ['summary', 'Chat summary'], ['page', 'Page'], ['channel', 'Channel'], ['marketing_opt_in', 'Offers by email'], ['status', 'Status']];
+    const cols = [['created_at', 'Date'], ['kind', 'Wants'], ['topic', 'Topic'], ['name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['call_time', 'Best time'], ['message', 'Message'], ['summary', 'Chat summary'], ['page', 'Page'], ['channel', 'Channel'], ['status', 'Status'], ['value', 'Value'], ['notes', 'Notes'], ['marketing_opt_in', 'Offers by email'], ['status', 'Status']];
     const rows = listChatLeads(req.tenant.id, { limit: 10000 }).map((l) => cols.map(([k]) => cell(k === 'marketing_opt_in' ? (l[k] ? 'Yes' : 'No') : k === 'kind' ? (l[k] === 'call' ? 'Call back' : 'Details') : l[k])).join(','));
     res.type('text/csv').set('Content-Disposition', `attachment; filename="leads-${new Date().toISOString().slice(0, 10)}.csv"`).send('\ufeff' + [cols.map((c) => c[1]).join(','), ...rows].join('\r\n'));
   });
@@ -809,7 +809,7 @@ export function adminRouter() {
     if (!results.length) return res.status(400).json({ error: 'Add a webhook address or a Google Sheets address first, and save.' });
     res.json({ results });
   });
-  r.patch('/tenants/:tenantId/leads/:id', requireTenant, (req, res) => { setLeadStatus(req.tenant.id, req.params.id, String(req.body?.status || '')); res.json({ ok: true }); });
+  r.patch('/tenants/:tenantId/leads/:id', requireTenant, (req, res) => { try { const b = req.body || {}; res.json({ ok: true, lead: updateLead(req.tenant.id, req.params.id, { status: b.status, value: b.value, notes: b.notes }) }); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
   r.post('/tenants/:tenantId/conversations/:waId/resume', requireTenant, (req, res) => {
     const c = resumeAi(req.tenant.id, req.params.waId);
     res.json({ ok: true, aiPausedUntil: c.aiPausedUntil, humanHandover: c.humanHandover });

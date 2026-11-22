@@ -238,7 +238,7 @@ export async function runWeeklyUnanswered(now = new Date()) {
 // ---------- Google review requests ----------
 
 /**
- * A few hours after an order is delivered / completed, ask the customer for a review (once per order, max one per
+ * A few hours after an order is delivered / completed – or a booking is marked Done – ask the customer for a review (once per order, max one per
  * customer every 30 days). Inside the 24h window it's a normal message with a button; outside it, only an approved
  * template can be used, so without one we skip.
  */
@@ -267,6 +267,26 @@ export async function runReviewRequests(now = Date.now()) {
         .catch((e) => { console.warn('[review request]', e.message); return 'failed'; });
       getDb().prepare('UPDATE orders SET review_status = ? WHERE id = ?').run(r === 'sent' || r === 'template' ? 'sent' : r, o.id);
       logOutreach(t.id, o.wa_id, 'review_request', { ref: `order:${o.id}`, status: r === 'sent' || r === 'template' ? 'sent' : r === 'failed' ? 'failed' : 'skipped', detail: r === 'sent' || r === 'template' ? null : r });
+      if (r === 'sent' || r === 'template') sent++;
+    }
+    // visits: bookings the team marked "Done" (salons, garages, trades) – same rules, once per visit
+    const visits = getDb().prepare(`SELECT * FROM bookings WHERE tenant_id = ? AND status = 'completed' AND review_sent_at IS NULL AND wa_id NOT LIKE 'web:%'
+      AND completed_at IS NOT NULL AND completed_at > datetime('now', '-3 days') AND completed_at < datetime('now', ?)`).all(t.id, `-${hours * 60} minutes`);
+    for (const b of visits) {
+      const gate = outreachCheck(t, b.wa_id, 'review_request', { ref: `booking:${b.id}` });
+      if (!gate.ok && gate.retry) continue;
+      getDb().prepare("UPDATE bookings SET review_sent_at = datetime('now') WHERE id = ?").run(b.id);
+      if (!gate.ok) { getDb().prepare("UPDATE bookings SET review_status = 'skipped_limit' WHERE id = ?").run(b.id); if (!gate.duplicate) logOutreach(t.id, b.wa_id, 'review_request', { ref: `booking:${b.id}`, status: 'skipped', detail: gate.reason }); continue; }
+      const recent = getDb().prepare("SELECT 1 FROM orders WHERE tenant_id = ? AND wa_id = ? AND review_sent_at > datetime('now', '-30 days') AND review_status = 'sent' UNION SELECT 1 FROM bookings WHERE tenant_id = ? AND wa_id = ? AND id != ? AND review_sent_at > datetime('now', '-30 days') AND review_status = 'sent'").get(t.id, b.wa_id, t.id, b.wa_id, b.id);
+      if (recent) { getDb().prepare("UPDATE bookings SET review_status = 'skipped_recent' WHERE id = ?").run(b.id); continue; }
+      const first = (b.name || 'there').split(' ')[0];
+      const name = t.settings.business?.name || t.name;
+      const text = (C.visitText || 'Hi {{name}}, thanks for visiting {{shop}}! 😊 If you have a minute, a quick Google review would really help us.')
+        .replace(/\{\{name\}\}/g, first).replace(/\{\{shop\}\}/g, name);
+      const r = await notify(t, b.wa_id, { type: 'cta', text, buttonText: '⭐ Leave a review', url: C.url }, C.template ? { name: C.template, language: C.language, params: [first, name] } : null, send)
+        .catch((e) => { console.warn('[review request]', e.message); return 'failed'; });
+      getDb().prepare('UPDATE bookings SET review_status = ? WHERE id = ?').run(r === 'sent' || r === 'template' ? 'sent' : r, b.id);
+      logOutreach(t.id, b.wa_id, 'review_request', { ref: `booking:${b.id}`, status: r === 'sent' || r === 'template' ? 'sent' : r === 'failed' ? 'failed' : 'skipped', detail: r === 'sent' || r === 'template' ? null : r });
       if (r === 'sent' || r === 'template') sent++;
     }
   }

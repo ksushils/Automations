@@ -1,6 +1,6 @@
 # Product build audit
 
-**Audit date:** 22 November 2026.
+**Audit date:** 22 November 2026 (first written for batch 1; the phase summary and the rows marked *updated* were brought up to date after batch 15).
 **Source of truth:** the code in `whatsapp-commerce/` and the automated tests. The product summary (`AI-assistant-platform-summary.md`) was used only as an index.
 **Live server:** wa.karatit.com. It has 12 businesses on it, none paying and none with WhatsApp connected. Email (Resend), Stripe, Meta, the alert webhook and off-server backups are **not configured** there.
 
@@ -55,7 +55,7 @@ Today nothing is **Verified**: no real Stripe, Resend or Meta account has been c
 | Restore procedure | **Drill passed locally (this batch)** | Backup, then seal, then `src/cli/restoreBackup.js`: counts matched and `integrity_check` = ok | A drill on the live server | High | P0 |
 | Alert channel | Built | `alert()` posts to a Slack/Discord/n8n webhook | `ALERT_WEBHOOK_URL` not set on live | High | P0 (Blocked) |
 | Structured logs and error tracking | Partial | Prefixed console logs, crash alerts; JSON logs with `LOG_FORMAT=json` (batch 11: secrets masked, request ids) | Error-tracking service (optional) | Low | P2 |
-| Rollback | Partial | Pre-deploy database snapshot plus git (see `docs/DEPLOY.md`) | A scripted rollback command | Medium | P1 |
+| Rollback | Built (*updated*) | `scripts/deploy-vps.sh` snapshots the database and tags the previous image, then rolls back by itself if the health check fails; `scripts/rollback-vps.sh` does it by hand | A rehearsal of a manual rollback on the live server | Medium | P1 |
 
 ## Security
 
@@ -69,32 +69,36 @@ Today nothing is **Verified**: no real Stripe, Resend or Meta account has been c
 | Webhook signatures | Tested | Meta (HMAC-SHA256), Stripe (`t=,v1=` with tolerance), outgoing hooks signed |
 | SSRF | Tested | `isPrivateIp` guard on website import and hooks |
 | Rate limits | Built | `/api` 600/min per IP. Sign-up 5/h. Chat 40/min per IP per shop. Demo 4/h. |
-| XSS | Partial | `esc()` used throughout the dashboard. No CSP header yet. |
+| XSS | Partial (*updated*) | `esc()` used throughout the dashboard. Content-Security-Policy on the dashboard: safe directives enforced, the full policy in report-only mode (batch 2), with reports collected at `/csp-report`. |
 | Audit trail | Tested | `audit()` records field names, never values |
 | Data retention | Tested | `applyRetention()` covers messages, consents and audit. `email_log` bodies are kept 30 days, records 180. |
-| Prompt injection and AI tool permissions | Partial | Booking honesty guard. Prices only from the knowledge base. No AI tool can change data without a flow step. A formal evaluation suite is missing. |
+| Prompt injection and AI tool permissions | Tested (*updated*) | Booking honesty guard; prices only from the knowledge base; no AI tool can change data without a flow step. Evaluation suite (batch 8) includes prompt-injection, malicious-document and other-customers'-data cases; the real-model run passed 15/15. Automation drafts keep only allowed steps (batch 12). |
 
 Full detail is in `docs/SECURITY_REVIEW.md`.
 
 ## Phases 1–7 (summary)
 
+*Updated after batch 15. Details and dates are in `BUILD_PROGRESS.md`.*
+
 | Area | Status | Notes |
 |---|---|---|
-| Instant website demo ("Business Twin") | Partial | `src/instantDemo.js` and `autoSetup.js` exist. Missing: show sources and uncertain facts, real progress, keep the configuration on claim. |
-| Trades and salon demos | Partial | 16 trade templates (`src/trades.js`), including trades and salon. Missing: separate plumber, electrician, heating and barber variants; scripted demo scenarios. |
-| Photo-to-quote | Partial | Photo understanding in web chat, quotes module with AI draft, team approval, PDF and accept. Missing: postcode/service-area check, linking the photo to the quote, trade qualification rules. |
-| Lead qualification | Partial | Lead flows (`src/leads.js`). Missing: per-trade field sets, asked one question at a time. |
-| Booking reliability | Tested | Slot capacity checks, deposits, reminders, Google Calendar (`bookings.js`, `gcal.js`). Missing: proof of correct times across the daylight-saving change, staff resources. |
-| Follow-up engine | Partial | Lead nudges, quote follow-ups, abandoned carts, review requests. Missing: one history of automatic actions, a per-customer message cap. |
-| Opportunity Radar | Missing | Data exists (leads, quotes, unanswered questions); there is no Opportunities view yet. |
-| Owner copilot | Partial | Morning briefing and owner WhatsApp commands (`briefing.js`). Missing: dashboard Q&A, confirmation-gated actions. |
-| Natural-language automations | Partial | Automation builder exists. AI-written drafts that are checked and simulated are missing. |
-| Verified answers | Partial | Retrieval (RAG) keeps the source documents. Missing: an owner view of answer → source, flags for stale sources. |
-| Results dashboard | Partial | Value report and results page. Missing: verified vs attributed vs estimated figures kept clearly apart. |
-| Simple owner mode, onboarding | Partial | 9-step setup guide. Missing: the 6-item simple navigation. |
-| Voice, Instagram, Messenger, agencies, multi-branch | Missing | Partner and referral tracking only. |
-| Pricing packaging | Partial | Free/£29/£79/£249 in `PLANS`. The £500 setup fee is still on the marketing site (needs a business decision). |
-| Marketing site | Partial | Server-rendered site. The name breaks Meta's trademark rules and must be changed. No fabricated testimonials found. |
+| Instant website demo ("Business Twin") | Built (batches 1, 10) | What the demo learnt, with source pages; uncertain and missing facts flagged; kept when the demo is claimed. |
+| Trades and salon demos | Built (batches 7, 11, 12) | 16 trade templates plus plumber, electrician, heating, handyman, property maintenance, hair, barber, beauty and nails variants. `/examples`: 8 scripted scenarios through the real engine on throwaway sample businesses. |
+| Photo-to-quote | Built (batches 7, 9) | Postcode and service-area check, photos attached to the quote request, AI draft, team approval, PDF and accept, one follow-up. |
+| Lead qualification | Built (batch 11) | Per-trade questions one at a time, urgent flag, owner-editable. |
+| Bookings | Built (batches 11–13) | Overlap-aware times, buffers, staff capacity, customers choose who, per-staff day view, clock-change tests. |
+| Follow-up engine | Built (batch 5) | One log of automatic actions, per-customer daily cap, quiet hours; review requests after orders and (batch 15) after visits. |
+| Opportunity Radar | Built (batch 3) | Opportunities view with evidence and suggested actions. |
+| Owner copilot | Built, read-only (batch 6) | Dashboard and WhatsApp Q&A; actions still go through the normal screens. |
+| Natural-language automations | Built (batches 12, 13) | AI draft → allowed steps only → try-out on a throwaway copy → owner approval; change an existing automation the same way. |
+| Verified answers | Built (batch 4) | Answer → source and date, stale sources flagged, figure checks. |
+| Results dashboard | Built (batch 4) | Verified, attributed, estimated and opportunity figures kept apart. |
+| Simple owner mode, onboarding | Built (batches 10, 12) | Grouped menu fitted to the business, "To do now" on Today, 9-step setup guide. |
+| Light CRM | Built (batch 15) | Lead board (new, contacted, won, lost) with team-entered values and notes; open and won-this-month totals. |
+| Account recovery | Built (batch 13) | Lost-key email link; needs Resend and an account email per business. |
+| Voice, Instagram, Messenger, agencies, multi-branch | Missing | Instagram/Messenger researched (`INSTAGRAM_MESSENGER_RESEARCH.md`); needs Meta App Review first. |
+| Pricing packaging | Partial | Free/£29/£79/£249 in `PLANS`. The £500 set-up fee is on the marketing site but not charged (needs a business decision). |
+| Marketing site | Partial | Server-rendered; pages for takeaways, trades and salons (batch 15), comparisons, examples. The name breaks Meta's trademark rules and must be changed. No fabricated testimonials. |
 | UK compliance | Partial | Consent ledger, data requests (export/erasure), retention, legal page templates. Needs legal review. |
-| AI evaluations | Partial | `src/cli/qualityGate.js` and weekly quality score. Missing: a recorded evaluation suite with model, cost and latency. |
-| Performance benchmarks | Missing | Nothing measured yet. |
+| AI evaluations | Built (batch 8) | Recorded suite with model, cost and latency; real-model run 15/15 on the server. |
+| Performance benchmarks | Built (batch 10) | Repeatable load test (`scripts/loadtest.js`); results in `END_TO_END_TEST_RESULTS.md`. |

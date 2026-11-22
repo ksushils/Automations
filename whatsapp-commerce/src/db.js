@@ -457,12 +457,12 @@ CREATE TABLE IF NOT EXISTS usage (
 
 // Columns added after v1 – applied to existing databases on start.
 const MIGRATIONS = {
-  chat_leads: { contacted_at: 'TEXT', area: 'TEXT', answers: 'TEXT', urgent: 'INTEGER DEFAULT 0' },
+  chat_leads: { contacted_at: 'TEXT', area: 'TEXT', answers: 'TEXT', urgent: 'INTEGER DEFAULT 0', value: 'REAL', notes: 'TEXT', won_at: 'TEXT' },
   quotes: { photos: "TEXT NOT NULL DEFAULT '[]'" }, // photos the customer sent in the same chat (last 2 days) // area: postcode + whether it's inside the business's areas
   email_log: { delivered_at: 'TEXT', event: 'TEXT' }, // from the Resend webhook: delivered / bounced / complained
   orders: { discount: 'REAL NOT NULL DEFAULT 0', delivery_fee: 'REAL NOT NULL DEFAULT 0', promo_code: 'TEXT', slot: 'TEXT', receipt_token: 'TEXT', paid_at: 'TEXT', reminded_at: 'TEXT', stripe_session_id: 'TEXT', recovered: 'INTEGER NOT NULL DEFAULT 0', review_sent_at: 'TEXT', review_status: 'TEXT' },
   customers: { last_inbound_at: 'TEXT', winback_sent_at: 'TEXT', tags: "TEXT NOT NULL DEFAULT '[]'", attributes: "TEXT NOT NULL DEFAULT '{}'", source: 'TEXT' },
-  bookings: { reminded2_at: 'TEXT', gcal_event_id: 'TEXT', staff: 'TEXT' },
+  bookings: { reminded2_at: 'TEXT', gcal_event_id: 'TEXT', staff: 'TEXT', review_sent_at: 'TEXT', review_status: 'TEXT', completed_at: 'TEXT' },
   conversations: { assigned_to: 'TEXT', ai_paused_until: 'TEXT' }, // ai_paused_until: owner replied from the phone (coexistence)
   messages: { processed: 'INTEGER NOT NULL DEFAULT 1', attempts: 'INTEGER NOT NULL DEFAULT 0', source: 'TEXT' }, // source: phone_app | history (coexistence)
   usage: { ai_tokens: 'INTEGER NOT NULL DEFAULT 0', ai_cost_micro: 'INTEGER NOT NULL DEFAULT 0', site_cart_adds: 'INTEGER NOT NULL DEFAULT 0' }, // micro-USD; site_cart_adds: items the chat put in the shop's own basket

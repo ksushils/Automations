@@ -280,7 +280,30 @@ export function listChatLeads(tenantId, { limit = 200 } = {}) {
 }
 export function setLeadStatus(tenantId, id, status) {
   if (!['new', 'contacted', 'won', 'lost'].includes(status)) throw Object.assign(new Error('bad status'), { status: 400 });
-  getDb().prepare("UPDATE chat_leads SET status = ?, contacted_at = CASE WHEN ? != 'new' AND contacted_at IS NULL THEN datetime('now') ELSE contacted_at END WHERE id = ? AND tenant_id = ?").run(status, status, Number(id), tenantId);
+  getDb().prepare("UPDATE chat_leads SET status = ?, contacted_at = CASE WHEN ? != 'new' AND contacted_at IS NULL THEN datetime('now') ELSE contacted_at END, won_at = CASE WHEN ? = 'won' THEN COALESCE(won_at, datetime('now')) ELSE NULL END WHERE id = ? AND tenant_id = ?").run(status, status, status, Number(id), tenantId);
+}
+
+/*
+ * Light CRM (R5): each lead can carry a value (what the job/order is worth, entered by the team – never guessed) and
+ * notes. The pipeline totals what's open (new + contacted) and what was won this month, from those entered values only.
+ */
+export function updateLead(tenantId, id, { status, value, notes } = {}) {
+  const row = getDb().prepare('SELECT id FROM chat_leads WHERE id = ? AND tenant_id = ?').get(Number(id), tenantId);
+  if (!row) throw Object.assign(new Error('not found'), { status: 404 });
+  if (status !== undefined && status !== '') setLeadStatus(tenantId, id, String(status));
+  if (value !== undefined) {
+    const v = value === null || value === '' ? null : Math.round(Number(value) * 100) / 100;
+    if (v !== null && !(Number.isFinite(v) && v >= 0 && v <= 10000000)) throw Object.assign(new Error('Value must be a positive amount'), { status: 400 });
+    getDb().prepare('UPDATE chat_leads SET value = ? WHERE id = ?').run(v, row.id);
+  }
+  if (notes !== undefined) getDb().prepare('UPDATE chat_leads SET notes = ? WHERE id = ?').run(String(notes ?? '').slice(0, 2000) || null, row.id);
+  return getDb().prepare('SELECT * FROM chat_leads WHERE id = ?').get(row.id);
+}
+export function pipeline(tenantId) {
+  const by = Object.fromEntries(['new', 'contacted', 'won', 'lost'].map((s) => [s, { count: 0, value: 0, valued: 0 }]));
+  for (const r of getDb().prepare('SELECT status, COUNT(*) AS n, SUM(COALESCE(value, 0)) AS v, COUNT(value) AS k FROM chat_leads WHERE tenant_id = ? GROUP BY status').all(tenantId)) if (by[r.status]) by[r.status] = { count: r.n, value: Math.round((r.v || 0) * 100) / 100, valued: r.k };
+  const month = getDb().prepare("SELECT COUNT(*) AS n, SUM(COALESCE(value, 0)) AS v FROM chat_leads WHERE tenant_id = ? AND status = 'won' AND won_at >= date('now', 'start of month')").get(tenantId);
+  return { stages: by, open: { count: by.new.count + by.contacted.count, value: Math.round((by.new.value + by.contacted.value) * 100) / 100 }, wonThisMonth: { count: month.n, value: Math.round((month.v || 0) * 100) / 100 } };
 }
 void config;
 

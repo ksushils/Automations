@@ -78,6 +78,32 @@ test('review requests: once per delivered order, inside the 24h window, with the
   assert.match(sent.text, /Hi Jane/);
 });
 
+test('review requests after a booking is marked Done: once per visit, not for cancelled ones, not twice in 30 days', async () => {
+  const { setBookingStatus } = await import('../src/bookings.js');
+  const tenants = await import('../src/tenants.js');
+  const t = makeTenant({ store: { type: 'none' }, whatsapp: { phoneNumberId: '124', accessToken: 'tok' }, notifications: { reviewRequest: { enabled: true, url: 'https://g.page/r/salon/review', afterHours: 0 } } });
+  const wa = '447700900019';
+  getDb().prepare("INSERT INTO customers (tenant_id, wa_id, name, last_inbound_at) VALUES (?, ?, 'Kim', datetime('now', '-1 hour'))").run(t.id, wa);
+  const add = (status) => Number(getDb().prepare("INSERT INTO bookings (tenant_id, wa_id, name, service, day, time, starts_at, status) VALUES (?, ?, 'Kim Lee', 'Cut', '2026-11-20', '10:00', '2026-11-20 10:00:00', ?)").run(t.id, wa, status).lastInsertRowid);
+  const done = add('confirmed'), gone = add('confirmed'), second = add('confirmed');
+  const prev = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ messages: [{ id: 'wamid.y' }] }), { status: 200 });
+  try {
+    await setBookingStatus(tenants.getTenant(t.id), done, 'completed');
+    await setBookingStatus(tenants.getTenant(t.id), gone, 'cancelled');
+    getDb().prepare("UPDATE bookings SET completed_at = datetime('now', '-1 minute') WHERE id = ?").run(done);
+    assert.equal(await runReviewRequests(), 1);
+    assert.equal(await runReviewRequests(), 0, 'never twice');
+    const last = JSON.parse(getDb().prepare("SELECT body FROM messages WHERE tenant_id = ? AND direction = 'out' ORDER BY id DESC").get(t.id).body);
+    assert.equal(last.url, 'https://g.page/r/salon/review'); assert.match(last.text, /Hi Kim, thanks for visiting/);
+    await setBookingStatus(tenants.getTenant(t.id), second, 'completed');
+    getDb().prepare("UPDATE bookings SET completed_at = datetime('now', '-1 minute') WHERE id = ?").run(second);
+    assert.equal(await runReviewRequests(), 0, 'one per customer every 30 days');
+    assert.equal(getDb().prepare('SELECT review_status FROM bookings WHERE id = ?').get(second).review_status, 'skipped_recent');
+    assert.equal(getDb().prepare('SELECT review_sent_at FROM bookings WHERE id = ?').get(gone).review_sent_at, null);
+  } finally { globalThis.fetch = prev; }
+});
+
 test('monthly report job only runs on the 1st and once per shop', async () => {
   assert.equal(await runMonthlyReports(new Date('2026-11-15T09:00:00Z')), 0);
   assert.equal(monthKey(new Date('2026-11-01T09:00:00Z')), '2026-11');
