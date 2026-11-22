@@ -6,10 +6,15 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 - **Last batch:** batch 9 (photos attached to quote requests), 22 November 2026.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
-- **Deploy:** the owner approved deploying ("keep doing all the batches… you can deploy"). The deploy is **not done yet**: since the start of batch 2, the VPS (191.215.46.170) has not answered on SSH or HTTPS, while the rest of the internet works from here.
-- **How to deploy:** with `scripts/deploy-vps.sh` on the server. It snapshots the database, runs the tests inside the new image, checks `/health`, and rolls back automatically if anything fails.
+- **Deploy:** ✅ **deployed to wa.karatit.com on 22 November 2026** (server commit `0e50038`), with `scripts/deploy-vps.sh`:
+  - **Database snapshots:** taken first, in `/root/wa-backups/predeploy-20261122-*.db`.
+  - **Tests:** run inside the Node 22 image.
+  - **Health:** `/health` returned `{"ok":true,"jobs":"ok"}`.
+  - **Data:** intact (14 businesses).
+  - **Rollback:** `sh scripts/rollback-vps.sh`.
+- **First deploy attempts:** one merge conflict with the demo-engine branch (`server.js` imports; both kept), and a calendar test that was flaky under load (fixed). The script stopped safely each time before restarting anything.
 - **Tests:** 310 of 310 pass locally on Node 24. They run again inside the Node 22 image during the deploy.
-- **Live server:** still on commit `231ae4e`.
+- **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
 
 ## Batch 9: photo to quote (R2.1, rest)
 - When a quote is requested, photos the customer sent in the same chat in the last 2 days are attached to it (`quotes.photos`, `chatPhotos()` in `src/quotes.js`).
