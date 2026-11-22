@@ -62,6 +62,7 @@ import { checkConnection, connectionStatus, connectionBanner } from '../waHealth
 import { entitlements, staffSeatsLeft } from '../entitlements.js';
 import { listOpportunities, setOpportunityState } from '../opportunities.js';
 import { buildTwin } from '../businessTwin.js';
+import { qualifyFor, parseQualifyText, qualifyText } from '../qualify.js';
 import { listAnswers, answerStats } from '../verified.js';
 import { automationLog } from '../outreach.js';
 import { askCopilot, SUGGESTIONS } from '../copilot.js';
@@ -601,9 +602,16 @@ export function adminRouter() {
     res.json({ imported: products.length, total: merged.length, tenant: view(t) });
   });
 
+  // the qualifying questions the assistant asks in a lead (the owner's own, else the trade's ready-made ones)
+  r.get('/tenants/:tenantId/qualify', requireTenant, (req, res) => {
+    const S = req.tenant.settings;
+    const qs = qualifyFor(S);
+    res.json({ questions: qs || [], text: qualifyText(qs || []), own: !!(S.leads?.qualify || []).length, off: !!S.leads?.qualifyOff });
+  });
   r.patch('/tenants/:tenantId/settings', requireTenant, requireOwner, (req, res) => {
     const patch = req.body || {};
     delete patch.storeWebhookSecret;
+    if (typeof patch.leads?.qualify === 'string') patch.leads.qualify = parseQualifyText(patch.leads.qualify); // "Question | option | option" lines from the dashboard
     if (!req.isSuper) delete patch.difyAllowed; // only the platform operator can grant Dify
     if (!req.isSuper && patch.ai) delete patch.ai.budgetUsd; // spend caps are set by the plan / operator, not the shop
     if (!req.isSuper && patch.ai?.provider === 'dify' && !difyAllowed(req.tenant)) return res.status(403).json({ error: 'The Dify engine is not available for this shop – use the built-in (Direct) AI.' });

@@ -117,7 +117,7 @@ test('call me back on WhatsApp: uses their number, asks the best time and what t
   r = await say(t, wa, { action: 'lead:when:Evening' });
   assert.match(r[0].text, /anything in particular/i, 'name known from WhatsApp, so straight to the requirement');
   r = await say(t, wa, 'Thailand in May, 2 adults, about £1500 each');
-  assert.match(r[0].text, /What's your email address\?/);
+  assert.match(r[0].text, /And what's your email address\?/);
   r = await say(t, wa, { action: 'lead:skip' });
   assert.match(r[0].text, /We'll call you on \+447700900771 \(evening\)/);
   const [lead] = listChatLeads(t.id);

@@ -5,6 +5,7 @@ import { emailShop, sendEmail } from './email.js';
 import { notify } from './whatsapp/cloudApi.js';
 import { sendHook } from './hooks.js';
 import { pushTeam } from './push.js';
+import { qualifyFor, answersText, labelFor } from './qualify.js';
 
 /*
  * Chat leads: the assistant turns interest into a lead the team can act on.
@@ -12,11 +13,12 @@ import { pushTeam } from './push.js';
  *    website – then link to the page, then offer "Email me details" / "Call me back" / "Ask a question".
  *  - Email me details: email → (optional) phone → anything particular to discuss → done.
  *    Call me back:     phone (WhatsApp: the number they're chatting from) → anything to discuss → (optional) email → done.
+ *  - Businesses with a trade get that trade's qualifying questions (src/qualify.js) instead of one long question.
  *  - One question at a time, always with a Skip; the visitor can type a question instead and the AI answers it.
  *  - Each lead is saved (chat_leads), the team is told at once (email + staff WhatsApp), and marketing consent is a
  *    separate, optional tap at the end (UK PECR) – asking for details is not consent to offers.
  */
-export const LEAD_STATES = new Set(['lead_email', 'lead_phone', 'lead_when', 'lead_msg', 'lead_name']);
+export const LEAD_STATES = new Set(['lead_email', 'lead_phone', 'lead_when', 'lead_msg', 'lead_name', 'lead_q']);
 export const CALL_TIMES = ['Morning', 'Afternoon', 'Evening'];
 const isEmail = (s) => /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]{2,}$/.test(String(s || '').trim());
 export const cleanPhone = (s) => { const raw = String(s || '').trim(); const d = raw.replace(/[^\d]/g, ''); return d.length >= 7 && d.length <= 15 && /^[+\d][\d\s().-]*$/.test(raw) ? (raw.startsWith('+') ? '+' : '') + d : null; };
@@ -77,25 +79,55 @@ function ask(ctx, step) {
   ctx.conv.state = `lead_${step}`;
   const why = lead.kind === 'email' ? (L.brochureUrl ? 'so we can send you the brochure' : `so our team can send you details${lead.topic && lead.topic !== 'general' ? ` about ${lead.topic}` : ''}`) : 'so our team can call you back';
   const privacy = L.privacyUrl ? `\n_We only use it for this. Privacy: ${L.privacyUrl}_` : '\n_We only use it to reply to you._';
-  if (step === 'email') return ctx.reply({ type: 'buttons', text: `${lead.kind === 'email' ? '📩 Great!' : 'And'} What's your email address? (${why})${lead.kind === 'email' ? privacy : ''}`, buttons: [skipBtn(lead.kind === 'email' ? 'lead:cancel' : 'lead:skip', lead.kind === 'email' ? 'Not now' : 'Skip')] });
+  if (step === 'email') return ctx.reply({ type: 'buttons', text: `${lead.kind === 'email' ? "📩 Great! What's" : "And what's"} your email address? (${why})${lead.kind === 'email' ? privacy : ''}`, buttons: [skipBtn(lead.kind === 'email' ? 'lead:cancel' : 'lead:skip', lead.kind === 'email' ? 'Not now' : 'Skip')] });
   if (step === 'phone') {
     return ctx.reply({ type: 'buttons', text: lead.kind === 'call' ? `📞 Sure! What's the best number to call you on?${privacy}` : 'Would you like a call back too? Type your phone number, or tap No thanks.', buttons: [skipBtn(lead.kind === 'call' ? 'lead:cancel' : 'lead:skip', lead.kind === 'call' ? 'Not now' : 'No thanks')] });
   }
   if (step === 'name') return ctx.reply({ type: 'buttons', text: 'And who should we ask for? (your first name)', buttons: [skipBtn('lead:skip')] });
   if (step === 'when') return ctx.reply({ type: 'buttons', text: '🕒 When is best to call you?', buttons: CALL_TIMES.map((t) => ({ id: `lead:when:${t}`, title: t })) });
   if (step === 'msg') return ctx.reply({ type: 'buttons', text: `📝 ${L.requirementPrompt}`, buttons: [skipBtn('lead:skip', 'Nothing else')] });
+  if (step === 'q') {
+    const x = lead.qs[lead.qi || 0];
+    const n = lead.qs.length;
+    return ctx.reply({ type: 'buttons', text: `📝 ${x.q}${n > 1 ? ` _(${(lead.qi || 0) + 1}/${n})_` : ''}`, buttons: [...(x.options || []).map((o, i) => ({ id: `lead:ans:${i}`, title: o.label })), skipBtn('lead:skip')] });
+  }
+}
+
+/** Record the answer to the current qualifying question and move on. */
+async function answerQ(ctx, value, option) {
+  const lead = ctx.conv.data.lead;
+  const x = lead.qs[lead.qi || 0];
+  const a = String(value || '').trim().slice(0, 300);
+  lead.answers = [...(lead.answers || []), { key: x.key, label: labelFor(x), q: x.q, a, ...(option?.urgent ? { urgent: true } : {}) }];
+  if (option?.urgent) lead.urgent = true;
+  if (x.postcode && a) {
+    const { checkServiceArea } = await import('./serviceArea.js');
+    const area = checkServiceArea(ctx.S, a);
+    if (area.postcode || area.covered != null) lead.area = { postcode: area.postcode || null, covered: area.covered };
+    if (area.covered === false) await ctx.reply({ type: 'text', text: `Thanks – ${area.postcode} may be outside the areas we usually cover, but the team will check and let you know.` });
+  }
+  return nextQ(ctx);
+}
+function nextQ(ctx) {
+  const lead = ctx.conv.data.lead;
+  lead.qi = (lead.qi || 0) + 1;
+  if (lead.qi >= lead.qs.length) { lead.done = [...new Set([...(lead.done || []), 'q'])]; lead.message = answersText(lead.answers).slice(0, 1000) || null; }
+  return continueLead(ctx);
 }
 
 /** Steps still to ask, in order. */
 function nextStep(ctx) {
   const lead = ctx.conv.data.lead;
   const done = new Set(lead.done || []);
-  const order = lead.kind === 'call' ? ['phone', 'when', 'name', 'msg', 'email'] : ['email', 'phone', 'name', 'msg'];
+  const m = lead.qs?.length ? 'q' : 'msg';
+  const order = lead.kind === 'call' ? ['phone', 'when', 'name', m, 'email'] : ['email', 'phone', 'name', m];
   return order.find((s) => !done.has(s) && !(s === 'phone' && (lead.phone || !isWeb(ctx) && lead.kind === 'email')) && !(s === 'name' && (lead.name || ctx.customer?.name)) && !(s === 'email' && lead.email));
 }
 
 export function startLead(ctx, kind, topic) {
   const lead = { kind: kind === 'call' ? 'call' : 'email', topic: String(topic || 'general').slice(0, 80), done: [], startedAt: new Date().toISOString() };
+  const qs = qualifyFor(ctx.S);
+  if (qs) { lead.qs = qs; lead.qi = 0; lead.answers = []; }
   if (!isWeb(ctx)) lead.phone = '+' + String(ctx.conv.waId).replace(/\D/g, ''); // on WhatsApp we already have their number
   if (ctx.customer?.email && isEmail(ctx.customer.email)) lead.email = ctx.customer.email;
   const known = cleanPhone(json(ctx.customer?.attributes, {})?.phone); // from the form before the chat
@@ -125,6 +157,8 @@ export async function leadAction(ctx, arg) {
   const lead = ctx.conv.data.lead;
   if (!lead) return ctx.reply({ type: 'text', text: 'No problem! Ask me anything, or type *menu* to see the options.' });
   if (cmd === 'cancel') { ctx.conv.state = 'idle'; ctx.conv.data.lead = null; return ctx.reply({ type: 'text', text: 'No problem! Ask me anything, or type *menu* to see the options.' }); }
+  if (cmd === 'ans' && ctx.conv.state === 'lead_q' && lead.qs) { const o = lead.qs[lead.qi || 0]?.options?.[Number(topic)]; if (o) return answerQ(ctx, o.label.replace(/^[^\p{L}\p{N}]+/u, ''), o); return ask(ctx, 'q'); }
+  if (cmd === 'skip' && ctx.conv.state === 'lead_q' && lead.qs) return nextQ(ctx);
   if (cmd === 'skip') { lead.done = [...new Set([...(lead.done || []), ctx.conv.state.replace('lead_', '')])]; return continueLead(ctx); }
   return continueLead(ctx);
 }
@@ -155,6 +189,13 @@ export async function leadText(ctx, text) {
     lead.name = v.replace(/^(i'?m|my name is|it'?s|this is)\s+/i, '').slice(0, 60); lead.done.push('name'); return continueLead(ctx);
   }
   if (step === 'when') { if (looksLikeQuestion) { ctx.conv.state = 'idle'; return false; } lead.callTime = v.slice(0, 60); lead.done.push('when'); return continueLead(ctx); }
+  if (step === 'q') {
+    if (/\?\s*$/.test(v) && v.split(/\s+/).length >= 4) { ctx.conv.state = 'idle'; return false; } // a question of their own: answer it
+    const x = lead.qs?.[lead.qi || 0];
+    if (!x) return false;
+    const o = (x.options || []).find((op) => op.label.replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase() === v.toLowerCase());
+    return answerQ(ctx, v, o);
+  }
   if (step === 'msg') {
     lead.message = v.slice(0, 1000); lead.done.push('msg');
     const { checkServiceArea } = await import('./serviceArea.js');
@@ -175,6 +216,7 @@ export function saveChatLead(tenant, conv, lead, customer) {
   const id = Number(getDb().prepare(`INSERT INTO chat_leads (tenant_id, wa_id, channel, kind, topic, name, email, phone, message, call_time, page, source)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(tenant.id, conv.waId, String(conv.waId).startsWith('web:') ? 'web' : 'whatsapp', lead.kind, lead.topic || null, lead.name || customer?.name || null, lead.email || null, lead.phone || null, lead.message || null, lead.callTime || null, page, source ? JSON.stringify(source) : null).lastInsertRowid);
   if (lead.area) getDb().prepare('UPDATE chat_leads SET area = ? WHERE id = ?').run(JSON.stringify(lead.area), id);
+  if (lead.answers?.length) getDb().prepare('UPDATE chat_leads SET answers = ?, urgent = ? WHERE id = ?').run(JSON.stringify(lead.answers.filter((a) => a.a).map(({ key, label, a, urgent }) => ({ key, label, a, ...(urgent ? { urgent } : {}) }))), lead.urgent ? 1 : 0, id);
   if (lead.email) getDb().prepare('UPDATE customers SET email = COALESCE(email, ?) WHERE tenant_id = ? AND wa_id = ?').run(lead.email, tenant.id, conv.waId);
   if (lead.name) getDb().prepare('UPDATE customers SET name = COALESCE(name, ?) WHERE tenant_id = ? AND wa_id = ?').run(lead.name, tenant.id, conv.waId);
   return id;
@@ -182,12 +224,13 @@ export function saveChatLead(tenant, conv, lead, customer) {
 
 export function leadSummary(tenant, lead, { page } = {}) {
   return [
+    lead.urgent && '🚨 URGENT',
     `${lead.kind === 'call' ? '📞 Call-back request' : '📩 Details requested'}${lead.topic && lead.topic !== 'general' ? ` – ${lead.topic}` : ''}`,
     lead.name && `Name: ${lead.name}`,
     lead.phone && `Phone: ${lead.phone}`,
     lead.email && `Email: ${lead.email}`,
     lead.callTime && `Best time to call: ${lead.callTime}`,
-    lead.message && `Wants to discuss: ${lead.message}`,
+    ...(lead.answers?.some((a) => a.a) ? lead.answers.filter((a) => a.a).map((a) => `${a.label}: ${a.a}`) : [lead.message && `Wants to discuss: ${lead.message}`]),
     page && `Page: ${page}`,
   ].filter(Boolean).join('\n');
 }
@@ -204,8 +247,8 @@ async function finishLead(ctx) {
   // a two-line summary of the chat for the team (in the background; the lead is saved either way)
   import('./ai/direct.js').then(({ summarizeChat }) => summarizeChat(ctx.tenant, ctx.conv.waId)).then((s) => s && getDb().prepare('UPDATE chat_leads SET summary = ? WHERE id = ?').run(s, id)).catch(() => {});
   // tell the team straight away – speed matters most for a call back
-  emailShop(ctx.tenant, `New lead: ${lead.kind === 'call' ? 'call back' : 'details'}${lead.topic && lead.topic !== 'general' ? ` – ${lead.topic}` : ''}`, `${summary}\n\nIt's in the Leads list in your dashboard.`, { button: 'Open your dashboard' }).catch(() => {});
-  pushTeam(ctx.tenant, { title: `📇 New lead: ${lead.kind === 'call' ? 'call back' : 'details'}`, body: summary.replace(/\n+/g, ' · '), url: '/admin/#leads', tag: `lead-${id}` }).catch(() => {});
+  emailShop(ctx.tenant, `${lead.urgent ? '🚨 URGENT ' : ''}New lead: ${lead.kind === 'call' ? 'call back' : 'details'}${lead.topic && lead.topic !== 'general' ? ` – ${lead.topic}` : ''}`, `${summary}\n\nIt's in the Leads list in your dashboard.`, { button: 'Open your dashboard' }).catch(() => {});
+  pushTeam(ctx.tenant, { title: `${lead.urgent ? '🚨 Urgent' : '📇 New'} lead: ${lead.kind === 'call' ? 'call back' : 'details'}`, body: summary.replace(/\n+/g, ' · '), url: '/admin/#leads', tag: `lead-${id}` }).catch(() => {});
   sendHook(ctx.tenant, 'lead.new', { id, kind: lead.kind, topic: lead.topic, name: lead.name || ctx.customer?.name || '', email: lead.email || '', phone: lead.phone || '', callTime: lead.callTime || '', message: lead.message || '', page: ctx.conv.data.page?.url || '', channel: isWeb(ctx) ? 'website' : 'whatsapp' }).catch(() => {});
   for (const s of ctx.S.notifications?.staffWaIds || []) notify(ctx.tenant, String(s).replace(/\D/g, ''), { type: 'text', text: `🔔 New lead\n${summary}` }, ctx.S.notifications?.templates?.staffAlert ? { name: ctx.S.notifications.templates.staffAlert, params: [summary.replace(/\n/g, ' · ').slice(0, 900)] } : null, ctx.rawSend).catch(() => {});
   // the brochure: link now, and by email when email is set up
@@ -233,7 +276,7 @@ function marketingChoice(ctx, yes) {
 }
 
 export function listChatLeads(tenantId, { limit = 200 } = {}) {
-  return getDb().prepare('SELECT * FROM chat_leads WHERE tenant_id = ? ORDER BY id DESC LIMIT ?').all(tenantId, limit).map((l) => ({ ...l, source: json(l.source, null) }));
+  return getDb().prepare('SELECT * FROM chat_leads WHERE tenant_id = ? ORDER BY id DESC LIMIT ?').all(tenantId, limit).map((l) => ({ ...l, source: json(l.source, null), answers: json(l.answers, null) }));
 }
 export function setLeadStatus(tenantId, id, status) {
   if (!['new', 'contacted', 'won', 'lost'].includes(status)) throw Object.assign(new Error('bad status'), { status: 400 });

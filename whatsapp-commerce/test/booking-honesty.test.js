@@ -30,10 +30,12 @@ test('the AI may not pretend to book: a made-up "confirmed" becomes a real reque
   // they finish the request: the team gets name, phone and time
   await say(t, web, '07700 900123');
   await say(t, web, { action: 'lead:when:Morning' });
-  await say(t, web, 'Dry cut on Wednesday');
+  await say(t, web, 'Dry cut'); // the salon's questions, one at a time: which service…
+  await say(t, web, 'Wednesday 10am'); // …and which day or time
   await say(t, web, { action: 'lead:skip' }); // email is optional
   const [lead] = listChatLeads(t.id);
-  assert.deepEqual([lead.kind, lead.topic, lead.name, lead.call_time, lead.message], ['call', 'Appointment request', 'Jane Doe', 'Morning', 'Dry cut on Wednesday']);
+  assert.deepEqual([lead.kind, lead.topic, lead.name, lead.call_time, lead.message], ['call', 'Appointment request', 'Jane Doe', 'Morning', 'Service: Dry cut · When: Wednesday 10am']);
+  assert.deepEqual(lead.answers.map((a) => a.a), ['Dry cut', 'Wednesday 10am']);
   assert.match(lead.phone, /7700900123/);
 }));
 

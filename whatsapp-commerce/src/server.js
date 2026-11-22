@@ -19,6 +19,7 @@ import { trackingRouter } from './tracking.js';
 import { siteRouter } from './site.js';
 import { helpRouter } from './help.js';
 import { quotesRouter } from './quotes.js';
+import { installJsonLogs, requestLog } from './log.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,7 @@ export function createApp() {
   // Keep the raw body for Meta signature verification.
   app.use(express.json({ limit: '15mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
+  app.use(requestLog); // one JSON line per request when LOG_FORMAT=json (src/log.js); does nothing otherwise
   app.use(securityHeaders);
   app.post('/csp-report', rateLimit({ max: 60 }), express.json({ type: ['application/csp-report', 'application/reports+json', 'application/json'], limit: '20kb' }), (req, res) => { recordCspReport(req.body); res.sendStatus(204); });
   app.get('/health', (req, res) => {
@@ -58,6 +60,7 @@ export function createApp() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  installJsonLogs(); // LOG_FORMAT=json → structured logs
   const problems = assertProductionConfig();
   if (problems.length) {
     console.warn('⚠️  Configuration warnings:\n - ' + problems.join('\n - '));

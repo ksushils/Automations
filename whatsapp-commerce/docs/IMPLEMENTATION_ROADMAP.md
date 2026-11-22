@@ -28,7 +28,7 @@ Rules that apply to every item:
 | R0.12 | Entitlement audit: list every plan-gated feature and prove each is enforced on the server (campaigns, seats, knowledge docs, WhatsApp, badge) | ✅ batch 2 (staff seats added; usage card) |
 | R0.13 | Key recovery for owners (email a one-time link to reset the admin key) | ⏳ (works fully once email is live) |
 | R0.14 | Scripted rollback (`docs/DEPLOY.md`: restore the pre-deploy snapshot, check out the previous commit) | ✅ batch 2 (`scripts/deploy-vps.sh`, `scripts/rollback-vps.sh`) |
-| R0.15 | Structured JSON logs (opt-in env flag) | ⬜ |
+| R0.15 | Structured JSON logs (opt-in env flag) | ✅ batch 11 (`LOG_FORMAT=json`; secrets masked; one line per request with an id) |
 | R0.16 | Rename the product away from "WhatsApp…" (Meta trademark) | 🔒 business decision |
 
 ## Phase 1: sales demo
@@ -37,15 +37,15 @@ Rules that apply to every item:
 |---|---|---|
 | R1.1 | Business Twin: show what was learnt, with source pages; flag uncertain or missing facts; real progress steps; keep the approved configuration when the demo is claimed | ✅ batch 10 |
 | R1.2 | Trade variants (plumber, electrician, heating, handyman, property maintenance) and beauty variants (hair, barber, beauty, nails) on top of the existing templates | ✅ batch 7 |
-| R1.3 | Scripted demo scenarios (emergency plumber, photo, quote, service area, booking, human, follow-up) running through the real engine, with sample data labelled as such | ⬜ |
+| R1.3 | Scripted demo scenarios (emergency plumber, photo, quote, service area, booking, human, follow-up) running through the real engine, with sample data labelled as such | ✅ batch 11 (`/examples`: 6 scenarios) |
 
 ## Phase 2: AI receptionist
 
 | ID | Item | Status |
 |---|---|---|
 | R2.1 | Photo-to-quote: link the photo to the quote request; postcode and service-area check; urgency; owner approval by default | ✅ service area (batch 7), photos attached to quotes (batch 9) |
-| R2.2 | Per-trade qualification rules (one question at a time) | ⬜ |
-| R2.3 | Booking: tests across the daylight-saving change, configurable buffers, staff or resource availability | ⬜ |
+| R2.2 | Per-trade qualification rules (one question at a time) | ✅ batch 11 |
+| R2.3 | Booking: tests across the daylight-saving change, configurable buffers, staff or resource availability | ✅ batch 11 (overlap-aware, buffers, staff capacity) |
 | R2.4 | Follow-up engine: one log of automatic actions, a per-customer cap, quiet hours | ✅ batch 5 |
 
 ## Phase 3: owner experience
@@ -70,8 +70,7 @@ Rules that apply to every item:
 
 ## Next batches
 
-1. **R1.3:** scripted demo scenarios (emergency plumber, photo, quote, service area, booking, human, follow-up) through the real engine, sample data labelled.
-2. **R2.2:** per-trade qualification rules (one question at a time).
-3. **R2.3:** booking tests across the clock change, buffers, staff/resource availability.
-4. **R3.3:** natural-language automation drafts → allowed steps only → simulation → approval.
-5. **R0.15:** structured JSON logs (opt-in).
+1. **R3.3:** natural-language automation drafts → allowed steps only → simulation → approval.
+2. **R4 (rest):** industry-aware "Today" page (what needs doing now: urgent leads, unconfirmed bookings, draft quotes).
+3. **R2.3 (rest):** choose a named staff member when booking, and show bookings per staff member on the Bookings tab.
+4. **R1.3 (rest):** scenarios for a salon and a shop (the six today use a trades business).

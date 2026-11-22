@@ -105,7 +105,7 @@ export async function updateQuote(tenant, number, { items, notes, status }) {
 }
 
 /** Send (or re-send) the quote to the customer: chat + email. */
-export async function sendQuote(tenant, number, { by = 'Team', skipChat = false } = {}) {
+export async function sendQuote(tenant, number, { by = 'Team', skipChat = false, sender = null } = {}) {
   const q = getQuote(tenant.id, number);
   if (!q) throw fail('Quote not found', 404);
   if (!q.items.length) throw fail('Add at least one line to the quote first');
@@ -113,7 +113,7 @@ export async function sendQuote(tenant, number, { by = 'Team', skipChat = false 
   const sym = tenant.settings.business?.currencySymbol || '£';
   const text = `📝 Your quote *Q-${q.number}* from ${tenant.settings.business.name}\n\n${q.items.map((x) => `• ${x.qty > 1 ? `${x.qty} × ` : ''}${x.item}: ${x.price === null ? 'to confirm' : money(x.price * x.qty, sym)}`).join('\n')}\n\n*Total: ${money(q.total, sym)}*${q.items.some((x) => x.price === null) ? ' (plus items to confirm)' : ''}\nValid until ${q.valid_until}.\n\nSee it, download the PDF or accept it here: ${quoteUrl(q)}`;
   const out = { chat: false, email: false };
-  if (q.wa_id && !skipChat) out.chat = await createSender(tenant)(q.wa_id, { type: 'text', text, staff: by === 'auto' ? undefined : by }).then(() => true, () => false);
+  if (q.wa_id && !skipChat) out.chat = await (sender || createSender(tenant))(q.wa_id, { type: 'text', text, staff: by === 'auto' ? undefined : by }).then(() => true, () => false);
   if (q.email) out.email = await sendEmail({ tenantId: tenant.id, topic: 'quote', to: q.email, replyTo: (tenant.settings.notifications?.alertEmails || [])[0], subject: `Your quote Q-${q.number} from ${tenant.settings.business.name}`, text: `${text.replace(/\*/g, '')}\n\n${tenant.settings.business.name}` }).then((r) => !!r?.ok, () => false);
   return { quote: getQuote(tenant.id, number), delivered: out, message: text };
 }
@@ -134,8 +134,8 @@ export async function acceptQuote(token) {
 }
 
 /** One friendly follow-up 2 days after sending, if the customer hasn't accepted. */
-export async function runQuoteFollowUps() {
-  const rows = getDb().prepare("SELECT * FROM quotes WHERE status = 'sent' AND followed_up_at IS NULL AND sent_at < datetime('now', '-2 days') AND sent_at > datetime('now', '-14 days') LIMIT 200").all().map(map);
+export async function runQuoteFollowUps({ tenantId = null, sender = null } = {}) {
+  const rows = getDb().prepare(`SELECT * FROM quotes WHERE status = 'sent' AND followed_up_at IS NULL AND sent_at < datetime('now', '-2 days') AND sent_at > datetime('now', '-14 days') ${tenantId ? 'AND tenant_id = ?' : ''} LIMIT 200`).all(...(tenantId ? [tenantId] : [])).map(map);
   let n = 0;
   const { guarded } = await import('./outreach.js');
   for (const q of rows) {
@@ -145,7 +145,7 @@ export async function runQuoteFollowUps() {
     const text = `Hi${q.name ? ` ${String(q.name).split(' ')[0]}` : ''}! Just checking you got your quote Q-${q.number} from ${t.settings.business.name}. Any questions? Reply here, or accept it when you're ready: ${quoteUrl(q)}`;
     let any = false;
     if (q.wa_id && !String(q.wa_id).startsWith('web:')) {
-      const r = await guarded(t, q.wa_id, 'quote_followup', `quote:${q.id}`, () => createSender(t)(q.wa_id, { type: 'text', text }), { onDecided: decided });
+      const r = await guarded(t, q.wa_id, 'quote_followup', `quote:${q.id}`, () => (sender || createSender(t))(q.wa_id, { type: 'text', text }), { onDecided: decided });
       if (r === 'retry') continue; // quiet hours – try again later
       any = any || r === 'sent';
     } else decided();

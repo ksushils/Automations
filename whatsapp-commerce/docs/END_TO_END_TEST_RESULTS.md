@@ -47,6 +47,7 @@
 | 22 November 2026 | Server image, Node 22, inside `deploy-vps.sh` | 326 tests, 325 pass, 0 fail, 1 skipped (the deploy-script check, because `scripts/` isn't in the image) |
 | 22 November 2026 (batch 10) | Local, Node 24 | 319 tests, 319 pass |
 | 22 November 2026 (batch 10) | Server image, Node 22, inside `deploy-vps.sh` | 334 tests, 333 pass, 0 fail, 1 skipped |
+| 22 November 2026 (batch 11) | Local, Node 24 | 340 tests, 340 pass |
 
 ## Performance baseline (22 November 2026, local)
 

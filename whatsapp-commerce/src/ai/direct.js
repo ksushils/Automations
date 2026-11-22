@@ -1,3 +1,4 @@
+import { inSampleRun } from '../sampleRun.js';
 import { pageNote } from '../bot/engine.js';
 import { stripInjections } from '../safety.js';
 // accents/non-Latin letters or common words of other languages → probably not English
@@ -16,7 +17,8 @@ import { money } from '../bot/cart.js';
  * Direct AI mode: talks to any OpenAI-compatible chat API (OpenRouter by default) – no Dify needed.
  * Knowledge comes from the local index (src/ai/rag.js); agent mode runs the same store tools in-process.
  */
-export const directConfigured = () => !!config.aiApiKey;
+// scripted sample runs (src/scenarios.js) never call the AI: same result every time, no cost
+export const directConfigured = () => !!config.aiApiKey && !inSampleRun();
 
 export function providerPrefs() {
   if (!/openrouter\.ai/.test(config.aiBaseUrl)) return undefined;

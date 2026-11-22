@@ -54,7 +54,7 @@ Today nothing is **Verified**: no real Stripe, Resend or Meta account has been c
 | Off-server encrypted backups | Tested, **not configured** | `src/offsite.js` (AES-256-GCM, SigV4), `test/offsite.test.js` | An S3 or R2 bucket | **High** | P0 (Blocked) |
 | Restore procedure | **Drill passed locally (this batch)** | Backup, then seal, then `src/cli/restoreBackup.js`: counts matched and `integrity_check` = ok | A drill on the live server | High | P0 |
 | Alert channel | Built | `alert()` posts to a Slack/Discord/n8n webhook | `ALERT_WEBHOOK_URL` not set on live | High | P0 (Blocked) |
-| Structured logs and error tracking | Partial | Prefixed console logs, crash alerts | JSON log format, error-tracking service (optional) | Low | P2 |
+| Structured logs and error tracking | Partial | Prefixed console logs, crash alerts; JSON logs with `LOG_FORMAT=json` (batch 11: secrets masked, request ids) | Error-tracking service (optional) | Low | P2 |
 | Rollback | Partial | Pre-deploy database snapshot plus git (see `docs/DEPLOY.md`) | A scripted rollback command | Medium | P1 |
 
 ## Security

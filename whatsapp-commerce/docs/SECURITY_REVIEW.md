@@ -36,6 +36,9 @@ This review is based on reading the code and on automated tests. It is **not** a
 | Security headers | nosniff, Referrer-Policy, Permissions-Policy, X-Frame-Options DENY on `/admin` and `/api`, HSTS on https |
 | Backups encrypted off the server (AES-256-GCM, key from the passphrase via scrypt) | `offsite.test.js`; restore drill in `END_TO_END_TEST_RESULTS.md` |
 | `/health` reveals no internal details | `phase0.test.js` |
+| JSON logs (`LOG_FORMAT=json`) mask API keys, bearer tokens, Meta and Stripe secrets; token-like path parts become `:token`; query strings are never logged | `json-logs.test.js` |
+| Demo scenarios run on a throwaway sample business that can't send anything (no WhatsApp number, replies captured, email and AI skipped during the run) and is deleted after each run | `scenarios.test.js` (zero network calls with an AI key on) |
+| Settings form no longer switches the abandoned-checkout consent rule (and three other default-on settings) off when the owner presses Save | `settings-defaults.test.js` |
 
 ## Open findings
 

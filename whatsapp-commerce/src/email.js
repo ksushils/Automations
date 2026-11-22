@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { config } from './config.js';
 import { getDb } from './db.js';
 import { alert } from './ops.js';
+import { inSampleRun } from './sampleRun.js';
 
 /*
  * Email alerts to shop owners (new orders, paid orders, "customer wants a person", plan limits).
@@ -73,6 +74,7 @@ export async function attemptEmail(logId) {
 }
 
 export async function sendEmail({ to, subject, text, html, replyTo, tenantId = null, topic = null, kind = 'transactional' }) {
+  if (inSampleRun()) return { ok: false, skipped: true, error: 'Sample run – nothing is sent' };
   const recipients = (Array.isArray(to) ? to : [to]).filter(isEmail);
   const d = getDb();
   const rec = (status, error, bodies = false) => Number(d.prepare('INSERT INTO email_log (tenant_id, kind, topic, to_addr, subject, body_text, body_html, reply_to, status, error, next_try_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)').run(

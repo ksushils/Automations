@@ -4,7 +4,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 10 (Business Twin, simple menu, load test + SQLite tuning), 22 November 2026.
+- **Last batch:** batch 11 (lead questions one at a time, scripted demo scenarios, booking availability, JSON logs), 22 November 2026.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** ✅ **batch 10 deployed to wa.karatit.com on 22 November 2026** (server commit `e7f0fd2`; 333/334 tests in the image, 1 skipped; health ok; 14 businesses and 1,110 messages intact; `PRAGMA synchronous` = NORMAL live). Batches 1–9 were deployed earlier the same day (server commit `0e50038`), with `scripts/deploy-vps.sh`:
   - **Database snapshots:** taken first, in `/root/wa-backups/predeploy-20261122-*.db`.
@@ -13,8 +13,31 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - **Data:** intact (14 businesses).
   - **Rollback:** `sh scripts/rollback-vps.sh`.
 - **First deploy attempts:** one merge conflict with the demo-engine branch (`server.js` imports; both kept), and a calendar test that was flaky under load (fixed). The script stopped safely each time before restarting anything.
-- **Tests:** 319 of 319 pass locally on Node 24 (batch 10). They run again inside the Node 22 image during the deploy.
+- **Tests:** 340 of 340 pass locally on Node 24 (batch 11). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
+
+## Batch 11: lead questions (R2.2), demo scenarios (R1.3), booking availability (R2.3), JSON logs (R0.15)
+- **Questions one at a time** (`src/qualify.js`): when someone asks for a call back or details, the assistant asks what this trade needs, one short question per message with a Skip – e.g. a plumber: the problem → the postcode → how soon (🚨 Today – urgent / This week); a travel agent: where → when → how many → budget. Up to 4 questions, up to 2 tap-to-answer choices each.
+  - An "urgent" choice marks the lead 🚨 Urgent in the team's email, push and WhatsApp alert and on the Leads list. A postcode answer is checked against the areas covered (kind message if outside; the team still gets it).
+  - Each answer is saved on its own (`chat_leads.answers`, `urgent`: additive columns) and shown line by line on the Leads list; the message line for CSV/webhooks reads "Job: … · Postcode: … · When: …".
+  - Businesses with a trade get its questions automatically, unless the owner wrote their own single question (respected). Owners can write their own list in Settings → Leads ("How soon? | !Today | This week"), or switch back to the single question.
+  - A question of the customer's own mid-way sets the form aside and is answered (never stuck in a form).
+- **Scripted demo scenarios** (`src/scenarios.js`, public page `/examples`): emergency plumber, photo to quote, outside the area, booking a visit, talk to a person, quote follow-up – each a fixed script played through the real engine, then "what the team gets" (the lead alert, draft quote with photo, booking request, inbox hand-over, follow-up).
+  - Runs against a sample business ("Northside Plumbing & Heating", labelled as a sample everywhere) created for the run and deleted straight after, with everything it created.
+  - Nothing can leave the server: no WhatsApp number, every reply captured, and a "sample run" guard (`src/sampleRun.js`) that skips email and the AI for the duration. Tested with an AI key switched on: zero network calls. Phone numbers are Ofcom's drama range (07700 900xxx).
+  - Results cached for 6 hours; linked from the demo page and the footer; in the sitemap.
+- **Booking availability** (`src/bookings.js`): a time is free when fewer bookings overlap it than there are people to do it.
+  - Each booking blocks its own service's length (a 2-hour colour at 10:00 also blocks 11:00); optional gap after each visit (`bufferMinutes`).
+  - Optional staff list: capacity follows who works that weekday, who's away that date, and who does the chosen service.
+  - Tests across both 2027 clock changes (times stay local; the notice period counts real hours); "Today/Tomorrow" labels now use UK time (they used UTC, wrong just after midnight in summer).
+  - Settings → Bookings: "Gap after each visit" and "Staff" fields.
+- **JSON logs** (`src/log.js`): `LOG_FORMAT=json` turns every log line into one JSON object (time, level, tag, message) plus one line per request (method, path, status, ms, request id; not /health). API keys, bearer tokens, Meta and Stripe secrets are masked; token-like path parts become `:token`; query strings are never logged. Off by default – nothing changes unless the variable is set.
+- **Fixes found on the way:**
+  - **Settings form switched defaults off:** four yes/no settings the server treats as ON when unset (lead capture, automatic follow-ups, order notes, and *marketing consent required for abandoned-checkout messages*) showed "No" in Settings, so pressing Save turned them off. The form now shows the real default; a test keeps the list in step with the code.
+  - Hand-over message said "Your cart is saved" to businesses with no shop – only said now when there is a cart.
+  - "And What's your email" → "And what's your email".
+  - Deleting a demo business now also clears its email log, answer evidence, automation log and opportunity state.
+- **Tests:** `test/qualify.test.js` (5), `test/scenarios.test.js` (4), `test/booking-edge.test.js` (7), `test/json-logs.test.js` (4), `test/settings-defaults.test.js` (1). Full suite 340/340 locally. Checked in a browser on a local test copy: `/examples` (all six, no sideways scroll), Leads list (urgent badge, answers), Settings (ready-made questions shown, own questions saved, defaults showing Yes).
 
 ## Batch 10: Business Twin (R1.1), simple menu (R4), load test (R8)
 - **Business Twin** (`src/businessTwin.js`): "what your assistant learnt about your business", built by fixed rules from the pages and documents it holds (no AI, so nothing invented).

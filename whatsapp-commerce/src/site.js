@@ -9,6 +9,7 @@ import { rateLimit } from './routes/web.js';
 import { COMPARISONS, comparison, CHECKED_ON } from './compare.js';
 import { instantDemoRouter } from './instantDemo.js';
 import { feeCheckerRouter } from './feeChecker.js';
+import { scenariosRouter } from './scenarios.js';
 
 /*
  * The public marketing website: home, pricing, takeaways, the WhatsApp cost calculator and "book a demo".
@@ -32,6 +33,7 @@ export const PAGES = [
   { path: '/takeaways', title: () => `WhatsApp ordering for UK takeaways | ${brand()}`, description: 'Take orders and answer questions on WhatsApp automatically. No commission per order, unlike the delivery apps.' },
   { path: '/whatsapp-cost-calculator', title: () => 'WhatsApp Business API cost calculator (UK, 2026)', description: 'Work out what Meta will charge you per month. Current UK rates, free service-message allowance included.' },
   { path: '/whatsapp-fee-checker', title: () => 'WhatsApp fee checker: how much is your provider adding? (UK)', description: "See how much your WhatsApp platform adds on top of Meta's own UK message fees, per month and per year: markups, per-message fees and per-user fees." },
+  { path: '/examples', title: () => `See it handle real situations | ${brand()}`, description: 'An emergency call-out, a photo quote, a booking and more – played through the real assistant with a sample business, plus what your team receives.' },
   { path: '/demo', title: () => `Book a demo | ${brand()}`, description: `Book 20 minutes. We load your website into ${brand()} live on the call and you ask it what your customers ask you.` },
   ...COMPARISONS.map((c) => ({ path: `/${c.slug}`, title: () => c.title(brand()), description: c.description })),
 ];
@@ -104,7 +106,7 @@ function layout(path, body, { ld = [], title, description, noindex = false, extr
 <main>${body}</main>
 <footer><div class="wrap">
 <div><b style="color:var(--ink)">${esc(brand())}</b><p>An assistant for your website and WhatsApp that answers customers, takes orders and hands the tricky ones to you. Set up for you.</p></div>
-<div><ul><li><a href="/#how-it-works">How it works</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/takeaways">For takeaways</a></li><li><a href="/whatsapp-cost-calculator">WhatsApp cost calculator</a></li><li><a href="/whatsapp-fee-checker">WhatsApp fee checker</a></li><li><a href="/demo">Book a demo</a></li></ul><p style="margin:14px 0 6px;color:var(--ink)"><b>Compare</b></p><ul>${COMPARISONS.map((c) => `<li><a href="/${c.slug}">${esc(c.name)} alternative</a></li>`).join('')}</ul></div>
+<div><ul><li><a href="/#how-it-works">How it works</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/takeaways">For takeaways</a></li><li><a href="/whatsapp-cost-calculator">WhatsApp cost calculator</a></li><li><a href="/whatsapp-fee-checker">WhatsApp fee checker</a></li><li><a href="/examples">See it handle real situations</a></li><li><a href="/demo">Book a demo</a></li></ul><p style="margin:14px 0 6px;color:var(--ink)"><b>Compare</b></p><ul>${COMPARISONS.map((c) => `<li><a href="/${c.slug}">${esc(c.name)} alternative</a></li>`).join('')}</ul></div>
 <div><ul><li><a href="/legal/privacy">Privacy</a></li><li><a href="/legal/terms">Terms</a></li><li><a href="/legal/dpa">Data processing agreement</a></li>${config.supportEmail ? `<li><a href="mailto:${esc(config.supportEmail)}">${esc(config.supportEmail)}</a></li>` : ''}${config.contactPhone ? `<li><a href="tel:${esc(config.contactPhone.replace(/[^\d+]/g, ''))}">${esc(config.contactPhone)}</a></li>` : ''}</ul></div>
 <div>${l.company ? `<p>${esc(l.company)}${l.number ? `<br>Registered in England and Wales, company no. ${esc(l.number)}` : ''}${l.address ? `<br>${esc(l.address)}` : ''}</p>` : ''}</div>
 </div></footer>${chat}
@@ -461,6 +463,7 @@ function demo({ sent = false, error = '' } = {}) {
 <section class="hero"><div class="wrap" style="max-width:720px">
 <h1>See it on your own business</h1>
 <p class="lead">Twenty minutes. We load your website into ${B} live on the call, and you ask it anything your customers would. If it isn't good enough, you'll know inside five minutes.</p>
+<p class="mute">Not ready for a call? <a href="/examples">Watch it handle six real situations</a> (an emergency, a photo quote, a booking…) or <a href="/try">try it on your own website</a>.</p>
 ${config.demoUrl ? `<p><a class="btn" href="${esc(config.demoUrl)}" rel="noopener">Pick a time in our calendar</a> <span class="mute">or send us your details below and we'll get back to you.</span></p>` : ''}
 ${sent ? `<div class="callout"><h2>Thanks, we've got it</h2><p>We'll be in touch within one working day to find a time.${contactLine() ? ` If it's urgent: ${contactLine()}.` : ''}</p></div>` : `
 <form class="card" method="post" action="/demo">
@@ -500,6 +503,7 @@ export function siteRouter() {
   const html = (res, body, status = 200) => res.status(status).type('html').set('Cache-Control', 'public, max-age=300').send(body);
   r.use(instantDemoRouter(layout)); // /try – your assistant in 60 seconds
   r.use(platformHelpRouter(layout)); // /guides – how to use the product
+  r.use(scenariosRouter(layout)); // /examples – scripted scenarios through the real engine, sample business
   r.use(feeCheckerRouter(layout)); // /whatsapp-fee-checker – what your current provider adds on top of Meta
   r.get('/', (req, res) => html(res, home()));
   r.get('/pricing', (req, res) => html(res, pricing()));
