@@ -37,6 +37,7 @@ import { currentKeyId } from '../crypto.js';
 import { directConfigured } from '../ai/direct.js';
 import { difyAllowed } from '../ai/gate.js';
 import { listChatLeads, setLeadStatus, leadSpeed, updateLead, pipeline } from '../leads.js';
+import { createReportingKey, listReportingKeys, revokeReportingKey } from '../outcomes.js';
 import { sendHook, SHEETS_SCRIPT } from '../hooks.js';
 import { TRADES, tradeList, applyTrade } from '../trades.js';
 import { ratingSummary, ratingAsk, ratingsOn } from '../ratings.js';
@@ -809,7 +810,21 @@ export function adminRouter() {
     if (!results.length) return res.status(400).json({ error: 'Add a webhook address or a Google Sheets address first, and save.' });
     res.json({ results });
   });
-  r.patch('/tenants/:tenantId/leads/:id', requireTenant, (req, res) => { try { const b = req.body || {}; res.json({ ok: true, lead: updateLead(req.tenant.id, req.params.id, { status: b.status, value: b.value, notes: b.notes }) }); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
+  // read-only reporting keys for Demo Engine (src/outcomes.js): owner-only to create and revoke; shown once
+  r.get('/tenants/:tenantId/reporting-keys', requireTenant, requireOwner, (req, res) => res.json({ keys: listReportingKeys(req.tenant.id) }));
+  r.post('/tenants/:tenantId/reporting-keys', requireTenant, requireOwner, (req, res) => {
+    const by = req.isSuper ? 'platform' : 'owner';
+    const out = createReportingKey(req.tenant.id, { label: String(req.body?.label || 'Demo Engine'), by });
+    audit({ tenantId: req.tenant.id, actor: by, role: req.role, action: 'reporting_key.created', target: String(out.id), ip: req.ip });
+    res.status(201).json({ id: out.id, key: out.key, note: "Shown once. Read-only access to this business's outcome events and summary at /api/v1/outcomes." });
+  });
+  r.delete('/tenants/:tenantId/reporting-keys/:keyId', requireTenant, requireOwner, (req, res) => {
+    const n = revokeReportingKey(req.tenant.id, req.params.keyId);
+    if (!n) return res.status(404).json({ error: 'not found (or already revoked)' });
+    audit({ tenantId: req.tenant.id, actor: req.isSuper ? 'platform' : 'owner', role: req.role, action: 'reporting_key.revoked', target: String(req.params.keyId), ip: req.ip });
+    res.json({ ok: true });
+  });
+  r.patch('/tenants/:tenantId/leads/:id', requireTenant, (req, res) => { try { const b = req.body || {}; res.json({ ok: true, lead: updateLead(req.tenant.id, req.params.id, { status: b.status, value: b.value, notes: b.notes }, { actor: req.staff ? `staff:${req.staff.name}` : req.isSuper ? 'platform' : 'owner' }) }); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
   r.post('/tenants/:tenantId/conversations/:waId/resume', requireTenant, (req, res) => {
     const c = resumeAi(req.tenant.id, req.params.waId);
     res.json({ ok: true, aiPausedUntil: c.aiPausedUntil, humanHandover: c.humanHandover });

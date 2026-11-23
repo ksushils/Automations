@@ -278,32 +278,49 @@ function marketingChoice(ctx, yes) {
 export function listChatLeads(tenantId, { limit = 200 } = {}) {
   return getDb().prepare('SELECT * FROM chat_leads WHERE tenant_id = ? ORDER BY id DESC LIMIT ?').all(tenantId, limit).map((l) => ({ ...l, source: json(l.source, null), answers: json(l.answers, null) }));
 }
-export function setLeadStatus(tenantId, id, status) {
-  if (!['new', 'contacted', 'won', 'lost'].includes(status)) throw Object.assign(new Error('bad status'), { status: 400 });
-  getDb().prepare("UPDATE chat_leads SET status = ?, contacted_at = CASE WHEN ? != 'new' AND contacted_at IS NULL THEN datetime('now') ELSE contacted_at END, won_at = CASE WHEN ? = 'won' THEN COALESCE(won_at, datetime('now')) ELSE NULL END WHERE id = ? AND tenant_id = ?").run(status, status, status, Number(id), tenantId);
+/** NEW → CONTACTED → QUALIFIED → WON / LOST (any move is allowed: owners correct mistakes). Each change is kept in lead_events. */
+export const LEAD_STATUSES = ['new', 'contacted', 'qualified', 'won', 'lost'];
+export function setLeadStatus(tenantId, id, status, { actor = 'system' } = {}) {
+  if (!LEAD_STATUSES.includes(status)) throw Object.assign(new Error('bad status'), { status: 400 });
+  const d = getDb();
+  const before = d.prepare('SELECT status FROM chat_leads WHERE id = ? AND tenant_id = ?').get(Number(id), tenantId);
+  if (!before) return;
+  d.prepare(`UPDATE chat_leads SET status = ?,
+    contacted_at = CASE WHEN ? != 'new' AND contacted_at IS NULL THEN datetime('now') ELSE contacted_at END,
+    qualified_at = CASE WHEN ? IN ('qualified', 'won') AND qualified_at IS NULL THEN datetime('now') ELSE qualified_at END,
+    won_at = CASE WHEN ? = 'won' THEN COALESCE(won_at, datetime('now')) ELSE NULL END,
+    closed_at = CASE WHEN ? IN ('won', 'lost') THEN COALESCE(closed_at, datetime('now')) ELSE NULL END
+    WHERE id = ? AND tenant_id = ?`).run(status, status, status, status, status, Number(id), tenantId);
+  if (before.status !== status) d.prepare("INSERT INTO lead_events (tenant_id, lead_id, kind, from_status, to_status, actor) VALUES (?, ?, 'status', ?, ?, ?)").run(tenantId, Number(id), before.status, status, String(actor).slice(0, 80));
 }
 
 /*
  * Light CRM (R5): each lead can carry a value (what the job/order is worth, entered by the team – never guessed) and
  * notes. The pipeline totals what's open (new + contacted) and what was won this month, from those entered values only.
  */
-export function updateLead(tenantId, id, { status, value, notes } = {}) {
-  const row = getDb().prepare('SELECT id FROM chat_leads WHERE id = ? AND tenant_id = ?').get(Number(id), tenantId);
+export function updateLead(tenantId, id, { status, value, notes } = {}, { actor = 'owner' } = {}) {
+  const row = getDb().prepare('SELECT id, value FROM chat_leads WHERE id = ? AND tenant_id = ?').get(Number(id), tenantId);
   if (!row) throw Object.assign(new Error('not found'), { status: 404 });
-  if (status !== undefined && status !== '') setLeadStatus(tenantId, id, String(status));
+  // the value first, so a "won" saved together with its value carries it
+  if (status !== undefined && status !== '' && !LEAD_STATUSES.includes(String(status))) throw Object.assign(new Error('bad status'), { status: 400 });
   if (value !== undefined) {
     const v = value === null || value === '' ? null : Math.round(Number(value) * 100) / 100;
     if (v !== null && !(Number.isFinite(v) && v >= 0 && v <= 10000000)) throw Object.assign(new Error('Value must be a positive amount'), { status: 400 });
-    getDb().prepare('UPDATE chat_leads SET value = ? WHERE id = ?').run(v, row.id);
+    // provenance: who entered it and when – an owner-entered value is labelled as such, never as a verified payment
+    if (v !== row.value) {
+      getDb().prepare("UPDATE chat_leads SET value = ?, value_source = CASE WHEN ? IS NULL THEN NULL ELSE 'owner_entered' END, value_set_by = ?, value_set_at = datetime('now') WHERE id = ?").run(v, v, String(actor).slice(0, 80), row.id);
+      getDb().prepare("INSERT INTO lead_events (tenant_id, lead_id, kind, value, actor) VALUES (?, ?, 'value', ?, ?)").run(tenantId, row.id, v, String(actor).slice(0, 80));
+    }
   }
+  if (status !== undefined && status !== '') setLeadStatus(tenantId, id, String(status), { actor });
   if (notes !== undefined) getDb().prepare('UPDATE chat_leads SET notes = ? WHERE id = ?').run(String(notes ?? '').slice(0, 2000) || null, row.id);
   return getDb().prepare('SELECT * FROM chat_leads WHERE id = ?').get(row.id);
 }
 export function pipeline(tenantId) {
-  const by = Object.fromEntries(['new', 'contacted', 'won', 'lost'].map((s) => [s, { count: 0, value: 0, valued: 0 }]));
+  const by = Object.fromEntries(LEAD_STATUSES.map((s) => [s, { count: 0, value: 0, valued: 0 }]));
   for (const r of getDb().prepare('SELECT status, COUNT(*) AS n, SUM(COALESCE(value, 0)) AS v, COUNT(value) AS k FROM chat_leads WHERE tenant_id = ? GROUP BY status').all(tenantId)) if (by[r.status]) by[r.status] = { count: r.n, value: Math.round((r.v || 0) * 100) / 100, valued: r.k };
   const month = getDb().prepare("SELECT COUNT(*) AS n, SUM(COALESCE(value, 0)) AS v FROM chat_leads WHERE tenant_id = ? AND status = 'won' AND won_at >= date('now', 'start of month')").get(tenantId);
-  return { stages: by, open: { count: by.new.count + by.contacted.count, value: Math.round((by.new.value + by.contacted.value) * 100) / 100 }, wonThisMonth: { count: month.n, value: Math.round((month.v || 0) * 100) / 100 } };
+  return { stages: by, open: { count: by.new.count + by.contacted.count + by.qualified.count, value: Math.round((by.new.value + by.contacted.value + by.qualified.value) * 100) / 100 }, wonThisMonth: { count: month.n, value: Math.round((month.v || 0) * 100) / 100 } };
 }
 void config;
 

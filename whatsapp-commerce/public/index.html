@@ -21,7 +21,7 @@ input,select,textarea{width:100%;padding:8px;border:1px solid var(--line);border
 textarea{min-height:70px}
 .btn{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit}.btn:hover{background:var(--brand2)}
 .btn.ghost{background:none;color:var(--brand);border:1px solid var(--line)}
-.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;color:var(--mute)}
 .tablewrap{overflow-x:auto}
 .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;background:var(--bg);border:1px solid var(--line)}
@@ -932,9 +932,26 @@ async function help(editId) {
 }
 
 // ---------- leads (details / call-back requests from the chat) ----------
+// read-only reporting access for Demo Engine (owner only): GET /api/v1/outcomes with a key shown once
+async function reportingCard() {
+  if (S.role !== 'owner' && !S.super) return;
+  const { keys } = await api(T('/reporting-keys'));
+  const box = document.createElement('div'); box.className = 'card'; box.id = 'repcard';
+  const draw = (list, fresh) => {
+    box.innerHTML = `<h2>📊 Reporting access</h2><p class="mute">Lets your marketing dashboard (Demo Engine) read results only – enquiries, where they came from, response times, bookings, quotes, orders and the won/lost outcomes you set. Read-only, no names, phone numbers or messages. You can switch a key off at any time.</p>
+      ${fresh ? `<p class="pill warn">Copy this key now – it won't be shown again:</p><code style="display:block;word-break:break-all;padding:8px">${esc(fresh)}</code>` : ''}
+      ${list.length ? `<div class="tablewrap"><table><tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr>${list.map((k) => `<tr><td>${esc(k.label || '')}</td><td>${esc(k.created_at)} <span class="mute">(${esc(k.created_by || '')})</span></td><td>${esc(k.last_used_at || '–')}</td><td>${k.revoked_at ? '<span class="mute">switched off</span>' : `<button class="btn ghost" data-repoff="${k.id}">Switch off</button>`}</td></tr>`).join('')}</table></div>` : '<p class="mute">No keys yet.</p>'}
+      <p><button class="btn ghost" id="repnew">+ Create a reporting key</button></p>`;
+    box.querySelector('#repnew').onclick = async () => { const r = await api(T('/reporting-keys'), { method: 'POST', body: { label: 'Demo Engine' } }); draw((await api(T('/reporting-keys'))).keys, r.key); };
+    box.querySelectorAll('[data-repoff]').forEach((b) => (b.onclick = async () => { await api(T(`/reporting-keys/${b.dataset.repoff}`), { method: 'DELETE' }); draw((await api(T('/reporting-keys'))).keys); }));
+  };
+  draw(keys);
+  $('#app').appendChild(box);
+}
+
 async function leads() {
   const { leads: rows, speed, pipeline: pl } = await api(T('/leads'));
-  const st = { new: '🆕 New', contacted: '📞 Contacted', won: '✅ Won', lost: '✖ Lost' };
+  const st = { new: '🆕 New', contacted: '📞 Contacted', qualified: '⭐ Qualified', won: '✅ Won', lost: '✖ Lost' };
   const sym = S.tenant.settings.business?.currencySymbol || '£';
   const view = store.get('wc_leadview') === 'board' ? 'board' : 'list';
   const money = (n) => sym + Number(n || 0).toLocaleString('en-GB', { maximumFractionDigits: 2 });
@@ -963,6 +980,7 @@ async function leads() {
       <label>Webhook secret (optional: we sign each request with X-Signature)</label><input id="hksecret" value="${esc(S.tenant.settings.notifications?.webhookSecret || '')}">
       <p><button class="btn" id="hksave">Save</button> <button class="btn ghost" id="hktest">Send a test</button> <span id="hkres" class="mute"></span></p></div>`;
   if ($('#leadcsv')) $('#leadcsv').onclick = () => downloadCsv('leads');
+  reportingCard().catch(() => {});
   $('#hkscript').onclick = async () => { const { script } = await api(T('/hooks/sheets-script')); await navigator.clipboard.writeText(script).then(() => toast('Script copied – paste it into Apps Script'), () => prompt('Copy the script:', script)); };
   $('#hksave').onclick = async () => {
     const u = (v) => v.trim();
@@ -975,7 +993,7 @@ async function leads() {
   $('#app').querySelectorAll('[data-lview]').forEach((b) => (b.onclick = () => { store.set('wc_leadview', b.dataset.lview === 'board' ? 'board' : null); leads(); }));
   if (view === 'board' && rows.length) {
     const tw = $('#leadcard .tablewrap'); if (tw) tw.style.display = 'none';
-    const next = { new: [['contacted', '📞 Contacted']], contacted: [['won', '✅ Won'], ['lost', '✖ Lost']], won: [['contacted', '↩ Reopen']], lost: [['contacted', '↩ Reopen']] };
+    const next = { new: [['contacted', '📞 Contacted']], contacted: [['qualified', '⭐ Qualified'], ['lost', '✖ Lost']], qualified: [['won', '✅ Won'], ['lost', '✖ Lost']], won: [['qualified', '↩ Reopen']], lost: [['contacted', '↩ Reopen']] };
     const card = (l) => `<div style="background:var(--card,#fff);border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px">
       ${l.urgent ? '<span class="pill" style="background:#fde2e1;color:#b42318">🚨 Urgent</span> ' : ''}<b>${esc(l.name || l.phone || l.email || 'Lead')}</b>
       <div class="mute" style="font-size:13px">${esc(l.topic && l.topic !== 'general' ? l.topic : l.kind === 'call' ? 'Call back' : 'Details')} · ${esc(String(l.created_at).slice(0, 10))}</div>

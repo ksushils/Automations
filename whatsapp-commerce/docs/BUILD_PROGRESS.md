@@ -4,7 +4,7 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 15 (lead board, review requests after visits, trades and salons pages, audit brought up to date), 22 November 2026.
+- **Last batch:** batch 16 (customer outcome tracker and read-only outcomes API for Demo Engine), 23 November 2026 – **not deployed yet (needs approval)**.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
 - **Deploy:** ✅ **batch 15 deployed to wa.karatit.com on 22 November 2026** (server commit `6b4ed1b`; 376/377 tests in the image, 1 skipped; health ok; `/trades` and `/salons` live and in the sitemap; new lead and booking columns present; 12 businesses and 1,060 messages unchanged).
 - **Earlier:** batch 14 deployed to wa.karatit.com on 22 November 2026** (server commit `c73d241`; 372/373 tests in the image, 1 skipped; health ok; 12 businesses and 1,060 messages unchanged; no live business has WhatsApp connected yet, so no expiry warnings are due).
@@ -18,8 +18,20 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
   - **Data:** intact (14 businesses).
   - **Rollback:** `sh scripts/rollback-vps.sh`.
 - **First deploy attempts:** one merge conflict with the demo-engine branch (`server.js` imports; both kept), and a calendar test that was flaky under load (fixed). The script stopped safely each time before restarting anything.
-- **Tests:** 362 of 362 pass locally on Node 24 (batch 15). They run again inside the Node 22 image during the deploy.
+- **Tests:** 367 of 367 pass locally on Node 24 (batch 16). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
+
+## Batch 16: customer outcome tracker for Demo Engine (measurement, not a new chatbot)
+- **Audited first:** enquiries, sources, conversations, bookings, quotes, orders and the "verified" money rules already existed. Demo Engine's own `/api/internal` endpoints (on the server branch) manage demo businesses with the super-admin key and have no outcome data. Nothing was rebuilt.
+- **Lead stages NEW → CONTACTED → QUALIFIED → WON / LOST:** the Qualified stage is added to the Leads list and Board. Every change is recorded with who made it and when (`lead_events`). A value saved on a lead records `owner_entered`, who entered it and when. Saving "won" together with a value carries the value.
+- **Booking timestamps:** `confirmed_at` and `cancelled_at` are set by database triggers, so the chat, the dashboard and the Stripe deposit path all record them.
+- **Outcome events** (`src/outcomes.js`): derived from the existing records into an append-only log with a stable `event_id` (dedup) and `seq` (cursor). Re-deriving is idempotent, and the first read backfills up to 400 days. Test and simulator chats are excluded.
+- **Data minimisation:** no names, phone numbers, emails, addresses, message text, notes or staff names. Customers appear as a pseudonymous id per business; landing pages lose their query strings.
+- **Read-only reporting keys** (`rpt_…`): one per business, created by the owner (dashboard → Leads → "📊 Reporting access") or the platform operator; shown once, stored hashed, revocable, audited, 120 requests a minute. The outcomes API refuses admin, staff and super-admin keys.
+- **API v1** at `/api/v1/outcomes`: `GET /schema`, `GET /events?after=&limit=&types=`, `GET /summary?from=&to=`, with JSON errors (`invalid_parameter`, `unauthorized`, `key_revoked`, `tenant_inactive`, `rate_limited`, `not_found`, `internal`). The full contract, blocked items and the tests Demo Engine needs are in `docs/OUTCOMES_API.md`.
+- **Money provenance:** `verified_value` = paid orders + completed cash orders + accepted quotes + paid deposits (the same rules as the Results page). Owner-entered values are reported separately and never counted as verified.
+- **Not changed:** no messaging permissions, nothing sent to customers, no other repository touched, **not deployed**.
+- **Tests:** `test/outcomes.test.js` (5, fixtures only, network calls fail the test). Full suite 367/367. Checked in a browser on a local test copy: Qualified column; key created and shown once; the key reads events and summary.
 
 ## Batch 15: lead board (R5 light CRM), review requests after visits, trades and salons pages (R7), audit refresh
 - **Lead board** (Leads tab → Board): New · Contacted · Won · Lost columns, each lead with an optional value and notes entered by the team, buttons to move it on, and per-column totals. Above the list: "Open: N worth £X · Won this month: N worth £Y" – from entered values only, never estimated. Additive columns `chat_leads.value`, `notes`, `won_at`; CSV now has Status, Value and Notes. Another business can't change your leads (tested).

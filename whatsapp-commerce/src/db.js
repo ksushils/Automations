@@ -457,17 +457,62 @@ CREATE TABLE IF NOT EXISTS usage (
 
 // Columns added after v1 – applied to existing databases on start.
 const MIGRATIONS = {
-  chat_leads: { contacted_at: 'TEXT', area: 'TEXT', answers: 'TEXT', urgent: 'INTEGER DEFAULT 0', value: 'REAL', notes: 'TEXT', won_at: 'TEXT' },
+  chat_leads: { contacted_at: 'TEXT', area: 'TEXT', answers: 'TEXT', urgent: 'INTEGER DEFAULT 0', value: 'REAL', notes: 'TEXT', won_at: 'TEXT', qualified_at: 'TEXT', closed_at: 'TEXT', value_source: 'TEXT', value_set_by: 'TEXT', value_set_at: 'TEXT' },
   quotes: { photos: "TEXT NOT NULL DEFAULT '[]'" }, // photos the customer sent in the same chat (last 2 days) // area: postcode + whether it's inside the business's areas
   email_log: { delivered_at: 'TEXT', event: 'TEXT' }, // from the Resend webhook: delivered / bounced / complained
   orders: { discount: 'REAL NOT NULL DEFAULT 0', delivery_fee: 'REAL NOT NULL DEFAULT 0', promo_code: 'TEXT', slot: 'TEXT', receipt_token: 'TEXT', paid_at: 'TEXT', reminded_at: 'TEXT', stripe_session_id: 'TEXT', recovered: 'INTEGER NOT NULL DEFAULT 0', review_sent_at: 'TEXT', review_status: 'TEXT' },
   customers: { last_inbound_at: 'TEXT', winback_sent_at: 'TEXT', tags: "TEXT NOT NULL DEFAULT '[]'", attributes: "TEXT NOT NULL DEFAULT '{}'", source: 'TEXT' },
-  bookings: { reminded2_at: 'TEXT', gcal_event_id: 'TEXT', staff: 'TEXT', review_sent_at: 'TEXT', review_status: 'TEXT', completed_at: 'TEXT' },
+  bookings: { reminded2_at: 'TEXT', gcal_event_id: 'TEXT', staff: 'TEXT', review_sent_at: 'TEXT', review_status: 'TEXT', completed_at: 'TEXT', confirmed_at: 'TEXT', cancelled_at: 'TEXT' },
   conversations: { assigned_to: 'TEXT', ai_paused_until: 'TEXT' }, // ai_paused_until: owner replied from the phone (coexistence)
   messages: { processed: 'INTEGER NOT NULL DEFAULT 1', attempts: 'INTEGER NOT NULL DEFAULT 0', source: 'TEXT' }, // source: phone_app | history (coexistence)
   usage: { ai_tokens: 'INTEGER NOT NULL DEFAULT 0', ai_cost_micro: 'INTEGER NOT NULL DEFAULT 0', site_cart_adds: 'INTEGER NOT NULL DEFAULT 0' }, // micro-USD; site_cart_adds: items the chat put in the shop's own basket
   tenants: { billing_event_at: 'INTEGER', payment_failed_at: 'TEXT', referred_by: 'TEXT', referral_code: 'TEXT', owner_email: 'TEXT', stripe_customer_id: 'TEXT', subscription_id: 'TEXT', subscription_status: 'TEXT', trial_ends_at: 'TEXT' },
 };
+
+// Customer outcome tracking (src/outcomes.js): lead history, an append-only event log for reporting, and read-only
+// reporting keys. Booking confirm/cancel times are set by triggers so every path (chat, dashboard, Stripe) records them.
+const OUTCOME_SCHEMA = `
+CREATE TABLE IF NOT EXISTS lead_events (  -- each status or value change on a chat lead, with who made it
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  lead_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,            -- status | value
+  from_status TEXT,
+  to_status TEXT,
+  value REAL,
+  actor TEXT,                    -- owner | staff:<name> | platform | system
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_lead_events ON lead_events(tenant_id, lead_id, id);
+CREATE TABLE IF NOT EXISTS outcome_events (  -- append-only; seq is the reading cursor, event_id the dedup key
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  payload TEXT NOT NULL,
+  UNIQUE(tenant_id, event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_outcome_events ON outcome_events(tenant_id, seq);
+CREATE TABLE IF NOT EXISTS reporting_keys (  -- read-only, one business each, revocable; only a hash is stored
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  key_hash TEXT NOT NULL UNIQUE,
+  label TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  revoked_at TEXT,
+  last_used_at TEXT
+);
+CREATE TRIGGER IF NOT EXISTS trg_booking_confirmed_ins AFTER INSERT ON bookings WHEN NEW.status = 'confirmed' AND NEW.confirmed_at IS NULL
+  BEGIN UPDATE bookings SET confirmed_at = datetime('now') WHERE id = NEW.id; END;
+CREATE TRIGGER IF NOT EXISTS trg_booking_status AFTER UPDATE OF status ON bookings WHEN NEW.status != OLD.status
+  BEGIN
+    UPDATE bookings SET confirmed_at = COALESCE(confirmed_at, datetime('now')) WHERE id = NEW.id AND NEW.status = 'confirmed';
+    UPDATE bookings SET cancelled_at = COALESCE(cancelled_at, datetime('now')) WHERE id = NEW.id AND NEW.status IN ('cancelled', 'no_show');
+  END;
+`;
 
 export function initDb(file = config.databasePath) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
@@ -487,6 +532,7 @@ export function initDb(file = config.databasePath) {
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_receipt ON orders(receipt_token) WHERE receipt_token IS NOT NULL");
   // Meta retries webhooks: an owner's phone message or an imported history message is stored once
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_src ON messages(tenant_id, wa_message_id) WHERE wa_message_id IS NOT NULL AND direction = 'out' AND source IS NOT NULL");
+  db.exec(OUTCOME_SCHEMA);
   return db;
 }
 
