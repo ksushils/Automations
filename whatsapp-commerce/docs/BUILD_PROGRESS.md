@@ -4,9 +4,10 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 
 ## Current state
 
-- **Last batch:** batch 16 (customer outcome tracker and read-only outcomes API for Demo Engine), 23 November 2026 – **not deployed yet (needs approval)**.
+- **Last batch:** batch 16 (customer outcome tracker and read-only outcomes API for Demo Engine), 23 November 2026 – deployed with approval.
 - **Branch:** batches 1–9 are committed and pushed to `origin/main` and `claude/dazzling-darwin-uojvtj`.
-- **Deploy:** ✅ **batch 15 deployed to wa.karatit.com on 22 November 2026** (server commit `6b4ed1b`; 376/377 tests in the image, 1 skipped; health ok; `/trades` and `/salons` live and in the sitemap; new lead and booking columns present; 12 businesses and 1,060 messages unchanged).
+- **Deploy:** ✅ **batch 16 deployed to wa.karatit.com on 23 November 2026 with the owner's approval** (server commit `6f6604f`; 381/382 tests in the image, 1 skipped; health ok; no merge conflict; `/api/v1/outcomes` answers 401 `unauthorized` without a reporting key, including for admin-style keys; new tables, columns and booking triggers present; no reporting keys created on live businesses; data matches the pre-deploy snapshot – 7 businesses and 931 messages, the 5 fewer than yesterday being unclaimed instant demos that expired overnight and were cleaned up as designed).
+- **Earlier:** batch 15 deployed to wa.karatit.com on 22 November 2026** (server commit `6b4ed1b`; 376/377 tests in the image, 1 skipped; health ok; `/trades` and `/salons` live and in the sitemap; new lead and booking columns present; 12 businesses and 1,060 messages unchanged).
 - **Earlier:** batch 14 deployed to wa.karatit.com on 22 November 2026** (server commit `c73d241`; 372/373 tests in the image, 1 skipped; health ok; 12 businesses and 1,060 messages unchanged; no live business has WhatsApp connected yet, so no expiry warnings are due).
 - **Earlier:** batch 13 deployed to wa.karatit.com on 22 November 2026** (server commit `1e01ed4`; 371/372 tests in the image, 1 skipped; health ok; `/recover` answers honestly that email isn't set up; expired links refused; 12 businesses and 1,060 messages unchanged).
 - **Earlier:** batch 12 deployed to wa.karatit.com on 22 November 2026** (server commit `3a1c687`; 366/367 tests in the image, 1 skipped; health ok; `/examples` shows all 8; `bookings.staff` column present; 12 businesses and 1,060 messages unchanged; no business was affected by the Online-shop menu bug).

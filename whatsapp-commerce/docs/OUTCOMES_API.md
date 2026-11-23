@@ -2,7 +2,7 @@
 
 **Status:**
 - Built and tested on `main` (23 November 2026).
-- **Not deployed:** deploying needs the owner's approval.
+- **Deployed** to wa.karatit.com on 23 November 2026 with the owner's approval (server commit `6f6604f`). No reporting keys exist yet – each business owner (or the platform operator) creates one.
 - **Code:** `src/outcomes.js` (events, summary, keys, API) and `src/leads.js` (lead stages, history, value provenance).
 - **Tests:** `test/outcomes.test.js`.
 
@@ -166,7 +166,6 @@ The body is always `{ "error": { "code", "message" } }`.
 
 ## 8. Blocked or not available
 
-- **Not deployed.** The live server doesn't have this yet; deploying needs approval.
 - **No payment data on the live server yet.** Stripe isn't configured there and no business is paying, so `payment_recorded` and `deposit_paid` will be empty until it is.
 - **No WhatsApp conversations on the live server yet.** No business has a WhatsApp number connected, so the conversation and response-time figures will come from website chat only for now.
 - **External shop orders (Shopify/WooCommerce)** only appear here when they were created in the chat (`external_store: true`). Orders placed directly in the shop aren't visible.
