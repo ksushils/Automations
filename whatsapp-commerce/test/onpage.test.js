@@ -70,7 +70,8 @@ test('Google Calendar: signed sign-in link; busy times are kept free; confirmed 
   const u = new URL(authUrl(t.id));
   assert.equal(u.searchParams.get('scope'), 'https://www.googleapis.com/auth/calendar.freebusy https://www.googleapis.com/auth/calendar.events.owned');
   assert.equal(checkState(u.searchParams.get('state')), t.id);
-  assert.equal(checkState(u.searchParams.get('state').replace(/.$/, 'x')), null, 'tampered state refused');
+  const st = u.searchParams.get('state');
+  assert.equal(checkState(st.slice(0, -1) + (st.endsWith('x') ? 'y' : 'x')), null, 'tampered state refused'); // always a different last character (was flaky 1 in 64)
   assert.equal(checkState(u.searchParams.get('state'), Date.now() + 31 * 60000), null, 'expired');
   const calls = [];
   const real = globalThis.fetch;

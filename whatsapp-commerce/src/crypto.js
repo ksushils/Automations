@@ -64,10 +64,18 @@ export function safeEqual(a, b) {
   return A.length === B.length && crypto.timingSafeEqual(A, B);
 }
 
-/** Verify Meta's X-Hub-Signature-256 header against the raw body. */
+/**
+ * Verify Meta's X-Hub-Signature-256 header (HMAC-SHA256 of the exact raw request body with the Meta app secret).
+ * FAILS CLOSED: no secret, no raw body, or a missing / malformed header → false. (Before 24 Nov 2026 a missing
+ * secret returned true – "check disabled" – which let unsigned requests through; see docs/SECURITY_REVIEW.md S9.)
+ * The comparison is constant-time on the decoded 32-byte digests.
+ */
 export function verifyMetaSignature(rawBody, header, appSecret) {
-  if (!appSecret) return true; // signature check disabled for this tenant
-  if (!header || !header.startsWith('sha256=')) return false;
-  const expected = 'sha256=' + crypto.createHmac('sha256', appSecret).update(rawBody).digest('hex');
-  return safeEqual(expected, header);
+  if (typeof appSecret !== 'string' || appSecret.length < 8) return false;
+  if (!Buffer.isBuffer(rawBody)) return false;
+  const m = /^sha256=([0-9a-f]{64})$/i.exec(String(header || '').trim());
+  if (!m) return false;
+  const expected = crypto.createHmac('sha256', appSecret).update(rawBody).digest();
+  const given = Buffer.from(m[1], 'hex');
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected);
 }

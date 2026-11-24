@@ -72,9 +72,13 @@ test('whatsapp payload limits are enforced', () => {
 
 test('crypto: signatures, encryption, session tokens', () => {
   const body = Buffer.from('{"a":1}');
-  const sig = 'sha256=' + crypto.createHmac('sha256', 's3cret').update(body).digest('hex');
-  assert.ok(verifyMetaSignature(body, sig, 's3cret'));
-  assert.ok(!verifyMetaSignature(body, sig, 'other'));
+  const sig = 'sha256=' + crypto.createHmac('sha256', 's3cret-app-secret').update(body).digest('hex');
+  assert.ok(verifyMetaSignature(body, sig, 's3cret-app-secret'));
+  assert.ok(!verifyMetaSignature(body, sig, 'other-app-secret'));
+  // fails closed (the old version returned true when no secret was set)
+  for (const secret of [undefined, null, '', 'short']) assert.equal(verifyMetaSignature(body, sig, secret), false, `secret ${secret}`);
+  assert.equal(verifyMetaSignature(body, undefined, 's3cret-app-secret'), false);
+  assert.equal(verifyMetaSignature('{"a":1}', sig, 's3cret-app-secret'), false, 'raw Buffer only, not a re-serialised string');
   assert.equal(decrypt(encrypt('hello')), 'hello');
   const tok = createSessionToken('t1', '4477');
   assert.deepEqual(verifySessionToken(tok), { tenantId: 't1', waId: '4477' });

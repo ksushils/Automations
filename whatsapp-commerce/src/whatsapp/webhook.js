@@ -117,13 +117,32 @@ export function importHistory(tenant, value) {
   return added;
 }
 
+/**
+ * Which business an (already signature-verified) change belongs to.
+ *  - Per-business URL: the change must be for THAT business's number (or its WhatsApp Business Account when there's
+ *    no number in the change, e.g. account_update). Anything else is skipped – a body signed with a shared app
+ *    secret can't be replayed into another business's URL.
+ *  - App-level URL: by phone_number_id only; the WABA id is used only when the change carries no number at all.
+ *  Inactive businesses are skipped.
+ */
+export function resolveTenant(entry, value, tenantOverride) {
+  const pnid = value?.metadata?.phone_number_id ? String(value.metadata.phone_number_id) : null;
+  if (tenantOverride) {
+    const W = tenantOverride.settings?.whatsapp || {};
+    const ok = pnid ? !!W.phoneNumberId && String(W.phoneNumberId) === pnid : !!entry?.id && !!W.wabaId && String(W.wabaId) === String(entry.id);
+    return ok && tenantOverride.active ? tenantOverride : null;
+  }
+  const t = pnid ? findTenantByPhoneNumberId(pnid) : entry?.id ? findTenantByWabaId(entry.id) : null;
+  return t && t.active ? t : null;
+}
+
 export function processWebhookBody(body, { tenantOverride } = {}) {
   const jobs = [];
   for (const entry of body?.entry || []) {
     for (const change of entry.changes || []) {
       const value = change.value || {};
-      const tenant = tenantOverride || findTenantByPhoneNumberId(value.metadata?.phone_number_id) || (entry.id && findTenantByWabaId(entry.id));
-      if (!tenant) continue;
+      const tenant = resolveTenant(entry, value, tenantOverride);
+      if (!tenant) { console.warn(`[webhook] skipped a change for an unknown or mismatched number${tenantOverride ? ` (url business ${tenantOverride.id})` : ''}`); continue; }
       captureAccountIds(tenant, value);
       if (change.field === 'account_update') { handleAccountUpdate(tenant, value); continue; }
       if (change.field === 'smb_app_state_sync') { syncContacts(tenant, value); continue; }
@@ -161,37 +180,61 @@ export function processWebhookBody(body, { tenantOverride } = {}) {
   return Promise.all(jobs);
 }
 
+/** The app secret that signs this business's webhooks: its own Meta app's, else the platform app's. */
+export const tenantAppSecret = (tenant) => tenant?.settings?.whatsapp?.appSecret || config.metaAppSecret || '';
+
+/** Why a webhook POST can't be trusted, or null. Fails closed: no secret configured → refused. */
+export function signatureProblem(req, secret) {
+  if (!secret) return 'no_app_secret';
+  if (!Buffer.isBuffer(req.rawBody)) return 'no_raw_body';
+  const h = req.get('x-hub-signature-256');
+  if (!h) return 'missing_signature';
+  return verifyMetaSignature(req.rawBody, h, secret) ? null : 'invalid_signature';
+}
+const REJECT_STATUS = { no_app_secret: 403, no_raw_body: 400, missing_signature: 401, invalid_signature: 401 };
+const rejectLog = new Map();
+/** Refuse and log (business id, reason and IP only – never the body, the header or the secret). At most once a minute per reason. */
+function reject(res, why, tenantId, req) {
+  const k = `${tenantId || 'app'}:${why}`;
+  const now = Date.now();
+  if (now - (rejectLog.get(k) || 0) > 60000) { rejectLog.set(k, now); console.warn(`[webhook] rejected POST business=${tenantId || 'app-level'} reason=${why} ip=${req.ip}`); }
+  return res.sendStatus(REJECT_STATUS[why] || 401);
+}
+
 export function whatsappRouter() {
   const r = express.Router();
 
   // App-level webhook for numbers connected through Embedded Signup (all clients share your Meta app).
   // Messages are routed to the right client by phone_number_id.
+  // GET = Meta's one-time verification handshake only (never processes events). POST = events, always signed.
   r.get('/', (req, res) => {
-    const ok = config.metaWebhookVerifyToken && req.query['hub.mode'] === 'subscribe' && safeEqual(req.query['hub.verify_token'], config.metaWebhookVerifyToken);
-    return ok ? res.status(200).send(String(req.query['hub.challenge'])) : res.sendStatus(403);
+    const ok = !!config.metaWebhookVerifyToken && req.query['hub.mode'] === 'subscribe' && safeEqual(req.query['hub.verify_token'], config.metaWebhookVerifyToken);
+    return ok ? res.status(200).type('text/plain').send(String(req.query['hub.challenge'] ?? '').slice(0, 200)) : res.sendStatus(403);
   });
   r.post('/', (req, res) => {
-    if (!config.metaAppSecret || !verifyMetaSignature(req.rawBody || Buffer.from(''), req.get('x-hub-signature-256'), config.metaAppSecret)) return res.sendStatus(401);
+    const why = signatureProblem(req, config.metaAppSecret);
+    if (why) return reject(res, why, null, req);
     res.sendStatus(200);
-    processWebhookBody(req.body).catch((e) => console.error('[webhook]', e));
+    processWebhookBody(req.body).catch((e) => console.error('[webhook] processing failed:', e.message));
   });
 
   // Webhook verification (GET). One URL per tenant: /webhooks/whatsapp/:tenantId
   r.get('/:tenantId', (req, res) => {
     const tenant = getTenant(req.params.tenantId);
-    const ok = tenant && req.query['hub.mode'] === 'subscribe' && safeEqual(req.query['hub.verify_token'], tenant.settings.whatsapp.verifyToken);
-    if (ok) return res.status(200).send(String(req.query['hub.challenge']));
+    const token = tenant?.settings?.whatsapp?.verifyToken;
+    const ok = !!tenant && !!token && req.query['hub.mode'] === 'subscribe' && safeEqual(req.query['hub.verify_token'], token);
+    if (ok) return res.status(200).type('text/plain').send(String(req.query['hub.challenge'] ?? '').slice(0, 200));
     return res.sendStatus(403);
   });
 
   r.post('/:tenantId', (req, res) => {
     const tenant = getTenant(req.params.tenantId);
     if (!tenant || !tenant.active) return res.sendStatus(404);
-    if (!verifyMetaSignature(req.rawBody || Buffer.from(''), req.get('x-hub-signature-256'), tenant.settings.whatsapp.appSecret)) {
-      return res.sendStatus(401);
-    }
+    // the business's own Meta app secret, else the platform app's (numbers connected through Embedded Signup)
+    const why = signatureProblem(req, tenantAppSecret(tenant));
+    if (why) return reject(res, why, tenant.id, req);
     res.sendStatus(200); // acknowledge fast; Meta retries if we take > ~10s
-    processWebhookBody(req.body, { tenantOverride: tenant }).catch((e) => console.error('[webhook]', e));
+    processWebhookBody(req.body, { tenantOverride: tenant }).catch((e) => console.error('[webhook] processing failed:', e.message));
   });
 
   return r;
