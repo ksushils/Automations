@@ -1,9 +1,11 @@
 # P0: WhatsApp webhook authentication and source recovery – 24 November 2026
 
-**Status:**
-- Fix on `main` (`a7545b1`, `4ff756a`).
-- Reviewed reconciliation merge kept locally (`reconcile/p0-20261124`, `63c9775`).
-- **Production NOT yet patched:** deploying needs explicit approval.
+**Status:** ✅ **Fixed in production on 24 November 2026**, with the owner's approval, at server commit `618fc8f`.
+- The deployed code is identical to the reviewed merge `63c9775` (tree `ae4cb7d`).
+- 388 of 389 tests passed inside the image (1 skipped).
+- Health check ok; data matches the pre-deploy snapshot (5 businesses, 894 messages).
+- On the live site, all 5 businesses refuse unsigned and forged webhook POSTs (403), and so does the app-level URL. Rejections are logged with business, reason and IP only.
+- The first deploy attempt was delayed about 2 hours by a network outage (no SSH, HTTPS or ping). The machine itself stayed up; the owner restarted it from Hostinger.
 
 ## 1. Root cause
 

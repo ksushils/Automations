@@ -59,6 +59,7 @@
 | 22 November 2026 (batch 15) | Server image, Node 22, inside `deploy-vps.sh` | 377 tests, 376 pass, 0 fail, 1 skipped |
 | 23 November 2026 (batch 16) | Local, Node 24 | 367 tests, 367 pass |
 | 23 November 2026 (batch 16) | Server image, Node 22, inside `deploy-vps.sh` | 382 tests, 381 pass, 0 fail, 1 skipped |
+| 24 November 2026 (P0 webhook fix) | Local, Node 24: main 374/374; merged with production 389/389 | Server image, Node 22: 389 tests, 388 pass, 0 fail, 1 skipped |
 
 ## Performance baseline (22 November 2026, local)
 
