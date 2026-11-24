@@ -119,14 +119,16 @@ export function importHistory(tenant, value) {
 
 /**
  * Which business an (already signature-verified) change belongs to.
- *  - Per-business URL: the change must be for THAT business's number (or its WhatsApp Business Account when there's
+ *  - Per-business URL (strict – used for every HTTP request): the change must be for THAT business's number (or its WhatsApp Business Account when there's
  *    no number in the change, e.g. account_update). Anything else is skipped – a body signed with a shared app
  *    secret can't be replayed into another business's URL.
  *  - App-level URL: by phone_number_id only; the WABA id is used only when the change carries no number at all.
- *  Inactive businesses are skipped.
+ *  Inactive businesses are skipped. Direct calls from trusted code (tests, internal replays) without `strict` keep the
+ *  given business, as before.
  */
-export function resolveTenant(entry, value, tenantOverride) {
+export function resolveTenant(entry, value, tenantOverride, { strict = false } = {}) {
   const pnid = value?.metadata?.phone_number_id ? String(value.metadata.phone_number_id) : null;
+  if (tenantOverride && !strict) return tenantOverride;
   if (tenantOverride) {
     const W = tenantOverride.settings?.whatsapp || {};
     const ok = pnid ? !!W.phoneNumberId && String(W.phoneNumberId) === pnid : !!entry?.id && !!W.wabaId && String(W.wabaId) === String(entry.id);
@@ -136,12 +138,12 @@ export function resolveTenant(entry, value, tenantOverride) {
   return t && t.active ? t : null;
 }
 
-export function processWebhookBody(body, { tenantOverride } = {}) {
+export function processWebhookBody(body, { tenantOverride, strict = false } = {}) {
   const jobs = [];
   for (const entry of body?.entry || []) {
     for (const change of entry.changes || []) {
       const value = change.value || {};
-      const tenant = resolveTenant(entry, value, tenantOverride);
+      const tenant = resolveTenant(entry, value, tenantOverride, { strict });
       if (!tenant) { console.warn(`[webhook] skipped a change for an unknown or mismatched number${tenantOverride ? ` (url business ${tenantOverride.id})` : ''}`); continue; }
       captureAccountIds(tenant, value);
       if (change.field === 'account_update') { handleAccountUpdate(tenant, value); continue; }
@@ -234,7 +236,7 @@ export function whatsappRouter() {
     const why = signatureProblem(req, tenantAppSecret(tenant));
     if (why) return reject(res, why, tenant.id, req);
     res.sendStatus(200); // acknowledge fast; Meta retries if we take > ~10s
-    processWebhookBody(req.body, { tenantOverride: tenant }).catch((e) => console.error('[webhook] processing failed:', e.message));
+    processWebhookBody(req.body, { tenantOverride: tenant, strict: true }).catch((e) => console.error('[webhook] processing failed:', e.message));
   });
 
   return r;
