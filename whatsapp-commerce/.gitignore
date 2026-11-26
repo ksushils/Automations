@@ -3,3 +3,8 @@ data/
 .env
 *.db
 *.db-*
+
+# bot testing output (contains other businesses' website text – keep private, never commit)
+results*.jsonl
+findings*.csv
+sites*.txt

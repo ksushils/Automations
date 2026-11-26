@@ -84,7 +84,9 @@ async function buildDemo(tenantId, token, origin) {
   const fromMenu = pageLinks((await safeFetch(site.origin).catch(() => null))?.body || '', site.origin);
   // pages the site really links to come before guessed paths; then the ones customers ask about most (prices, contact...)
   const known = rankPaths([...fromMenu, ...fromMap]);
-  const paths = [...new Set(['/', ...known.slice(0, 20), ...usual, ...known.slice(20)])].filter((p) => !SKIP.test(p));
+  // "/about-us" and "/about-us/" are one page: read it once (the demo only reads 14)
+  const seen = new Set();
+  const paths = ['/', ...known.slice(0, 20), ...usual, ...known.slice(20)].filter((p) => { const k = p.toLowerCase().replace(/\/+$/, '') || '/'; if (seen.has(k) || SKIP.test(p)) return false; seen.add(k); return true; });
   let ok = 0;
   const deadline = Date.now() + 40000;
   for (let i = 0; i < paths.length && ok < MAX_PAGES && Date.now() < deadline; i += 4) {
