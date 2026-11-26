@@ -76,7 +76,7 @@ node --disable-warning=ExperimentalWarning src/cli/trySites.js sites.txt results
 - `chat[]`: one entry per question:
   - `q` and `a`: the question, and the reply with its buttons in `[a | b]`;
   - `by`: `ai` (the AI wrote it) or `bot` (fixed flows such as greeting, booking or handover);
-  - `flags`: for example `unsupported_figures` (a number not found in the sources), `no_source` or `price_blocked`;
+  - `flags`: for example `unsupported_figures` (a number not found in the sources), `no_source`, `price_blocked` (an amount was removed) or `time_blocked` (a time or duration was removed);
   - `sources`: the pages the answer was based on.
 
 ## 4. Choosing the sites
@@ -279,18 +279,31 @@ https://example.co.uk,shop,"Do you offer free shipping?","Yes, free shipping on 
 | Buttons, handover and fallbacks | `src/bot/engine.js` (`askDirect`, `extractChoices`, `handover`, `shortLabel`) |
 | The test tools | `src/cli/trySite.js`, `src/cli/trySites.js` |
 
-## 9. Already known (26 Nov 2026), so no need to report again
+## 9. Already known (26 Nov 2026, after batch 18), so no need to report again
 
-- **Blocked sites:** some sites block automated visits (Audley Travel, Bupa, Kwik Fit, Trailfinders, Honest Burgers). That's expected.
-- **Slow sites:** Evans Cycles timed out after 2 minutes.
-- **Chains:** for a chain, contact details can come from a corporate page. For example, mydentist read its "acquisitions" pages and gave the acquisitions email. The page choice should skip corporate, investor, legal and careers pages.
-- **Business name:** sometimes taken from the page title ("PCs & Components" for Overclockers).
-- **Demo bookings:** for clinics, salons and experiences, the demo switches on sample booking times, so the bot says "type *book* to pick a time". That's demo behaviour, but its wording for things like emergency appointments is worth a look.
-- **Different prices for one item:** when the same item has different prices on different pages (Dishoom's delivery menu £10.50 vs restaurant £11.50), the bot gives one without saying which.
-- **Fixed in batch 17, re-check it stays fixed:**
-  - "puddings" vs desserts search;
-  - prices without a £ sign;
-  - handover without asking;
-  - "we don't offer" denials;
-  - double team offers;
-  - labels cut mid-word.
+- **Blocked sites:** some sites block automated visits (Audley Travel, Bupa, Kwik Fit, Trailfinders, Honest Burgers, Rapanui, CCL, Chillblast). That's expected. Don't try to get round it.
+- **Slow sites:** Evans Cycles timed out.
+- **Business name from the page title:** when a site has no `og:site_name`, the name can be its page title ("Heating & Plumbing Stourbridge" for M.A. Parkes, "PCs & Components" for Overclockers).
+- **Demo bookings:** for clinics, salons and experiences, the demo switches on sample booking times, so the bot says "type *book* to pick a time". That's demo behaviour.
+- **Different prices for one item on different pages** (Dishoom's delivery menu vs restaurant menu): the bot gives one without saying which.
+- **Flaky test:** `webhook-security` fails about 1 run in 3. Re-run it before reporting.
+
+**Fixed in batch 18 (commit 585cef6). Re-check these, and report any that come back:**
+- **Made-up opening hours and durations:** these are now removed by a time guard. The answer then says the team can confirm, and `flags` has `time_blocked`. Check two things:
+  - real hours are **not** removed (false blocks);
+  - no invented time gets through.
+- **Phone, email and hours** on pages it read are now found (M.A. Parkes phone, Bellwether hours).
+- **Cloudflare "[email protected]"** emails are now decoded.
+- **Names with an apostrophe** ("Noah's Barber") and "&amp;" in names.
+- **Duplicate and "page not found" pages, and privacy, jobs, investor and test pages** are skipped. No more than 14 pages are read.
+- **Menu labels** are cut at a whole word, and one-page sites get a menu.
+- **Buttons that make no sense** ("Yes | Monday | Saturday", "Booking | Service | Other") are dropped.
+- **The follow-up** "and how long does that take?" now comes right after "How much does it cost?". It should answer about the price topic, or ask what "that" means.
+- **Over-merged price ranges** and "currently" when the page doesn't say so (prompt rule).
+
+**Fixed in batch 17, still re-check:**
+- "puddings" vs desserts;
+- prices without a £ sign;
+- no handover without asking;
+- no "we don't offer" denials;
+- no double team offers.
