@@ -215,7 +215,7 @@ export async function directTurn(ctx, text) {
   // keep the answer with the sources it was given, and check its figures against them (Verified answers)
   // …and never let an invented price reach the customer (settings.ai.blockUnverifiedPrices, on by default)
   try {
-    const { recordAnswer, guardPrices } = await import('../verified.js');
+    const { recordAnswer, guardPrices, guardTimes } = await import('../verified.js');
     const productText = products.map((p) => `${p.title} ${money(p.price, sym)} ${(p.variants || []).map((v) => money(v.price, sym)).join(' ')}`).join('\n');
     let blocked = [];
     if (answer && S.ai?.blockUnverifiedPrices !== false) {
@@ -226,8 +226,11 @@ export async function directTurn(ctx, text) {
       const earlier = messages.filter((m) => m.role === 'assistant' && typeof m.content === 'string').map((m) => m.content).join(' ');
       const g = guardPrices(answer, kb, { productText: `${productText} ${earlier}`, extra, customerText: text });
       if (g.blocked.length) { blocked = g.blocked; console.log('[price guard]', ctx.tenant.id, g.blocked.join(', ')); }
-      recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt, blocked });
-      answer = g.answer;
+      // …and no invented opening hours or "takes about an hour" (the shop facts in the prompt count as known)
+      const tg = guardTimes(g.answer, kb, { extra: `${messages[0].content}\n${earlier}\n${productText}`, customerText: text });
+      if (tg.blocked.length) console.log('[time guard]', ctx.tenant.id, tg.blocked.join(', '));
+      recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt, blocked, timeBlocked: tg.blocked });
+      answer = tg.answer;
     } else recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt });
   } catch (e) { console.warn('[verified answers]', e.message); }
   let shown = products;

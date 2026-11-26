@@ -79,7 +79,21 @@ export function removeDoc(tenantId, id) {
 // ---------- HTML → text & safe fetching ----------
 const decodeEntities = (s) => String(s).replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&rsquo;|&lsquo;|&#x27;/g, "'").replace(/&ldquo;|&rdquo;/g, '"').replace(/&pound;/g, '£').replace(/&mdash;|&ndash;/g, '–').replace(/&hellip;/g, '…').replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
 
-export function htmlToText(html) {
+/** Cloudflare hides email addresses as "[email protected]" with the address XOR-encoded in data-cfemail / the link. */
+export function decodeCfEmail(hex) {
+  if (!/^[0-9a-f]{4,}$/i.test(String(hex)) || hex.length % 2) return '';
+  const key = parseInt(hex.slice(0, 2), 16);
+  let out = '';
+  for (let i = 2; i < hex.length; i += 2) out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+  return /^[\w.+-]+@[\w-]+(\.[\w-]+)+$/.test(out) ? out : '';
+}
+const revealEmails = (html) => String(html)
+  .replace(/<(span|a)\b[^>]*data-cfemail=["']([0-9a-f]+)["'][^>]*>[\s\S]*?<\/\1>/gi, (m, tag, hex) => decodeCfEmail(hex) || m)
+  .replace(/href=["'][^"']*\/cdn-cgi\/l\/email-protection#([0-9a-f]+)["']/gi, (m, hex) => { const e = decodeCfEmail(hex); return e ? `href="mailto:${e}"` : m; })
+  .replace(/\[email(?:&#160;|&nbsp;|\s)protected\]/gi, '');
+
+export function htmlToText(rawHtml) {
+  const html = revealEmails(rawHtml);
   const title = decodeEntities((String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
   const main = String(html).match(/<main[\s\S]*?<\/main>/i)?.[0] || String(html).match(/<body[\s\S]*<\/body>/i)?.[0] || String(html);
   const text = main
@@ -93,7 +107,7 @@ export function htmlToText(html) {
 
     .split('\n').map((l) => decodeEntities(l).replace(/[ \t]+/g, ' ').trim().replace(/^(\|\s*)+|(\s*\|)+$/g, '').replace(/(\s*\|)+\s*\|/g, ' |')).filter(Boolean).join('\n');
   const facts = footerFacts(html).filter((l) => !text.includes(l));
-  return { title, text: facts.length ? `${text}\n\nFrom the website footer (opening hours and contact details):\n${facts.join('\n')}` : text };
+  return { title, text: facts.length ? `${text}\n\nFrom the website footer:\n${facts.join('\n')}` : text };
 }
 
 const DAY = /\b(mon|tues?|wed(nes)?|thu(rs)?|fri|sat(ur)?|sun)(day|s|\.)?\b/i;
@@ -176,6 +190,13 @@ export async function importUrl(tenantId, url, { name } = {}) {
   if (r.status !== 200) throw Object.assign(new Error(`Could not open the page (HTTP ${r.status})`), { status: 400 });
   const { title, text } = /html/.test(r.contentType) || /^\s*</.test(r.body) ? htmlToText(r.body) : { title: '', text: r.body };
   if (text.length < 80) throw Object.assign(new Error('That page has almost no text to learn from'), { status: 400 });
+  // many sites answer a missing page with "200 OK" and a "page not found" message: don't learn that
+  if (/\b(page not found|404|not be found|doesn'?t exist|no longer exists?)\b/i.test(title) || (text.length < 1500 && /\b(page (you|you're|you are) looking for|page not found|error 404|404 error|oops!? (that|this) page)\b/i.test(text.slice(0, 600)))) throw Object.assign(new Error('That page was not found'), { status: 404 });
+  // a catch-all site serves its home page at every address: skip pages whose text we already have under another address
+  const body = text.replace(/\s+/g, ' ').trim();
+  const twin = getDb().prepare("SELECT url, text FROM knowledge_docs WHERE tenant_id = ? AND status != 'deleted' AND url IS NOT NULL AND url != ? AND size BETWEEN ? AND ?").all(tenantId, r.url, Math.floor(Buffer.byteLength(body) * 0.9), Math.ceil(Buffer.byteLength(body) * 1.2) + 200)
+    .find((d) => String(d.text).replace(/^Source: .*\n+/, '').replace(/\s+/g, ' ').trim() === body);
+  if (twin) throw Object.assign(new Error(`Same text as ${twin.url}`), { status: 409 });
   return addTextDoc(tenantId, { name: name || title.replace(/\s+[–|-]\s+[^–|-]+$/, '') || r.url, text: `Source: ${r.url}\n\n${text}`, source: 'url', url: r.url });
 }
 
@@ -191,7 +212,9 @@ export async function detectWebsite(url) {
   const home = await safeFetch(origin).catch(() => null);
   const html = home?.body || '';
   const desc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)/i)?.[1] || html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)/i)?.[1] || '';
-  const name = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']+)/i)?.[1] || htmlToText(html).title.split(/[|–-]/)[0].trim();
+  // og:site_name may hold an apostrophe ("Noah's Barber") and some sites encode it twice ("&amp;amp;")
+  const og = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=(["'])(.*?)\1/i)?.[2] || html.match(/<meta[^>]+content=(["'])(.*?)\1[^>]+property=["']og:site_name["']/i)?.[2] || '';
+  const name = decodeEntities(decodeEntities(og)).trim() || decodeEntities(htmlToText(html).title).split(/\s[|–-]\s|\s?[|–]\s?/)[0].trim();
   return { platform: woo ? 'woocommerce' : 'website', origin, domain: u.hostname, name, description: stripHtml(desc) };
 }
 

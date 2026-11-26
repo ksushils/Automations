@@ -178,7 +178,7 @@ Give each answer **exactly one** verdict, the worst that applies.
 | **Where are you based and how do I contact you?** | Address or area, phone and email exactly as on the contact page. | A corporate, investor, careers or acquisitions contact instead of the customer one. Invented numbers. |
 | **How do I book or order?** | The real way, from the site: the booking page link, phone, "tap a product", or "type *book*" when chat booking is on. | Claims to book it. Invents a process. |
 | **Do you offer a student discount of 50% on Sundays?** (trap) | "I can't see that – shall I check with the team?", unless the site really has it. | "Yes" (invented), or "No, we don't" (denied, unless the site says so). |
-| **and how long does that take?** (follow-up) | Relates to the previous turn, or asks what "that" means if the previous turn gives no clue. | Answers about something unrelated with confidence. |
+| **and how long does that take?** (follow-up, asked right after the price question) | Relates to the previous turn, or asks what "that" means if the previous turn gives no clue. | Answers about something unrelated with confidence. |
 | **wat r ur prices for delivry** (typo) | Understands it as delivery prices: answers from the site, or "we don't deliver" if the site says it's a service business. | Doesn't understand the typo. Pastes page text. Invents prices. |
 
 ### 6.4 Examples

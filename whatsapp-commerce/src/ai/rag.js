@@ -195,8 +195,43 @@ export async function retrieve(tenantId, query, { k = 4 } = {}) {
     });
   }
   const top = [...ranked.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([id]) => id);
-  if (!top.length) return [];
+  // Hours and contact questions: short lines with the phone, email and opening times lose to long pages in the
+  // search, so the assistant said "check our website" while the number was on every page. Add them as one passage.
+  const contact = CONTACT_Q.test(String(query)) ? contactPassage(tenantId) : null;
+  if (!top.length) return contact ? [contact] : [];
   // documents are data: lines that try to instruct the AI are removed before anything uses the text (src/safety.js)
-  return top.map((id) => d.prepare('SELECT c.id, c.text, k.name AS doc, k.url, k.id AS docId, k.updated_at AS docUpdated FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.id = ?').get(id)).filter(Boolean)
+  const hits = top.map((id) => d.prepare('SELECT c.id, c.text, k.name AS doc, k.url, k.id AS docId, k.updated_at AS docUpdated FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.id = ?').get(id)).filter(Boolean)
     .map((c) => { const s = stripInjections(c.text); if (s.removed) console.warn(`[injection filter] removed ${s.removed} line(s) from "${c.doc}" (${tenantId})`); return s.removed ? { ...c, text: s.text, injectionRemoved: s.removed } : c; });
+  return contact ? [...hits, contact] : hits;
+}
+
+const CONTACT_Q = /\b(open(ing)?|hours?|times?|close[sd]?|when|today|tomorrow|weekends?|sundays?|saturdays?|bank holiday|contact|phone|call|ring|number|e-?mail|address|where|located|location|based|find you|visit|reach)\b/i;
+const C_DAY = /\b(mon|tues?|wed(nes)?|thu(rs)?|fri|sat(ur)?|sun)(day|s|\.)?\b|\bweekdays?\b|\bweekends?\b|\bbank holidays?\b/i;
+const C_TIME = /\b\d{1,2}([:.]\d{2})?\s*(am|pm)\b|\b\d{1,2}[:.]\d{2}\b|\b[012]\d[0-5]\d\s*[-–]\s*[012]\d[0-5]\d\b|\bclosed\b|\b24\s*hours\b|\bnoon\b/i;
+const C_PHONE = /(\+44\s?\(?0?\)?\s?|\b0)\d{2,4}[\s-]?\d{3,4}[\s-]?\d{3,4}\b/;
+const C_EMAIL = /\b[\w.+-]+@[\w-]+\.[\w.]+\b/;
+const C_POSTCODE = /\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b/;
+
+/** Lines with phone numbers, emails, postcodes and opening times from all of a shop's pages, as one passage. */
+export function contactPassage(tenantId) {
+  const rows = getDb().prepare("SELECT c.text, k.name, k.url FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.tenant_id = ? AND k.status NOT IN ('deleted', 'to_delete') ORDER BY k.id, c.idx LIMIT 400").all(tenantId);
+  const lines = [], seen = new Set();
+  let url = null;
+  for (const r of rows) {
+    for (const raw of String(r.text).split('\n')) {
+      const l = raw.replace(/\s+/g, ' ').trim();
+      if (l.length < 6 || l.length > 180 || /^Source:/i.test(l)) continue;
+      if (!((C_DAY.test(l) && C_TIME.test(l)) || /\b(opening (hours|times)|open (from|daily|every)|we are open)\b/i.test(l) || C_PHONE.test(l) || C_EMAIL.test(l) || C_POSTCODE.test(l))) continue;
+      const key = l.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lines.push(l);
+      url ||= r.url;
+      if (lines.length >= 25) break;
+    }
+    if (lines.length >= 25) break;
+  }
+  if (!lines.length) return null;
+  const text = stripInjections(lines.join('\n')).text;
+  return { id: null, doc: 'Contact details and opening times (from the website)', url, docId: null, docUpdated: null, text };
 }

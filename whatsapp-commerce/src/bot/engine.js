@@ -525,8 +525,21 @@ export function extractChoices(answer) {
   if (br && !/\[CHOICES?:/i.test(br[1])) answer = `${String(answer).slice(0, br.index)}\n[CHOICES: ${[...br[1].matchAll(/\[\s*([^\]]+?)\s*\]/g)].map((x) => x[1]).join(' | ')}]`;
   const m = String(answer || '').match(/\n*\s*\[CHOICES?:\s*([^\]]*)\]\s*$/i);
   if (!m) return { text: String(answer || '').replace(/\[CHOICES?:[^\]]*\]/gi, '').trim(), choices: [] };
-  const choices = [...new Set(m[1].split('|').map((c) => c.replace(/\s+/g, ' ').trim()).filter((c) => c && c.length <= 40))].slice(0, 3);
+  let choices = [...new Set(m[1].split('|').map((c) => c.replace(/\s+/g, ' ').trim()).filter((c) => c && c.length <= 40))].slice(0, 3);
+  if (senselessChoices(choices)) choices = [];
   return { text: String(answer).slice(0, m.index).trim(), choices };
+}
+/**
+ * Buttons that can't be a real answer to one question: "Yes" mixed with other things ("Yes | Monday | Saturday"),
+ * or two or more bare filler words ("Type | Range | Yes"). Those are dropped and the reply goes without buttons.
+ */
+const YESNO = /^(yes|no|yeah|nope|sure|ok(ay)?)\b/i;
+const FILLER = /^(yes|no|type|range|option|options|other|more|details|info|information|price|prices|item|items|product|products|service|services|category|size|colour|color|style|model|brand|date|time|day|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri|sat|sun)$/i;
+export function senselessChoices(choices) {
+  if (choices.length < 2) return false;
+  const bare = (c) => FILLER.test(c.replace(/[^\p{L}\s]/gu, '').trim());
+  if (choices.some((c) => YESNO.test(c)) && choices.some((c) => !YESNO.test(c) && bare(c))) return true;
+  return choices.filter(bare).length >= 2 && !choices.every((c) => /^(mon|tue|wed|thu|fri|sat|sun)/i.test(c)) && !choices.every((c) => YESNO.test(c));
 }
 const choiceButtons = (text, choices, topic = 'general') => ({ type: 'buttons', text, buttons: choices.map((c) => ({
   id: /\b(open|raise|log|create|submit)\s+(a\s+)?(support\s+)?ticket\b/i.test(c) ? 'ticket' : /\b(get|send me|request)\s+(a\s+)?(free\s+)?quote\b/i.test(c) ? 'quote' : /call\s*(me)?\s*back|callback|phone me|ring me/i.test(c) ? `lead:call:${topic}` : /e-?mail me|brochure|send (me )?(the )?details/i.test(c) ? `lead:email:${topic}` : `say:${c.slice(0, 200)}`,
@@ -537,8 +550,11 @@ export function shortLabel(c, max = 20) {
   const s = String(c).replace(/\s+/g, ' ').trim();
   if (s.length <= max) return s;
   const cut = s.slice(0, max - 1);
+  // cut at the last whole word ("Booking consultation" → "Booking…", not "Booking consultatio…"); only a single
+  // long word is cut inside, and an emoji with one short word ("🏠 Residential…") keeps that word
   const at = cut.lastIndexOf(' ');
-  return (at >= 8 ? cut.slice(0, at) : cut).replace(/[\s,.;:–-]+$/, '') + '…';
+  const word = at > 0 && /[\p{L}\p{N}]/u.test(cut.slice(0, at)) ? cut.slice(0, at) : cut;
+  return word.replace(/[\s,.;:–&/+-]+$/, '') + '…';
 }
 const leadTopic = (ctx, text) => String(ctx.conv.data.lastTopic || text || 'general').replace(/[\r\n]+/g, ' ').slice(0, 60);
 
@@ -1237,7 +1253,8 @@ async function askDirect(ctx, text) {
     return ctx.reply(H({ type: 'buttons', text: say, buttons: [{ id: 'human', title: '🙋 Yes, ask the team' }, { id: `lead:call:${topic}`, title: '📞 Call me back' }, { id: 'menu', title: 'No, thanks' }] }));
   }
   // the model forgot the tap options on a question: ask for them (not when products are shown or a person has taken over)
-  const choices = offered.length || shown.length || ctx.conv.humanHandover || ctx.S.ai?.suggestChoices === false ? offered : await suggestChoices(ctx, say);
+  const suggested = offered.length || shown.length || ctx.conv.humanHandover || ctx.S.ai?.suggestChoices === false ? offered : await suggestChoices(ctx, say);
+  const choices = senselessChoices(suggested) ? [] : suggested; // "Booking | Service | Other" helps nobody
   if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(H(productList(ctx, shown, say || 'Here are some products you might like:'))); }
   else if (choices.length) ctx.reply(H(choiceButtons(say || 'Which is closest?', choices, leadTopic(ctx, text))));
   else ctx.reply(H({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." }));

@@ -4,6 +4,7 @@ import { getTenant, updateTenantSettings } from './tenants.js';
 import { chatCompletion, directConfigured } from './ai/direct.js';
 import { TRADES, TRADE_KEYS, guessTrade } from './trades.js';
 import { learnedQuestions } from './learn.js';
+import { shortLabel } from './bot/engine.js';
 
 /*
  * AI auto-setup: once the assistant has read a new shop's website, the AI writes the parts we used to set up by hand –
@@ -16,6 +17,15 @@ import { learnedQuestions } from './learn.js';
  */
 const sig = (v) => createHash('sha1').update(JSON.stringify(v ?? null)).digest('hex').slice(0, 12);
 const clip = (s, n) => String(s ?? '').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+/**
+ * A menu label within WhatsApp's 24 characters, never cut mid-word. Combined emoji ("💇‍♀️" is 5 characters) become
+ * their plain base emoji ("💇") so the words fit; long labels are shortened at a word ("Residential Conveyancing"
+ * → "🏠 Residential…"), not sliced ("Residential Conveyanc").
+ */
+export function menuLabel(raw, max = 24) {
+  const s = clip(raw, 200).replace(/️?‍[\p{Extended_Pictographic}♀♂⚕⚖✈]️?/gu, '').replace(/[\u{1F3FB}-\u{1F3FF}]/gu, '');
+  return shortLabel(s, max);
+}
 const ACTIONS = new Set(['link', 'ask', 'book', 'browse', 'status', 'human']);
 
 function sitePages(tenantId, origin) {
@@ -33,7 +43,7 @@ export async function draftSetup(tenant) {
   const S = tenant.settings;
   if (!directConfigured()) return null;
   const pages = sitePages(tenant.id, S.business?.website);
-  if (pages.length < 2) return null;
+  if (!pages.length) return null; // a one-page site still gets a menu (its "ask" options answer from that page)
   const type = S.store?.type || 'manual';
   const shop = ['shopify', 'shopify_public', 'woocommerce', 'custom'].includes(type) || (type === 'manual' && (S.store?.manual?.products || []).length > 0);
   const bookings = !!S.bookings?.enabled;
@@ -69,7 +79,7 @@ export function buildSettings({ plan, pages, shop, bookings }) {
   const options = [];
   for (const o of Array.isArray(plan?.options) ? plan.options : []) {
     const action = String(o?.action || '');
-    const label = clip(o?.label, 24);
+    const label = menuLabel(o?.label);
     if (!ACTIONS.has(action) || action === 'human' || label.length < 3 || labels.has(label.toLowerCase())) continue;
     if ((action === 'browse' || action === 'status') && !shop) continue;
     if (action === 'book' && !bookings) continue;

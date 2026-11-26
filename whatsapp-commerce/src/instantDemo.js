@@ -30,7 +30,8 @@ export function demoTenantForToken(token) {
   return t && isDemo(t) ? t : null;
 }
 
-const SKIP = /\/(cart|checkout|(my-)?account|login|register|search|wp-admin|wp-login|feed|tag|author|cookie[\w-]*)\b|\.(pdf|jpe?g|png|gif|zip|xml)$/i;
+// pages customers never ask about (or that aren't for customers): legal, jobs, investors, test pages
+const SKIP = /\/(cart|checkout|(my-)?account|login|register|search|wp-admin|wp-login|feed|tag|author|cookie[\w-]*|privacy[\w-]*|gdpr|careers?|jobs?|vacanc(y|ies)|recruitment|join-(our|the)-team|work-with-us|investors?|investor-relations|acquisitions?|test(-?form|-?page)?|sample-page|hello-world|sitemap|accessibility|modern-slavery[\w-]*)(\/|$)|\.(pdf|jpe?g|png|gif|zip|xml)$/i;
 
 /** Start a demo; the reading happens in the background (status is polled). Returns { token }. */
 export async function startDemo(rawUrl, { ip = '' } = {}) {
@@ -89,8 +90,9 @@ async function buildDemo(tenantId, token, origin) {
   const paths = ['/', ...known.slice(0, 20), ...usual, ...known.slice(20)].filter((p) => { const k = p.toLowerCase().replace(/\/+$/, '') || '/'; if (seen.has(k) || SKIP.test(p)) return false; seen.add(k); return true; });
   let ok = 0;
   const deadline = Date.now() + 40000;
-  for (let i = 0; i < paths.length && ok < MAX_PAGES && Date.now() < deadline; i += 4) {
-    const batch = paths.slice(i, i + 4);
+  for (let i = 0; i < paths.length && ok < MAX_PAGES && Date.now() < deadline;) {
+    const batch = paths.slice(i, i + Math.min(4, MAX_PAGES - ok)); // never more than MAX_PAGES in all
+    i += batch.length;
     const res = await Promise.allSettled(batch.map((p) => importUrl(tenantId, site.origin + p)));
     ok += res.filter((r) => r.status === 'fulfilled').length;
     setState(token, { pages: ok, step: `Read ${ok} page${ok === 1 ? '' : 's'}` });

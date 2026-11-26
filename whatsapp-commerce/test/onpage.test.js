@@ -7,6 +7,7 @@ import { config } from '../src/config.js';
 import { getDb } from '../src/db.js';
 import { createApp } from '../src/server.js';
 import { extractShow, pageNote } from '../src/bot/engine.js';
+import { addTextDoc } from '../src/knowledge.js';
 import { authUrl, checkState, refreshBusy, _setBusyForTest } from '../src/gcal.js';
 import { freeTimes, zonedToUtc, getBooking, setBookingStatus } from '../src/bookings.js';
 
@@ -30,6 +31,8 @@ test('point to the page: the AI is told the sections; [SHOW: …] becomes a "Sho
   try {
     await withServer(async (base) => {
       const t = makeTenant();
+      // the shop's own information backs the delivery and returns times (invented times are removed by the time guard)
+      addTextDoc(t.id, { name: 'Delivery & returns', text: 'We ship in 2 days. Returns are free within 30 days of delivery.' });
       const r = await post(base, t.id, { sessionId: 'sess' + 's'.repeat(20), text: 'how long does delivery take?', page: { url: 'https://shop.test/products/tee', title: 'Tee', sections } });
       const m = r.replies.find((x) => /ships in 2 days/.test(x.text || ''));
       assert.equal(m.highlight, 'Delivery & returns');

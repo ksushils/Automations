@@ -23,6 +23,27 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 - **Tests:** 367 of 367 pass locally on Node 24 (batch 16). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
 
+## Batch 18 (26 Nov 2026): fixes from the 15-site test report
+The external test of 15 UK small-business sites scored 82% good answers, with 5.5% critical (targets: at least 85%, at most 2%). Most critical answers were made-up opening hours and durations.
+- **Time guard** (`verified.guardTimes`, wired in `ai/direct.js`): any sentence with a clock time or duration that isn't in the sources, the shop facts or earlier replies is removed. The customer is told the team can confirm instead. The answer is flagged `time_blocked`.
+- **Figures:** handles 24-hour ranges ("0800 – 1830"), "1:00 pm" (no stray "1:00"), "9.30am", noon, "2 working days", and duration ranges ("2 or 3 hours").
+- **Contact and hours passage** (`rag.contactPassage`): questions about hours or contact always get the lines with the phone, email, postcode and opening times from all pages.
+- **Reading pages** (`knowledge.js`):
+  - Cloudflare-hidden emails are decoded.
+  - The footer note no longer claims to hold opening hours.
+  - "Page not found" pages and copies of a page already read are skipped.
+  - The name comes from `og:site_name`, which may contain an apostrophe or be double-encoded.
+- **Instant demo:** skips privacy, jobs, investor and test pages, and never reads more than 14 pages.
+- **Auto-setup:** a one-page site gets a menu too. Labels fit 24 characters at a word, and combined emoji count as one.
+- **Buttons:** sets that make no sense ("Yes | Monday | Saturday", "Booking | Service | Other") are dropped. `shortLabel` cuts at the last whole word.
+- **Prompt:** no "usual" hours or durations; each item's own price; no "currently" unless the page says so; unclear "that/it" gets a question; the phone and email rather than "visit our website"; buttons only from the shop's information.
+- **trySite:** the follow-up "and how long does that take?" now comes right after "How much does it cost?".
+- **Live re-check** (5 of the sites, real AI): no invented hours; phone and hours now found; one page instead of 14 copies; "Noah's Barber" named correctly; unclear follow-ups get a question.
+- **Still open:**
+  - M.A. Parkes is still named after its page title ("Heating & Plumbing Stourbridge"), because the site has no `og:site_name`.
+  - `webhook-security` is flaky: it fails about 1 run in 3 on its own, with or without these changes.
+- **Tests:** `test/batch18-findings.test.js` (11 tests). `onpage.test.js` now gives the shop a delivery page, because the time guard removes made-up delivery times.
+
 ## Batch 17 (26 Nov 2026): answer quality, from trying the assistant on real websites
 
 **New tool:** `src/cli/trySite.js <url> ["question" ...]` sets up a throwaway business from any public website, exactly like an instant demo, and prints the conversation. It runs on an in-memory database, with email and alerts blanked, so nothing is sent. It costs about a penny per site.

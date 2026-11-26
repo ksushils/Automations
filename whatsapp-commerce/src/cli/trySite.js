@@ -40,7 +40,8 @@ const tenant = getTenant(st.tenantId);
 const docs = listDocs(tenant.id);
 const out = { url, ok: true, name: tenant.settings.business.name, trade: tenant.settings.trade || null, model: config.aiModel, pages: docs.map((d) => d.url || d.name), setupSeconds: Math.round((Date.now() - t0) / 1000), menu: (tenant.settings.welcomeMenu?.options || []).map((o) => o.label), chat: [] };
 
-const STANDARD = ['hi', 'What are your opening hours?', 'How much does it cost?', 'Where are you based and how do I contact you?', 'How do I book or order?', 'Do you offer a student discount of 50% on Sundays?', 'and how long does that take?', 'wat r ur prices for delivry'];
+// the follow-up comes straight after the price question, so 'that' has something to refer to
+const STANDARD = ['hi', 'What are your opening hours?', 'How much does it cost?', 'and how long does that take?', 'Where are you based and how do I contact you?', 'How do I book or order?', 'Do you offer a student discount of 50% on Sundays?', 'wat r ur prices for delivry'];
 const questions = asked.length ? asked : [...(st.suggestions || []), ...STANDARD];
 const text = (m) => [m.text, m.body, m.caption, m.buttons && `[${m.buttons.map((b) => b.title).join(' | ')}]`, m.sections && `[list: ${m.sections.flatMap((s) => s.rows.map((r) => r.title)).join(' | ')}]`, m.url && `(${m.buttonText || 'link'}: ${m.url})`].filter(Boolean).join(' ');
 const waId = 'web:trysite' + Math.random().toString(36).slice(2, 10);
