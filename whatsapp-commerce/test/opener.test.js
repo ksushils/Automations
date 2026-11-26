@@ -139,3 +139,20 @@ test('the model forgot the tap options on a question: a short follow-up call sug
     });
   } finally { Object.assign(config, prev); llm.srv.close(); }
 });
+
+test('pop-up with a long menu: 2–3 buttons plus "More options", which opens the full menu', () => withServer(async (base) => {
+  const options = Array.from({ length: 9 }, (_, i) => ({ label: `Option ${i + 1}`, action: 'answer', value: `Answer ${i + 1}` }));
+  const t = makeTenant({ store: { type: 'none' }, welcomeMenu: { enabled: true, intro: 'Choose:', options } });
+  const cfg = openerConfig(tenants.getTenant(t.id));
+  assert.equal(cfg.chips.length, 3);
+  assert.equal(cfg.menuTotal, 9, 'the widget knows more options exist');
+  const js = await (await fetch(`${base}/chat-widget/${t.id}.js`)).text();
+  assert.doesNotThrow(() => new Function(js), 'the widget script is valid JavaScript');
+  assert.match(js, /More options/);
+  const r = await post(base, t.id, { sessionId: SID(), actionId: 'menu' });
+  const list = r.replies.find((x) => x.type === 'list');
+  assert.equal(list.sections[0].rows.length, 9, 'every option is reachable');
+  // a short menu needs no "More" button
+  const s = makeTenant({ welcomeMenu: { enabled: true, options: options.slice(0, 2) } });
+  assert.equal(openerConfig(tenants.getTenant(s.id)).menuTotal, 2);
+}));

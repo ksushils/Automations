@@ -116,7 +116,8 @@ export function openerConfig(t) {
     ...(Array.isArray(O.pages) ? O.pages : []).filter((r) => r?.match && r?.text).slice(0, 20).map((r) => ({ m: String(r.match).toLowerCase().slice(0, 100), t: String(r.text).slice(0, 200) })),
     ...(O.pageRules === false ? [] : PAGE_OPENERS.map((r) => ({ m: r.match, t: r.text, re: 1 }))),
   ];
-  const own = menuOptions(t.settings).slice(0, 3).map((o, i) => ({ id: `wm:${i}`, label: String(o.label).trim().slice(0, 24) }));
+  const menuAll = menuOptions(t.settings);
+  const own = menuAll.slice(0, 3).map((o, i) => ({ id: `wm:${i}`, label: String(o.label).trim().slice(0, 24) }));
   const S = t.settings;
   const chips = own.length ? own : S.store?.type === 'none'
     ? [{ id: 'book', label: String(S.business.bookingButton || '📅 Book now').slice(0, 24) }, { id: 'ask', label: '❓ Ask a question' }, { id: 'human', label: '🙋 Talk to a person' }]
@@ -127,7 +128,7 @@ export function openerConfig(t) {
   const hosts = [S.store?.shopify?.domain, S.store?.shopify?.origin, S.store?.woocommerce?.url, S.business?.website, ...(S.store?.siteDomains || [])].map((x) => host(x || '')).filter(Boolean);
   const freeDelivery = Number(S.webchat?.freeDeliveryOver ?? S.ordering?.freeDeliveryOver) || 0;
   const ab = O.textB && O.abStarted ? { b: String(O.textB).slice(0, 200), holdout: Math.max(0, Math.min(50, Number(O.holdout ?? 10))) / 100 } : null;
-  return { ab, text: String(O.text || DEFAULT_OPENER).slice(0, 200), rules, chips: O.chips === false ? [] : chips, delay: n(O.delaySeconds, 10, 120), mobileDelay: n(O.mobileDelaySeconds, 15, 180), exit: O.exitIntent !== false,
+  return { ab, text: String(O.text || DEFAULT_OPENER).slice(0, 200), rules, chips: O.chips === false ? [] : chips, menuTotal: O.chips === false ? 0 : menuAll.length, delay: n(O.delaySeconds, 10, 120), mobileDelay: n(O.mobileDelaySeconds, 15, 180), exit: O.exitIntent !== false,
     site: platform && hosts.length && S.ordering?.siteCart !== false ? { platform, hosts: [...new Set(hosts)] } : null, freeDelivery, sym: S.business?.currencySymbol || '£' };
 }
 export { openerFor };
@@ -593,7 +594,9 @@ if(L&&O){
     var gap=O.freeDelivery?O.freeDelivery-CART.total:0;
     if(c.item_count&&gap>0){O.cartNudge='🚚 You\'re '+O.sym+gap.toFixed(2)+' away from free delivery. Want a suggestion to add?';O.chips=[{id:'say:Suggest something to add to my basket to reach free delivery',label:'💡 Suggest something'}].concat(O.chips).slice(0,3)}}).catch(function(){});
   var show=function(){if(shown||open||!L)return;shown=true;mark(K+'-shown','1',1);
-    L.querySelector('span').innerHTML='<b>'+esc(C.title)+'</b>'+esc(textFor())+(O.chips.length?'<div class="wc-lc">'+O.chips.slice(0,mobile?2:3).map(function(c){return '<button data-a="'+esc(c.id)+'" data-l="'+esc(c.label)+'">'+esc(c.label)+'</button>'}).join('')+'</div>':'')+'<form class="wc-lf"><input placeholder="Type your question…" aria-label="Type your question" maxlength="500"><button type="submit">Send</button></form>';
+    // the bubble has room for 2–3 buttons; when the business's own menu has more, the last one opens the full menu
+    function chipsShown(){var v=O.chips.slice(0,mobile?2:3),own=v.filter(function(c){return /^wm:/.test(c.id)}).length;if((O.menuTotal||0)>own)v.push({id:'menu',label:'☰ More options'});return v}
+    L.querySelector('span').innerHTML='<b>'+esc(C.title)+'</b>'+esc(textFor())+(O.chips.length?'<div class="wc-lc">'+chipsShown().map(function(c){return '<button data-a="'+esc(c.id)+'" data-l="'+esc(c.label)+'">'+esc(c.label)+'</button>'}).join('')+'</div>':'')+'<form class="wc-lf"><input placeholder="Type your question…" aria-label="Type your question" maxlength="500"><button type="submit">Send</button></form>';
     var LF=L.querySelector('.wc-lf');LF.onsubmit=function(e){e.preventDefault();e.stopPropagation();var v=LF.querySelector('input').value.trim();if(!v)return;toggle({text:v},v)};LF.onclick=function(e){e.stopPropagation()};
     L.style.display='';};
   if(AB==='H'||got(K+'-chatted',1)||got(K+'-closed',1)||got(K+'-shown',1)){L.remove();L=null}

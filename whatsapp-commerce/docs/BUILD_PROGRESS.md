@@ -23,6 +23,12 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 - **Tests:** 367 of 367 pass locally on Node 24 (batch 16). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
 
+## Fix (26 Nov 2026): "More options" in the website pop-up
+
+- The pop-up greeting beside the chat button shows only 3 buttons (2 on phones). A business with a longer welcome menu (Travel Rise has 9 options) had the rest hidden until the visitor opened the chat.
+- When the menu has more options than fit, the last button is now "☰ More options", which opens the full menu in the chat (`openerConfig().menuTotal`, `chipsShown()` in the widget).
+- Test: `test/opener.test.js` (9-option menu: 3 buttons plus More; the full list has all 9; the widget script parses).
+
 ## Batch 16: customer outcome tracker for Demo Engine (measurement, not a new chatbot)
 - **Audited first:** enquiries, sources, conversations, bookings, quotes, orders and the "verified" money rules already existed. Demo Engine's own `/api/internal` endpoints (on the server branch) manage demo businesses with the super-admin key and have no outcome data. Nothing was rebuilt.
 - **Lead stages NEW → CONTACTED → QUALIFIED → WON / LOST:** the Qualified stage is added to the Leads list and Board. Every change is recorded with who made it and when (`lead_events`). A value saved on a lead records `owner_entered`, who entered it and when. Saving "won" together with a value carries the value.
