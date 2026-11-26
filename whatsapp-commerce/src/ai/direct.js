@@ -222,7 +222,9 @@ export async function directTurn(ctx, text) {
       // known amounts: the shop's own fees, the basket, and (for the built-in catalogue) every listed price
       const catalogue = S.store?.type === 'manual' ? (S.store.manual?.products || []).flatMap((p) => [p.price, ...(p.variants || []).map((v) => v.price)]) : [];
       const extra = [S.ordering?.deliveryFee, S.ordering?.freeDeliveryOver, S.ordering?.minimumOrder, ...(ctx.conv.cart || []).map((i) => i.price), ...catalogue];
-      const g = guardPrices(answer, kb, { productText, extra, customerText: text });
+      // amounts the assistant already gave earlier in this chat were checked against the shop's information then
+      const earlier = messages.filter((m) => m.role === 'assistant' && typeof m.content === 'string').map((m) => m.content).join(' ');
+      const g = guardPrices(answer, kb, { productText: `${productText} ${earlier}`, extra, customerText: text });
       if (g.blocked.length) { blocked = g.blocked; console.log('[price guard]', ctx.tenant.id, g.blocked.join(', ')); }
       recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt, blocked });
       answer = g.answer;

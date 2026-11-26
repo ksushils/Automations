@@ -99,8 +99,8 @@ function customMenu(ctx, intro) {
   if (!opts.length) return null;
   const ask = String(ctx.S.welcomeMenu.intro || '').trim() || 'How can we help?';
   const text = intro ? `${intro}\n\n${ask}` : ask;
-  if (opts.length <= 3) return { type: 'buttons', text, buttons: opts.map((o, i) => ({ id: `wm:${i}`, title: String(o.label).trim().slice(0, 20) })) };
-  return { type: 'list', text, button: String(ctx.S.welcomeMenu.button || 'Choose').slice(0, 20), sections: [{ title: 'Options', rows: opts.map((o, i) => ({ id: `wm:${i}`, title: String(o.label).trim().slice(0, 24), ...(o.description ? { description: String(o.description).slice(0, 72) } : {}) })) }] };
+  if (opts.length <= 3) return { type: 'buttons', text, buttons: opts.map((o, i) => ({ id: `wm:${i}`, title: shortLabel(o.label, 20) })) };
+  return { type: 'list', text, button: String(ctx.S.welcomeMenu.button || 'Choose').slice(0, 20), sections: [{ title: 'Options', rows: opts.map((o, i) => ({ id: `wm:${i}`, title: shortLabel(o.label, 24), ...(o.description ? { description: String(o.description).slice(0, 72) } : {}) })) }] };
 }
 async function runMenuOption(ctx, i) {
   const o = menuOptions(ctx.S)[i];
@@ -530,8 +530,16 @@ export function extractChoices(answer) {
 }
 const choiceButtons = (text, choices, topic = 'general') => ({ type: 'buttons', text, buttons: choices.map((c) => ({
   id: /\b(open|raise|log|create|submit)\s+(a\s+)?(support\s+)?ticket\b/i.test(c) ? 'ticket' : /\b(get|send me|request)\s+(a\s+)?(free\s+)?quote\b/i.test(c) ? 'quote' : /call\s*(me)?\s*back|callback|phone me|ring me/i.test(c) ? `lead:call:${topic}` : /e-?mail me|brochure|send (me )?(the )?details/i.test(c) ? `lead:email:${topic}` : `say:${c.slice(0, 200)}`,
-  title: c.slice(0, 20),
+  title: shortLabel(c),
 })) });
+/** A button label within WhatsApp's 20 characters, cut at a word ("What dishes do you h" → "What dishes do you…"). */
+export function shortLabel(c, max = 20) {
+  const s = String(c).replace(/\s+/g, ' ').trim();
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max - 1);
+  const at = cut.lastIndexOf(' ');
+  return (at >= 8 ? cut.slice(0, at) : cut).replace(/[\s,.;:–-]+$/, '') + '…';
+}
 const leadTopic = (ctx, text) => String(ctx.conv.data.lastTopic || text || 'general').replace(/[\r\n]+/g, ' ').slice(0, 60);
 
 /** Where a website visitor is right now (sent by the chat widget), for the AI. */
@@ -583,7 +591,9 @@ async function askAi(ctx, text) {
   const answer = toWhatsAppFormatting(res.answer);
   noteGap(ctx, text, answer);
   if (/\[HANDOVER\]/i.test(answer)) {
-    ctx.reply({ type: 'text', text: answer.replace(/\[HANDOVER\]/gi, '').trim() || 'Let me get a team member for you.' });
+    const said = answer.replace(/\[HANDOVER\]/gi, '').replace(/\[CHOICES?:[^\]]*\]/gi, '').trim();
+    if (offersPerson(said) && !wantsPerson(text)) return ctx.reply({ type: 'buttons', text: said, buttons: [{ id: 'human', title: '🙋 Yes, please' }, { id: 'menu', title: 'No, thanks' }] });
+    ctx.reply({ type: 'text', text: said || 'Let me get a team member for you.' });
     return handover(ctx);
   }
   // Agent mode: if the agent searched the catalogue this turn, attach those products as a tappable list.
@@ -604,6 +614,11 @@ function noteGap(ctx, question, answer) {
     else if (/\[HANDOVER\]/i.test(answer)) recordUnanswered(ctx.tenant.id, ctx.conv.waId, question, answer, 'handover');
   } catch (e) { console.warn('[unanswered]', e.message); }
 }
+
+/** The reply ASKS whether they'd like a person ("Would you like me to get someone from the team?"). */
+export const offersPerson = (s) => /\b(would you like|shall i|should i|do you want|want me to|can i)\b[^?]{0,80}\b(team|someone|person|colleague|staff|human|agent)\b[^?]{0,60}\?/i.test(String(s));
+/** The customer asked for a person, complained, or reported a problem – a handover needs no extra yes. */
+export const wantsPerson = (s) => /\b(human|real person|a person|someone|staff|team|agent|manager|speak|talk to|call me|ring me|complain|complaint|refund|wrong|broken|damaged|late|missing|never arrived|not arrived|unhappy|angry|terrible|awful)\b/i.test(String(s));
 
 function handover(ctx, text) {
   // outside team hours: don't promise a quick reply – the assistant keeps helping and the team gets their details
@@ -1194,7 +1209,9 @@ async function askDirect(ctx, text) {
   const out = toWhatsAppFormatting(answer);
   noteGap(ctx, text, out);
   if (/\[HANDOVER\]/i.test(out)) {
-    ctx.reply({ type: 'text', text: out.replace(/\[HANDOVER\]/gi, '').trim() || 'Let me get a team member for you.' });
+    const said = out.replace(/\[HANDOVER\]/gi, '').replace(/\[CHOICES?:[^\]]*\]/gi, '').trim();
+    if (offersPerson(said) && !wantsPerson(text)) return ctx.reply({ type: 'buttons', text: said, buttons: [{ id: 'human', title: '🙋 Yes, please' }, { id: 'menu', title: 'No, thanks' }] });
+    ctx.reply({ type: 'text', text: said || 'Let me get a team member for you.' });
     return handover(ctx);
   }
   // The tappable list should be the products the AI talked about: those it named (matched against what it was shown,
@@ -1213,7 +1230,12 @@ async function askDirect(ctx, text) {
   }
   const named = await namedProducts(ctx, plain, products);
   const shown = named.length ? named : /view products/i.test(plain) || S_agent(ctx) ? products : [];
-  const say = shown.length ? plain : plain.replace(/\n*\s*Tap \*?View products\*? below to order\s*👇?[.!\s]*$/i, '').trim();
+  const say = shown.length ? plain : plain.replace(/\n*\s*Tap \*?View products\*? below to order\s*👇?[.!]?/gi, ' ').replace(/[ \t]{2,}/g, ' ').trim();
+  if (!shown.length && !ctx.conv.humanHandover && (offersPerson(say) || /\b(check|ask|confirm) (this |that |it )?with (the|our) team\b/i.test(say))) {
+    ctx.conv.data.unsureRun = 0;
+    const topic = leadTopic(ctx, text);
+    return ctx.reply(H({ type: 'buttons', text: say, buttons: [{ id: 'human', title: '🙋 Yes, ask the team' }, { id: `lead:call:${topic}`, title: '📞 Call me back' }, { id: 'menu', title: 'No, thanks' }] }));
+  }
   // the model forgot the tap options on a question: ask for them (not when products are shown or a person has taken over)
   const choices = offered.length || shown.length || ctx.conv.humanHandover || ctx.S.ai?.suggestChoices === false ? offered : await suggestChoices(ctx, say);
   if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(H(productList(ctx, shown, say || 'Here are some products you might like:'))); }

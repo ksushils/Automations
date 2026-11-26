@@ -23,6 +23,25 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 - **Tests:** 367 of 367 pass locally on Node 24 (batch 16). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
 
+## Batch 17 (26 Nov 2026): answer quality, from trying the assistant on real websites
+
+**New tool:** `src/cli/trySite.js <url> ["question" ...]` sets up a throwaway business from any public website, exactly like an instant demo, and prints the conversation. It runs on an in-memory database, with email and alerts blanked, so nothing is sent. It costs about a penny per site.
+
+**Sites tried:** Dishoom, Pimlico Plumbers, Beardbrand, Hershesons, Red Letter Days and travelrise.in. Audley Travel, Bupa and Franco Manca block automated visits; the demo says so and offers a hand set-up, and the bot does not try to get round the block.
+
+**Fixes:**
+- **Meaning-based search is now on.** `EMBEDDINGS_MODEL` was empty, so the bot searched by keywords alone, and "puddings" missed the desserts page. With the AI on OpenRouter and no separate key, it now uses the same key with `openai/text-embedding-3-small` (about $0.02 per million words), under the same provider rules (`data_collection: deny`). `EMBEDDINGS_AUTO=false` turns this off. An hourly job (`kb-embeddings`) adds vectors to pages learnt before.
+- **Price guard:**
+  - an amount the assistant already gave earlier in the chat can be repeated (Hershesons' "free over £45" had been removed);
+  - menu prices printed without £ ("Lamb Samosas 8.20") count as known amounts (every Dishoom dessert price had been removed).
+- **Handover:** "Would you like me to get someone from the team?" plus [HANDOVER] in the same reply used to hand the chat over without a yes, after which the bot went silent. Now the customer gets Yes / No buttons. A customer who asks for a person or complains is still handed over straight away.
+- **One offer, not two:** a reply that already offers to check with the team gets one set of real buttons (Yes, ask the team / Call me back / No, thanks), instead of the AI's own options followed by a second "Sorry I couldn't answer…" message.
+- **Prompt:** the bot no longer says the shop "doesn't offer" something its information doesn't mention. It now says it can't see it and offers to check.
+- **Labels:** buttons and menu labels are cut at a word ("What dishes do you…", not "What dishes do you h").
+- **Tap prompt:** "Tap View products" is no longer shown when there are no products.
+
+**Tests:** `test/answer-quality.test.js` (9 tests). Suite: 384/384.
+
 ## Fix (26 Nov 2026): "More options" in the website pop-up
 
 - The pop-up greeting beside the chat button shows only 3 buttons (2 on phones). A business with a longer welcome menu (Travel Rise has 9 options) had the rest hidden until the visitor opened the chat.

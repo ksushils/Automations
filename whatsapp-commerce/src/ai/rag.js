@@ -23,14 +23,27 @@ export function chunkText(text, { size = 900, overlap = 150 } = {}) {
   return chunks.map((c) => c.trim()).filter((c) => c.length > 20);
 }
 
-// ---------- embeddings (optional) ----------
-export const embeddingsEnabled = () => !!(config.embeddingsModel && config.embeddingsApiKey);
+// ---------- embeddings ----------
+// Meaning-based search ("puddings" finds the desserts page, "postage" finds delivery). Uses EMBEDDINGS_* when set;
+// otherwise, when the AI runs on OpenRouter, the same key with OpenAI's small embeddings model (about $0.02 per
+// million words). EMBEDDINGS_AUTO=false keeps keyword search only.
+export const AUTO_EMBEDDINGS_MODEL = 'openai/text-embedding-3-small';
+export function embeddingsConfig() {
+  if (config.embeddingsModel && config.embeddingsApiKey) return { base: config.embeddingsBaseUrl, key: config.embeddingsApiKey, model: config.embeddingsModel };
+  if (config.embeddingsAuto && config.aiApiKey && /openrouter\.ai/.test(config.aiBaseUrl)) return { base: config.aiBaseUrl, key: config.aiApiKey, model: AUTO_EMBEDDINGS_MODEL, openrouter: true };
+  return null;
+}
+export const embeddingsEnabled = () => !!embeddingsConfig();
 
 export async function embed(texts) {
-  const res = await fetch(`${config.embeddingsBaseUrl}/embeddings`, {
+  const c = embeddingsConfig();
+  if (!c) throw new Error('embeddings are not configured');
+  // the same data rules as the chat itself (no providers that train on prompts; named providers only)
+  const provider = c.openrouter ? (await import('./direct.js')).providerPrefs() : undefined;
+  const res = await fetch(`${c.base}/embeddings`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${config.embeddingsApiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: config.embeddingsModel, input: texts }),
+    headers: { Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: c.model, input: texts, ...(provider ? { provider } : {}) }),
     signal: AbortSignal.timeout(60000),
   });
   const data = await res.json().catch(() => ({}));
@@ -41,6 +54,7 @@ export async function embed(texts) {
 const toBlob = (v) => Buffer.from(v.buffer, v.byteOffset, v.byteLength);
 const fromBlob = (b) => new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
 function cosine(a, b) {
+  if (a.length !== b.length) return 0; // made with a different model: ignore until re-embedded
   let d = 0, na = 0, nb = 0;
   for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
   return d / (Math.sqrt(na * nb) || 1);
@@ -76,6 +90,24 @@ export async function indexDoc(doc) {
     }
   }
   return chunks.length;
+}
+
+/**
+ * Add vectors to chunks that have none (pages learnt while embeddings were off, or after a failed call).
+ * Runs in the background, a few hundred chunks per call. Returns how many were embedded.
+ */
+export async function backfillEmbeddings({ max = 640 } = {}) {
+  if (!embeddingsEnabled()) return 0;
+  const d = getDb();
+  const rows = d.prepare("SELECT c.id, c.text FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.embedding IS NULL AND k.status NOT IN ('deleted', 'to_delete') ORDER BY c.id DESC LIMIT ?").all(max);
+  let n = 0;
+  for (let i = 0; i < rows.length; i += 64) {
+    const batch = rows.slice(i, i + 64);
+    const vecs = await embed(batch.map((r) => r.text));
+    vecs.forEach((v, j) => d.prepare('UPDATE knowledge_chunks SET embedding = ? WHERE id = ?').run(toBlob(v), batch[j].id));
+    n += batch.length;
+  }
+  return n;
 }
 
 /** Index every live document of a tenant that has no chunks yet (or all with force). */

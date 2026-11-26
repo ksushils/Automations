@@ -1,8 +1,10 @@
 process.env.ENCRYPTION_KEY = 'test-encryption-key-test-encryption-key';
 process.env.SUPER_ADMIN_KEY = 'super-admin-test-key';
 process.env.PUBLIC_URL = 'http://localhost:0';
+process.env.EMBEDDINGS_AUTO = 'false'; // tests never call a real embeddings API (rag tests switch it on with a fake)
 const { initDb } = await import('../src/db.js');
 initDb(':memory:');
+(await import('../src/config.js')).config.embeddingsAuto = false; // even if config loaded before this file
 export const tenants = await import('../src/tenants.js');
 export const engine = await import('../src/bot/engine.js');
 export const cloud = await import('../src/whatsapp/cloudApi.js');

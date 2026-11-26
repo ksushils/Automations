@@ -106,6 +106,8 @@ export function startJobs() {
     track('retention', H1, () => import('./verified.js').then(({ purgeAnswers }) => log('retention')({ ...applyRetention(), emails: purgeEmailLog(), answers: purgeAnswers(), automation: purgeAutomationLog() })));
     track('whatsapp-health', H1, () => import('./waHealth.js').then(({ runConnectionChecks }) => runConnectionChecks()).then(log('whatsapp health')));
     track('db-integrity', H1, () => { if (Date.now() - (globalThis.__integrityAt || 0) < 24 * H1) return 'skipped'; globalThis.__integrityAt = Date.now(); return integrityCheck(); });
+    // meaning-based search: vectors for pages learnt before embeddings were on (a few hundred chunks an hour)
+    track('kb-embeddings', H1, () => import('./ai/rag.js').then(({ backfillEmbeddings }) => backfillEmbeddings()).then((n) => (n ? log('embeddings')({ added: n }) : 0)));
     // keep knowledge bases in step with the shops' websites (weekly per shop, one shop per hour)
     track('kb-refresh', H1, () => import('./dify/provision.js').then(({ knowledgeChanged }) => runWeeklyRefresh({ onChange: (id) => knowledgeChanged(id) }))
       .then((r) => { if (r) console.log('[kb refresh]', JSON.stringify({ updated: r.updated, added: r.added, removed: r.removed, failed: r.failed })); return r ? { updated: r.updated, failed: r.failed } : null; }));

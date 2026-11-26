@@ -68,6 +68,8 @@ export function guardPrices(answer, sources = [], { productText = '', extra = []
   if (!inAnswer.length) return { answer, blocked: [] };
   const knownNums = new Set();
   for (const f of [...sources.flatMap((s) => [...figures(s.text)]), ...figures(productText), ...extra.filter((x) => Number(x) > 0).map((x) => '£' + Number(x))]) if (/^[£$€]/.test(f)) knownNums.add(Number(f.slice(1)));
+  // menus and price lists often print amounts without the currency sign ("Lamb Samosas 8.20"): two decimals count
+  for (const s of sources) for (const m of String(s.text || '').matchAll(/(?<![\d.,£$€])(\d{1,4}\.\d{2})(?![\d.%])/g)) knownNums.add(Number(m[1]));
   const ok = (n) => {
     const r = (x) => Math.round(x * 100) / 100;
     for (const k of knownNums) {

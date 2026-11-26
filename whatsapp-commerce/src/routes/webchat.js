@@ -7,7 +7,7 @@ import { config } from '../config.js';
 import { getTenant, bumpUsage, withinLimit, PLANS } from '../tenants.js';
 import { getDb, json } from '../db.js';
 import { createSender, logMessage } from '../whatsapp/cloudApi.js';
-import { handleInbound, menuOptions, openerFor, PAGE_OPENERS, DEFAULT_OPENER } from '../bot/engine.js';
+import { handleInbound, menuOptions, openerFor, PAGE_OPENERS, DEFAULT_OPENER, shortLabel } from '../bot/engine.js';
 import { enqueue } from '../whatsapp/webhook.js';
 import { rateLimit } from './web.js';
 import { isDemo, DEMO_MESSAGE_CAP } from '../instantDemo.js';
@@ -117,7 +117,7 @@ export function openerConfig(t) {
     ...(O.pageRules === false ? [] : PAGE_OPENERS.map((r) => ({ m: r.match, t: r.text, re: 1 }))),
   ];
   const menuAll = menuOptions(t.settings);
-  const own = menuAll.slice(0, 3).map((o, i) => ({ id: `wm:${i}`, label: String(o.label).trim().slice(0, 24) }));
+  const own = menuAll.slice(0, 3).map((o, i) => ({ id: `wm:${i}`, label: shortLabel(o.label, 24) }));
   const S = t.settings;
   const chips = own.length ? own : S.store?.type === 'none'
     ? [{ id: 'book', label: String(S.business.bookingButton || '📅 Book now').slice(0, 24) }, { id: 'ask', label: '❓ Ask a question' }, { id: 'human', label: '🙋 Talk to a person' }]

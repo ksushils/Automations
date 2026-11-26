@@ -93,7 +93,8 @@ Object.assign(config, {
   aiRequireZdr: env.AI_REQUIRE_ZDR === 'true', // only zero-data-retention endpoints (check your model + providers support it first)
   embeddingsBaseUrl: (env.EMBEDDINGS_BASE_URL || env.AI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, ''),
   embeddingsApiKey: env.EMBEDDINGS_API_KEY || env.AI_API_KEY || '',
-  embeddingsModel: env.EMBEDDINGS_MODEL || '', // e.g. text-embedding-3-small – empty = keyword (FTS) search only
+  embeddingsModel: env.EMBEDDINGS_MODEL || '', // e.g. text-embedding-3-small – empty = automatic (below) or keyword search only
+  embeddingsAuto: env.EMBEDDINGS_AUTO !== 'false', // no EMBEDDINGS_MODEL: use the OpenRouter AI key with openai/text-embedding-3-small
   // Fallback prices (USD per million tokens) when the provider doesn't report cost (OpenRouter does)
   // Dify's licence forbids running it as a multi-tenant service without written permission.
   // Only set DIFY_LICENSED=true if you hold that permission; otherwise Dify is limited to shops you mark difyAllowed.
