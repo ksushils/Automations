@@ -541,6 +541,35 @@ export function senselessChoices(choices) {
   if (choices.some((c) => YESNO.test(c)) && choices.some((c) => !YESNO.test(c) && bare(c))) return true;
   return choices.filter(bare).length >= 2 && !choices.every((c) => /^(mon|tue|wed|thu|fri|sat|sun)/i.test(c)) && !choices.every((c) => YESNO.test(c));
 }
+/**
+ * Drops buttons that aren't grounded: one naming something the shop's information, the reply and the customer never
+ * mention ("Yoga class" at a boxing gym), and a question the reply has just answered ("Is it £50?", "How long is it?").
+ * Action buttons (call me back, quote, ticket…) always stay. Fewer than 2 left → no buttons.
+ */
+const GENERIC = new Set('above adult adults afternoon asap below beginner between big budget cheap cheaper child children couple evening experienced family friend friends gift gifts group kids large little medium morning myself people person quick single small someone soon teen teenager teens urgent weekday weekdays weekend weekends under over about after again also another anything appointment appointments area areas available basic before book booked booking bookings browse business call callback cancel change check choose class classes collection come contact cost costs could date dates day days deal deals delivery details different done each else email enquire enquiry every everything exact explore find first free from full general give help hours info information just know later learn less list location looking main maybe menu message more most much need next nothing offer offers online only open option options order orders other others over phone please premium price prices pricing quote quotes range read request same says send service services share show something special specific standard start still stuff suggest talk team tell than thank thanks that them then there these they thing things this time times today tomorrow type types view visit want week what when where which with would your yours yourself'.split(' '));
+const ACTION = /call\s*(me)?\s*back|callback|phone me|ring me|e-?mail me|brochure|send (me )?(the )?details|quote|ticket|talk to|a person|human|ask the team/i;
+export function groundedChoices(choices, { answer = '', known = '' } = {}) {
+  if (!choices.length) return choices;
+  const k = String(known).toLowerCase();
+  const a = String(answer);
+  const hasWord = (w) => k.includes(w) || (w.length > 5 && k.includes(w.slice(0, w.length - 2))) || (w.endsWith('s') && k.includes(w.slice(0, -1)));
+  // answers about the customer (age, budget, group size, dates, who it's for) aren't the shop's offerings to check
+  const aboutCustomer = /\b(how old|age|budget|spend|how many|group size|when|what date|which (day|date|month)|who is it for|who's it for|for you or)\b/i.test(a);
+  const kept = choices.filter((c) => {
+    if (ACTION.test(c)) return true;
+    if (/\d/.test(c) && !/£/.test(c) && !/\?\s*$/.test(c)) return true; // "8 to 12", "2 people", "June"-like answers with numbers
+    // a question the reply already answered
+    if (/\?\s*$/.test(c)) {
+      const price = c.match(/£\s?\d[\d,.]*/);
+      if (price && a.includes(price[0].replace(/\s/g, ''))) return false;
+      if (/^how (long|much)\b/i.test(c) && (/£\s?\d/.test(a) && /how much/i.test(c) || /\b\d+(\.\d+)?\s*(min|minute|hour|hr|day|week)s?\b/i.test(a) && /how long/i.test(c))) return false;
+    }
+    if (aboutCustomer || /£/.test(c)) return true;
+    const words = c.toLowerCase().replace(/[^\p{L}\s'-]/gu, ' ').split(/\s+/).filter((w) => w.length >= 4 && !GENERIC.has(w));
+    return words.every(hasWord);
+  });
+  return kept.length === choices.length ? choices : kept.length >= 2 ? kept : [];
+}
 const choiceButtons = (text, choices, topic = 'general') => ({ type: 'buttons', text, buttons: choices.map((c) => ({
   id: /\b(open|raise|log|create|submit)\s+(a\s+)?(support\s+)?ticket\b/i.test(c) ? 'ticket' : /\b(get|send me|request)\s+(a\s+)?(free\s+)?quote\b/i.test(c) ? 'quote' : /call\s*(me)?\s*back|callback|phone me|ring me/i.test(c) ? `lead:call:${topic}` : /e-?mail me|brochure|send (me )?(the )?details/i.test(c) ? `lead:email:${topic}` : `say:${c.slice(0, 200)}`,
   title: shortLabel(c),
@@ -1219,7 +1248,7 @@ async function namedProducts(ctx, out, candidates) {
 const S_agent = (ctx) => (ctx.S.ai?.mode || ctx.S.dify?.mode) === 'agent';
 async function askDirect(ctx, text) {
   saveConversation(ctx.conv); // agent tools read/write the cart in the DB
-  const { answer, products } = await directTurn(ctx, text);
+  const { answer, products, kbText = '' } = await directTurn(ctx, text);
   const fresh = getConversation(ctx.tenant.id, ctx.conv.waId);
   Object.assign(ctx.conv, { cart: fresh.cart, data: fresh.data, state: fresh.state, humanHandover: fresh.humanHandover });
   const out = toWhatsAppFormatting(answer);
@@ -1254,7 +1283,9 @@ async function askDirect(ctx, text) {
   }
   // the model forgot the tap options on a question: ask for them (not when products are shown or a person has taken over)
   const suggested = offered.length || shown.length || ctx.conv.humanHandover || ctx.S.ai?.suggestChoices === false ? offered : await suggestChoices(ctx, say);
-  const choices = senselessChoices(suggested) ? [] : suggested; // "Booking | Service | Other" helps nobody
+  // "Booking | Service | Other" helps nobody; nor does "Yoga class" at a boxing gym, or "Is it £50?" right after "it's £50"
+  const known = [kbText, say, text, ctx.S.business?.name, ...menuOptions(ctx.S).map((m) => m?.label), ...products.map((p) => p.title)].join('\n');
+  const choices = senselessChoices(suggested) ? [] : groundedChoices(suggested, { answer: say, known });
   if (shown.length && !ctx.conv.humanHandover) { ctx.conv.data.lastList = shown.slice(0, 10).map((p) => p.id); ctx.reply(H(productList(ctx, shown, say || 'Here are some products you might like:'))); }
   else if (choices.length) ctx.reply(H(choiceButtons(say || 'Which is closest?', choices, leadTopic(ctx, text))));
   else ctx.reply(H({ type: 'text', text: say || "Sorry, I didn't catch that. Type *menu* to see options." }));

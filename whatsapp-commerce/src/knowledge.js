@@ -77,7 +77,7 @@ export function removeDoc(tenantId, id) {
 }
 
 // ---------- HTML → text & safe fetching ----------
-const decodeEntities = (s) => String(s).replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&rsquo;|&lsquo;|&#x27;/g, "'").replace(/&ldquo;|&rdquo;/g, '"').replace(/&pound;/g, '£').replace(/&mdash;|&ndash;/g, '–').replace(/&hellip;/g, '…').replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+const decodeEntities = (s) => String(s).replace(/&middot;|&bull;/g, '·').replace(/&starf;|&#9733;/g, '★').replace(/&rarr;/g, '→').replace(/&times;/g, '×').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&rsquo;|&lsquo;|&#x27;/g, "'").replace(/&ldquo;|&rdquo;/g, '"').replace(/&pound;/g, '£').replace(/&mdash;|&ndash;/g, '–').replace(/&hellip;/g, '…').replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
 
 /** Cloudflare hides email addresses as "[email protected]" with the address XOR-encoded in data-cfemail / the link. */
 export function decodeCfEmail(hex) {
@@ -92,11 +92,33 @@ const revealEmails = (html) => String(html)
   .replace(/href=["'][^"']*\/cdn-cgi\/l\/email-protection#([0-9a-f]+)["']/gi, (m, hex) => { const e = decodeCfEmail(hex); return e ? `href="mailto:${e}"` : m; })
   .replace(/\[email(?:&#160;|&nbsp;|\s)protected\]/gi, '');
 
+/**
+ * Shop listings (Shopify especially) write each card's price as "Regular price / £12.00 GBP / Regular price / £0.00 GBP /
+ * Sale price / £12.00 GBP / Unit price / per" on separate lines, so a price ends up between two product names and the
+ * AI pairs it with the wrong one. Collapse that to one price and put it on the product's own line: "Gift Box – From £10.00".
+ */
+export function tidyPriceRows(text) {
+  const P = String.raw`(?:From\s+)?£\s?\d[\d,]*(?:\.\d{2})?`;
+  let t = String(text)
+    .replace(/Regular price\s*£\s?0(?:\.00)?(?: GBP)?[ \t]*/gi, '')
+    .replace(/[ \t]*Unit price(?:\s*\/\s*per)?[ \t]*/gi, '')
+    .replace(new RegExp(String.raw`(£\s?\d[\d,]*(?:\.\d{2})?)\s?GBP\b`, 'g'), '$1')
+    .replace(/(?:Regular|Sale) price\s*(?=(?:From\s+)?£)/gi, '')
+    .split('\n').map((l) => l.trim()).filter(Boolean).join('\n');
+  // "From £10.00 From £10.00" (regular then sale on one line) → once
+  t = t.replace(new RegExp(String.raw`(${P})\s+\1(?=\s|$)`, 'g'), '$1');
+  // the same price twice in a row (regular then sale) → once
+  t = t.replace(new RegExp(String.raw`(^|\n)(${P})\n\2(?=\n|$)`, 'g'), '$1$2');
+  // a line that is only a price belongs to the line above it (the product name)
+  t = t.replace(new RegExp(String.raw`([^\n£]{3,120})\n(${P}(?:\s*[–-]\s*£\s?\d[\d,]*(?:\.\d{2})?)?)(?=\n|$)`, 'g'), '$1 – $2');
+  return t.replace(/\n{2,}/g, '\n');
+}
+
 export function htmlToText(rawHtml) {
   const html = revealEmails(rawHtml);
   const title = decodeEntities((String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
   const main = String(html).match(/<main[\s\S]*?<\/main>/i)?.[0] || String(html).match(/<body[\s\S]*<\/body>/i)?.[0] || String(html);
-  const text = main
+  const rawText = main
     .replace(/<(script|style|noscript|svg|template|iframe)[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<(nav|footer|header|form|aside)[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<tr\b[\s\S]*?<\/tr>/gi, (row) => row.replace(/\s+/g, ' ').replace(/<\/t[dh]>/gi, ' | ').replace(/<br\s*\/?>|<\/(p|div|h[1-6]|li)>/gi, ' ') + '\n')
@@ -106,6 +128,7 @@ export function htmlToText(rawHtml) {
     .replace(/<[^>]+>/g, ' ')
 
     .split('\n').map((l) => decodeEntities(l).replace(/[ \t]+/g, ' ').trim().replace(/^(\|\s*)+|(\s*\|)+$/g, '').replace(/(\s*\|)+\s*\|/g, ' |')).filter(Boolean).join('\n');
+  const text = tidyPriceRows(rawText);
   const facts = footerFacts(html).filter((l) => !text.includes(l));
   return { title, text: facts.length ? `${text}\n\nFrom the website footer:\n${facts.join('\n')}` : text };
 }
@@ -120,6 +143,13 @@ export function footerFacts(html) {
     .replace(/<(script|style|noscript|svg|template|iframe|form)[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h[1-6]|tr|td|th|dd|dt|span)>/gi, '\n').replace(/<[^>]+>/g, ' ')
     .split('\n').map((l) => decodeEntities(l).replace(/[ \t]+/g, ' ').trim()).filter((l) => l.length >= 3 && l.length <= 160);
+  // hours are often split over two lines ("<dt>Monday</dt><dd>10am - 4pm</dd>", "Monday — Friday<br>8:30 am — 6:30 pm"):
+  // join a line naming only days with the time line that follows it
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (DAY.test(lines[i]) && !TIME.test(lines[i]) && lines[i].length <= 40 && TIME.test(lines[i + 1]) && !DAY.test(lines[i + 1]) && lines[i + 1].length <= 60) {
+      lines.splice(i, 2, `${lines[i]}: ${lines[i + 1]}`);
+    }
+  }
   const keep = lines.filter((l) => (DAY.test(l) && TIME.test(l)) || /opening hours|open(ing)? times|^hours\b/i.test(l)
     || /(\+44|\b0)\s?\d{2,4}[\s-]?\d{3,4}[\s-]?\d{3,4}\b/.test(l) || /\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b/.test(l) || /\b[\w.+-]+@[\w-]+\.[\w.]+\b/.test(l));
   return [...new Set(keep)].slice(0, 20);
@@ -138,6 +168,35 @@ export function rankPaths(paths) {
     return n - s.split('/').filter(Boolean).length * 3;
   };
   return [...new Set(paths)].map((p, i) => ({ p, i, s: score(p) })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.p);
+}
+
+/**
+ * Pages worth reading only if nothing better is left: near-identical area pages ("/kingswinford-heating-plumbing",
+ * "/lye-heating-plumbing", "/driving-lessons-benton"…, beyond the first 2 of a family of 3 or more) and blog/news/gallery
+ * pages. Returns them in the order given.
+ */
+export function lastResortPaths(paths) {
+  const list = [...new Set(paths)];
+  const keysOf = (p) => {
+    const segs = p.toLowerCase().replace(/\/+$/, '').split('/');
+    const tokens = (segs.pop() || '').split('-').filter(Boolean);
+    const parent = segs.join('/');
+    const keys = [];
+    for (let n = 2; n < tokens.length; n++) { keys.push(`${parent}|<${tokens.slice(0, n).join('-')}`); keys.push(`${parent}|>${tokens.slice(-n).join('-')}`); }
+    return keys;
+  };
+  const count = new Map();
+  for (const p of list) for (const k of new Set(keysOf(p))) count.set(k, (count.get(k) || 0) + 1);
+  const used = new Map();
+  const out = [];
+  for (const p of list) {
+    if (/\/(blog|news|gallery|testimonials?|reviews?|case-studies)(\/|$)/i.test(p)) { out.push(p); continue; }
+    const family = keysOf(p).filter((k) => count.get(k) >= 3).sort((a, b) => count.get(b) - count.get(a))[0];
+    if (!family) continue;
+    used.set(family, (used.get(family) || 0) + 1);
+    if (used.get(family) > 2) out.push(p);
+  }
+  return out;
 }
 
 /** Same-site page links from a page's HTML (its menu and footer), as paths. */

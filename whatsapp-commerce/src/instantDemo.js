@@ -2,7 +2,7 @@ import express from 'express';
 import { config } from './config.js';
 import { getDb } from './db.js';
 import { createTenant, getTenant, listTenants, updateTenantSettings, deleteTenant, rotateKeys } from './tenants.js';
-import { detectWebsite, importUrl, sitemapPages, listDocs, rankPaths, pageLinks, safeFetch } from './knowledge.js';
+import { detectWebsite, importUrl, sitemapPages, listDocs, rankPaths, lastResortPaths, pageLinks, safeFetch } from './knowledge.js';
 import { chatCompletion, directConfigured } from './ai/direct.js';
 import { randomToken } from './crypto.js';
 import { rateLimit } from './routes/web.js';
@@ -84,10 +84,13 @@ async function buildDemo(tenantId, token, origin) {
   const fromMap = (await sitemapPages(site.origin, { limit: 60 }).catch(() => [])).map((x) => { try { return new URL(x).pathname; } catch { return null; } }).filter(Boolean);
   const fromMenu = pageLinks((await safeFetch(site.origin).catch(() => null))?.body || '', site.origin);
   // pages the site really links to come before guessed paths; then the ones customers ask about most (prices, contact...)
-  const known = rankPaths([...fromMenu, ...fromMap]);
+  const ranked = rankPaths([...fromMenu, ...fromMap]);
+  // ten near-identical area pages or the blog shouldn't use up the page budget: read those only if pages are left
+  const later = new Set(lastResortPaths(ranked));
+  const known = ranked.filter((p) => !later.has(p));
   // "/about-us" and "/about-us/" are one page: read it once (the demo only reads 14)
   const seen = new Set();
-  const paths = ['/', ...known.slice(0, 20), ...usual, ...known.slice(20)].filter((p) => { const k = p.toLowerCase().replace(/\/+$/, '') || '/'; if (seen.has(k) || SKIP.test(p)) return false; seen.add(k); return true; });
+  const paths = ['/', ...known.slice(0, 20), ...usual, ...known.slice(20), ...later].filter((p) => { const k = p.toLowerCase().replace(/\/+$/, '') || '/'; if (seen.has(k) || SKIP.test(p)) return false; seen.add(k); return true; });
   let ok = 0;
   const deadline = Date.now() + 40000;
   for (let i = 0; i < paths.length && ok < MAX_PAGES && Date.now() < deadline;) {

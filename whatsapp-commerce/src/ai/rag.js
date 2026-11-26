@@ -205,7 +205,7 @@ export async function retrieve(tenantId, query, { k = 4 } = {}) {
   return contact ? [...hits, contact] : hits;
 }
 
-const CONTACT_Q = /\b(open(ing)?|hours?|times?|close[sd]?|when|today|tomorrow|weekends?|sundays?|saturdays?|bank holiday|contact|phone|call|ring|number|e-?mail|address|where|located|location|based|find you|visit|reach)\b/i;
+const CONTACT_Q = /\b(open(ing)?|hours?|times?|close[sd]?|when|today|tomorrow|weekends?|sundays?|saturdays?|bank holiday|contact|phone|call|ring|number|e-?mail|address|where|located|location|based|find you|visit|reach|book(ing)?|order|quote|appointments?)\b/i;
 const C_DAY = /\b(mon|tues?|wed(nes)?|thu(rs)?|fri|sat(ur)?|sun)(day|s|\.)?\b|\bweekdays?\b|\bweekends?\b|\bbank holidays?\b/i;
 const C_TIME = /\b\d{1,2}([:.]\d{2})?\s*(am|pm)\b|\b\d{1,2}[:.]\d{2}\b|\b[012]\d[0-5]\d\s*[-–]\s*[012]\d[0-5]\d\b|\bclosed\b|\b24\s*hours\b|\bnoon\b/i;
 const C_PHONE = /(\+44\s?\(?0?\)?\s?|\b0)\d{2,4}[\s-]?\d{3,4}[\s-]?\d{3,4}\b/;

@@ -155,6 +155,14 @@ export async function summarizeTopic(ctx, label, url) {
   return String(res.choices?.[0]?.message?.content || '').trim().slice(0, 600) || null;
 }
 
+/** The shop's own facts from the system prompt (not our generic rules or the trade rules), for the answer guards. */
+export function shopFactsOnly(prompt) {
+  const s = String(prompt);
+  const i = s.indexOf('\nShop facts:');
+  const about = (s.match(/\nAbout the shop: .*/) || [''])[0];
+  return about + (i < 0 ? s : s.slice(i)).replace(/\nRules for this kind of business:[\s\S]*?(?=\nExtra instructions from the shop owner:|$)/, '\n');
+}
+
 export async function directTurn(ctx, text) {
   const S = ctx.S;
   const agent = (S.ai?.mode || S.dify?.mode) === 'agent';
@@ -215,7 +223,7 @@ export async function directTurn(ctx, text) {
   // keep the answer with the sources it was given, and check its figures against them (Verified answers)
   // …and never let an invented price reach the customer (settings.ai.blockUnverifiedPrices, on by default)
   try {
-    const { recordAnswer, guardPrices, guardTimes } = await import('../verified.js');
+    const { recordAnswer, guardPrices, guardTimes, guardPlaces, keepVat } = await import('../verified.js');
     const productText = products.map((p) => `${p.title} ${money(p.price, sym)} ${(p.variants || []).map((v) => money(v.price, sym)).join(' ')}`).join('\n');
     let blocked = [];
     if (answer && S.ai?.blockUnverifiedPrices !== false) {
@@ -226,11 +234,15 @@ export async function directTurn(ctx, text) {
       const earlier = messages.filter((m) => m.role === 'assistant' && typeof m.content === 'string').map((m) => m.content).join(' ');
       const g = guardPrices(answer, kb, { productText: `${productText} ${earlier}`, extra, customerText: text });
       if (g.blocked.length) { blocked = g.blocked; console.log('[price guard]', ctx.tenant.id, g.blocked.join(', ')); }
-      // …and no invented opening hours or "takes about an hour" (the shop facts in the prompt count as known)
-      const tg = guardTimes(g.answer, kb, { extra: `${messages[0].content}\n${earlier}\n${productText}`, customerText: text });
+      // …and no invented opening hours or "takes about an hour" (the shop's own facts in the prompt count as known –
+      // not our generic or trade rules, whose example figures would otherwise let an invented "14 days" through)
+      const tg = guardTimes(g.answer, kb, { extra: `${shopFactsOnly(messages[0].content)}\n${earlier}\n${productText}`, customerText: text });
       if (tg.blocked.length) console.log('[time guard]', ctx.tenant.id, tg.blocked.join(', '));
-      recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt, blocked, timeBlocked: tg.blocked });
-      answer = tg.answer;
+      // …and no invented town ("based in Ipswich" when the site only says Suffolk)
+      const pg = guardPlaces(tg.answer, kb, { extra: `${shopFactsOnly(messages[0].content)}\n${earlier}`, customerText: text });
+      if (pg.blocked.length) console.log('[place guard]', ctx.tenant.id, pg.blocked.join(', '));
+      recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt, blocked, timeBlocked: tg.blocked, placeBlocked: pg.blocked });
+      answer = keepVat(pg.answer, kb).answer; // "from £704.50" → "from £704.50 + VAT" when the site always says +VAT
     } else recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt });
   } catch (e) { console.warn('[verified answers]', e.message); }
   let shown = products;
@@ -238,5 +250,5 @@ export async function directTurn(ctx, text) {
     const searched = (await import('../bot/state.js')).getConversation(ctx.tenant.id, ctx.conv.waId).data.lastSearch;
     if (searched?.at >= startedAt) shown = searched.products.map((p) => ({ ...p, variants: [] }));
   }
-  return { answer, products: shown, kbHits: kb.length };
+  return { answer, products: shown, kbHits: kb.length, kbText: kb.map((c) => `${c.doc || ''}\n${c.text}`).join('\n') };
 }

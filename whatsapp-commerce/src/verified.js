@@ -40,7 +40,13 @@ export function figures(text) {
 }
 
 /** Score sources against an answer; find figures the sources don't contain. Pure – tested directly. */
-export function checkAnswer(answer, sources, { productText = '', now = Date.now() } = {}) {
+/** "£6.20 or 6.85" / "£10 – 15": the second number is a price too. */
+const pricedPairs = (t) => String(t || '').replace(/£\s?(\d[\d,]*(?:\.\d{2})?)(\s*(?:or|to|and|-|–|\/)\s*)(\d[\d,]*(?:\.\d{2})?)\b(?!\s*%)/g, '£$1$2£$3');
+/** "I can't see that… shall I check with the team?" and "Could you tell me which…?" are honest, not weakly supported. */
+const NOT_A_CLAIM = /\b(can'?t|cannot|couldn'?t|don'?t) (see|find)\b|\bcheck with (the|our) team\b|^\s*(could|can|would) you (please )?(clarify|tell|let me know|specify|share)\b/i;
+
+export function checkAnswer(answer, sources, { productText = '', customerText = '', now = Date.now() } = {}) {
+  sources = sources.map((s) => ({ ...s, text: pricedPairs(s.text) }));
   const aw = words(answer);
   const af = figures(answer);
   const scored = sources.map((s) => {
@@ -52,12 +58,13 @@ export function checkAnswer(answer, sources, { productText = '', now = Date.now(
     const checked = s.docUpdated ? Date.parse(String(s.docUpdated).replace(' ', 'T') + (String(s.docUpdated).includes('Z') ? '' : 'Z')) : NaN;
     return { doc: s.doc, url: s.url || null, docId: s.docId ?? null, chunkId: s.id ?? null, lastChecked: Number.isFinite(checked) ? new Date(checked).toISOString() : null, stale: Number.isFinite(checked) && now - checked > STALE_DAYS * 864e5, support: Math.round(support * 100) / 100, figures: figs, excerpt: String(s.text || '').replace(/\s+/g, ' ').slice(0, 300) };
   }).sort((a, b) => b.support - a.support);
-  const known = new Set([...sources.flatMap((s) => [...figures(s.text)]), ...figures(productText)]);
+  // figures the customer typed ("a 50% discount?") aren't the assistant's claims
+  const known = new Set([...sources.flatMap((s) => [...figures(s.text)]), ...figures(productText), ...figures(customerText)]);
   const unsupported = [...af].filter((f) => !known.has(f));
   const used = scored.filter((s) => s.support >= 0.2);
   const flags = [];
   if (!sources.length) flags.push('no_source');
-  else if (!used.length) flags.push('weak_support');
+  else if (!used.length && !NOT_A_CLAIM.test(String(answer))) flags.push('weak_support');
   if (unsupported.length) flags.push('unsupported_figures');
   if (used.some((s) => s.stale)) flags.push('stale_source');
   return { sources: scored, used: used.map((s) => s.doc), unsupported, flags, confidence: flags.includes('unsupported_figures') || flags.includes('no_source') ? 'low' : flags.length ? 'medium' : 'high' };
@@ -117,14 +124,67 @@ export function guardTimes(answer, sources = [], { extra = '', customerText = ''
   const note = "I can't see exact times for that in our information, so I won't guess – the team can confirm them for you.";
   const body = kept.filter((s) => s.trim() && !/^\s*\[CHOICES:/i.test(s));
   const choices = kept.filter((s) => /^\s*\[CHOICES:/i.test(s));
-  return { answer: [...body, note, ...choices].join(' ').replace(/\s+\[CHOICES:/, '\n[CHOICES:').trim(), blocked };
+  // the note goes before a closing question ("…the team can confirm them. Shall I ask them?"), not after it
+  let q = body.length;
+  while (q > 0 && !/\p{L}/u.test(body[q - 1])) q--; // a trailing "😊" on its own
+  if (q > 0 && /\?\s*$/.test(body[q - 1])) body.splice(q - 1, 0, note); else body.push(note);
+  return { answer: [...body, ...choices].join(' ').replace(/\s+\[CHOICES:/, '\n[CHOICES:').trim(), blocked };
 }
 
-export function recordAnswer(tenantId, { waId, question, answer, sources = [], productText = '', model = null, latencyMs = null, blocked = [], timeBlocked = [] }) {
+/**
+ * "EV chargers from £704.50" when the site says "from £704.50+vat": a price that the sources only ever give with
+ * "+VAT" / "plus VAT" / "ex VAT" right after it gets " + VAT" back in the answer.
+ */
+export function keepVat(answer, sources = []) {
+  const src = sources.map((s) => s.text).join('\n');
+  const added = [];
+  const out = String(answer).replace(/£\s?\d[\d,]*(?:\.\d{2})?(?!\d|[.,]\d)/g, (price, at, whole) => {
+    const after = whole.slice(at + price.length, at + price.length + 16);
+    if (/^\s*\*?\s*(\+\s?vat|plus vat|ex\.? vat|excl\.?(uding)? vat|\(?ex vat)/i.test(after)) return price;
+    const num = price.replace(/[£\s,]/g, '');
+    const re = new RegExp(String.raw`£\s?${num.replace('.', String.raw`\.`)}(?![\d.])([^\n]{0,4})`, 'gi');
+    const uses = [...src.matchAll(re)];
+    if (!uses.length || !uses.every((m) => /^\s*(\+\s?vat|plus vat|ex\.? vat)/i.test(m[1] + src.slice(m.index + m[0].length, m.index + m[0].length + 10)))) return price;
+    added.push(price);
+    return `${price} + VAT`;
+  });
+  return { answer: added.length ? out : answer, added };
+}
+
+/**
+ * "We're based in Ipswich, Suffolk" when the site only says "Suffolk, UK": a place name after "based / located in"
+ * that appears nowhere in the sources (or the shop facts, or the customer's message) is removed from the answer.
+ */
+export function guardPlaces(answer, sources = [], { extra = '', customerText = '' } = {}) {
+  const known = `${sources.map((s) => s.text).join('\n')}\n${extra}\n${customerText}`.toLowerCase();
+  const blocked = [];
+  const out = String(answer).replace(/\b(based|located|situated|found)( just)? (in|at|near|outside) ((?:[A-Z][\w'’-]+(?: (?:upon|on|in|under|le|de|the) [A-Z][\w'’-]+)*(?: [A-Z][\w'’-]+)*,? ?)+)/g, (m, verb, just, prep, places) => {
+    const parts = places.split(/,\s*/).map((p) => p.trim()).filter(Boolean);
+    const keep = parts.filter((p) => {
+      const ok = known.includes(p.toLowerCase().replace(/[’]/g, "'")) || known.includes(p.toLowerCase());
+      if (!ok) blocked.push(p);
+      return ok;
+    });
+    if (keep.length === parts.length) return m;
+    if (!keep.length) return '\u0000';
+    return `${verb}${just || ''} ${prep} ${keep.join(', ')}${/,\s*$/.test(places) ? ', ' : / $/.test(places) ? ' ' : ''}`;
+  });
+  if (!blocked.length) return { answer, blocked };
+  if (!out.includes('\u0000')) return { answer: out, blocked };
+  // nothing left of the place: drop that sentence and say so
+  const CH = /^\s*\[CHOICES:/i;
+  const parts = out.split(/(?<=[.!?])\s+|\n+/);
+  const body = parts.filter((s) => s.trim() && !CH.test(s) && !s.includes('\u0000'));
+  const choices = parts.filter((s) => CH.test(s));
+  return { answer: [...body, "I can't see our exact location in our information – the team can confirm it for you.", ...choices].join(' ').replace(/\s+\[CHOICES:/, '\n[CHOICES:').trim(), blocked };
+}
+
+export function recordAnswer(tenantId, { waId, question, answer, sources = [], productText = '', model = null, latencyMs = null, blocked = [], timeBlocked = [], placeBlocked = [] }) {
   if (!answer) return null;
-  const c = checkAnswer(answer, sources, { productText });
+  const c = checkAnswer(answer, sources, { productText, customerText: question });
   if (blocked.length) { c.flags.push('price_blocked'); c.confidence = 'low'; }
   if (timeBlocked.length) { c.flags.push('time_blocked'); c.confidence = 'low'; }
+  if (placeBlocked.length) { c.flags.push('place_blocked'); c.confidence = 'low'; }
   const id = Number(getDb().prepare('INSERT INTO answer_evidence (tenant_id, wa_id, question, answer, sources, flags, unsupported, confidence, model, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
     tenantId, waId || null, String(question || '').slice(0, 1000), String(answer).slice(0, 4000), JSON.stringify(c.sources.slice(0, 6)), JSON.stringify(c.flags), JSON.stringify(c.unsupported), c.confidence, model, latencyMs).lastInsertRowid);
   return { id, ...c };

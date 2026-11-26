@@ -23,6 +23,24 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 - **Tests:** 367 of 367 pass locally on Node 24 (batch 16). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
 
+## Batch 19 (26 Nov 2026): fixes from the round-2 test report
+Round 2 (14 readable sites, 154 AI answers, after batch 18) scored 91.6% good answers and 1.9% critical, so it met the targets (at least 85%, at most 2%). This batch fixes what it found. The tester's own patch is included (part 1).
+- **Footer hours split over two lines** (`<dt>Monday</dt><dd>10am – 4pm</dd>`, `Monday — Friday<br>8:30 am…`) are joined, so Petal Boutique and Catmose Vets now give their hours (`knowledge.footerFacts`). More entities decoded (`&middot;`, `&starf;`, `&rarr;`…). From the tester's patch.
+- **Shop trade rule** no longer says "14 days", which the AI repeated as a shop's returns policy. From the tester's patch.
+- **Guards check against the shop's own facts only** (`ai/direct.shopFactsOnly`): our generic and trade rules no longer count as a source, so their example figures can't let an invented figure through.
+- **Place guard** (`verified.guardPlaces`): a town after "based / located in" that the information never names is removed ("Ipswich, Suffolk" → "Suffolk"), or the sentence is replaced by "the team can confirm". Flag `place_blocked`.
+- **"+VAT" kept** (`verified.keepVat`): a price the site always gives with "+vat" gets " + VAT" back if the AI drops it.
+- **Shopify listing prices** (`knowledge.tidyPriceRows`): "Regular price £0.00 GBP / Sale price / Unit price / per" is collapsed, and the price goes on the product's own line ("Wax Melt Mini Gift Box – From £10.00"), so the AI stops pairing a price with the wrong product.
+- **How to book or order:** questions about booking, ordering, quotes and appointments now bring in the contact passage (phone, email), and a prompt rule says to give the real way first. Live: M.A. Parkes, Dina, AJPM and TSE all give their phone number.
+- **Prompt rules:** phone-line hours only when the site says so; keep "+VAT / from / per hour / subject to survey / free over £X" with a price; never add a town; no button for something the reply just answered.
+- **Buttons grounded** (`engine.groundedChoices`): a button naming something the shop's information, the reply and the customer never mention ("Yoga class" at a boxing gym) is dropped, as is a question the reply just answered ("Is it £50?"). Action buttons and answers about the customer (age, budget, dates) are not checked.
+- **Page budget:** near-identical area pages beyond 2 per family ("/lye-heating-plumbing"…) and blog/news pages are read last (`knowledge.lastResortPaths`).
+- **Trade:** florists get the shop trade.
+- **Checker:** figures the customer typed, "£6.20 or 6.85", and honest "I can't see that" replies are no longer flagged.
+- **Time-guard note** now goes before a closing question.
+- **Tests:** 409 of 409 pass (`test/batch19-findings.test.js` from the tester, `test/batch19-more.test.js`). Live re-check on 8 sites in the server container: all the fixed items behave as above.
+- **Not fixed yet:** bakery/café sites get the takeaway trade; an M.A. Parkes-style site with only area pages still reads them (nothing else to read); Bellwether gave different hours from round 2 (to re-check against the site).
+
 ## Batch 18 (26 Nov 2026): fixes from the 15-site test report
 The external test of 15 UK small-business sites scored 82% good answers, with 5.5% critical (targets: at least 85%, at most 2%). Most critical answers were made-up opening hours and durations.
 - **Time guard** (`verified.guardTimes`, wired in `ai/direct.js`): any sentence with a clock time or duration that isn't in the sources, the shop facts or earlier replies is removed. The customer is told the team can confirm instead. The answer is flagged `time_blocked`.
