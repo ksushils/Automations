@@ -29,9 +29,9 @@ export function figures(text) {
   for (const m of t.matchAll(/(?<![\d.:£$€])(\d{1,2})(?:[:.](\d{2}))?\s?(am|pm|a\.m\.|p\.m\.)(?![\p{L}])/giu)) out.add(`${(Number(m[1]) % 12) + (/^p/i.test(m[3]) ? 12 : 0)}:${m[2] || '00'}`);
   if (/\b(noon|midday)\b/i.test(t)) out.add('12:00');
   for (const m of t.matchAll(/(?<![\d.:£$€])([01]?\d|2[0-3])([:.])([0-5]\d)(?!\d|\.\d|\s?(?:am|pm|a\.m|p\.m))/gi)) {
-    // "17:30" is always a time; "9.30" only inside a range ("9.30 – 5.30"), so prices like "8.20" aren't read as times
-    const before = t.slice(Math.max(0, m.index - 4), m.index), after = t.slice(m.index + m[0].length, m.index + m[0].length + 5);
-    if (m[2] === ':' || /[-–—]\s*$|\bto\s+$/i.test(before) || /^\s*(?:[-–—]|to\b)/i.test(after)) out.add(`${Number(m[1])}:${m[3]}`);
+    // "17:30" is always a time; "9.30" only inside a range ("9.30 – 5.30", "8.30 till 3pm"), so prices like "8.20" aren't read as times
+    const before = t.slice(Math.max(0, m.index - 7), m.index), after = t.slice(m.index + m[0].length, m.index + m[0].length + 8);
+    if (m[2] === ':' || /[-–—]\s*$|\b(?:to|till|until|til)\s+$/i.test(before) || /^\s*(?:[-–—]|(?:to|till|until|til)\b)/i.test(after)) out.add(`${Number(m[1])}:${m[3]}`);
   }
   for (const m of t.matchAll(/\b([01]\d|2[0-3])([0-5]\d)\s*(?:-|–|—|to)\s*([01]\d|2[0-3])([0-5]\d)\b/g)) { out.add(`${Number(m[1])}:${m[2]}`); out.add(`${Number(m[3])}:${m[4]}`); }
   // "45 pounds" ≡ "£45"
@@ -131,6 +131,61 @@ export function guardTimes(answer, sources = [], { extra = '', customerText = ''
   return { answer: [...body, ...choices].join(' ').replace(/\s+\[CHOICES:/, '\n[CHOICES:').trim(), blocked };
 }
 
+const digitsOf = (p) => String(p).replace(/^\+44\s*\(?0?\)?/, '0').replace(/\D/g, '');
+/** Removes a sentence part ("or email us at x") / sentence and says so. Shared by the contact and range guards. */
+function dropSentences(answer, bad, note) {
+  const CH = /^\s*\[CHOICES:/i;
+  const parts = String(answer).split(/(?<=[.!?])\s+|\n+/);
+  const body = parts.filter((s) => s.trim() && !CH.test(s) && !bad(s));
+  const choices = parts.filter((s) => CH.test(s));
+  let q = body.length;
+  while (q > 0 && !/\p{L}/u.test(body[q - 1])) q--;
+  if (note) { if (q > 0 && /\?\s*$/.test(body[q - 1])) body.splice(q - 1, 0, note); else body.push(note); }
+  return [...body, ...choices].join(' ').replace(/\s+\[CHOICES:/, '\n[CHOICES:').trim();
+}
+
+/**
+ * Contact guard: an email address or UK phone number in the answer that isn't in the sources, the shop facts or the
+ * customer's message is invented ("email us at info@tseelectrical.co.uk" on a site with no email). The "or email…"
+ * part is cut when the sentence also gives a real one; otherwise the sentence goes.
+ */
+export function guardContacts(answer, sources = [], { extra = '', customerText = '' } = {}) {
+  const known = `${sources.map((s) => s.text).join('\n')}\n${extra}\n${customerText}`;
+  const knownLower = known.toLowerCase();
+  const knownDigits = (known.match(/(\+44\s?\(?0?\)?\s?|\b0)\d[\d\s-]{8,13}\d/g) || []).map(digitsOf);
+  const EMAIL = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g, PHONE = /(\+44\s?\(?0?\)?\s?|\b0)\d[\d\s-]{8,13}\d\b/g;
+  const blocked = [];
+  for (const e of String(answer).match(EMAIL) || []) if (!knownLower.includes(e.toLowerCase())) blocked.push(e);
+  for (const p of String(answer).match(PHONE) || []) { const d = digitsOf(p); if (d.length >= 10 && !knownDigits.some((k) => k === d)) blocked.push(p.trim()); }
+  if (!blocked.length) return { answer, blocked };
+  let out = String(answer);
+  for (const b of blocked) {
+    const esc = b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // "… call 01223 516767 or email us at x" → "… call 01223 516767"
+    out = out.replace(new RegExp(String.raw`,?\s*(?:or|and)\s+(?:by\s+)?(?:e-?mail(?:ing)?|call(?:ing)?|phon(?:e|ing)|ring(?:ing)?|text(?:ing)?|whatsapp(?:ing)?)?\s*(?:us\s+)?(?:at|on)?\s*[📞📧✉️\s]*\*?${esc}\*?`, 'gi'), '');
+  }
+  if (blocked.some((b) => out.includes(b))) out = dropSentences(out, (s) => blocked.some((b) => s.includes(b)), "I can't see that contact detail in our information – the team can confirm it for you.");
+  return { answer: out.replace(/\s+([.,!?])/g, '$1'), blocked };
+}
+
+/**
+ * Range guard: "prices range from £2.00 to £16.00" built from a few items is false when the menu runs £1–£17. A
+ * "from £X to/up to £Y" range is kept only when the sources write that range themselves; otherwise the sentence goes.
+ */
+export function guardRanges(answer, sources = []) {
+  const src = sources.map((s) => s.text).join('\n').replace(/\s+/g, ' ');
+  const RANGE = /(?:rang(?:e|es|ing)|prices?|start(?:s|ing)?|cost(?:s|ing)?)?[^.!?\n]{0,40}?\bfrom\s+\*?£\s?(\d[\d,]*(?:\.\d{2})?)\*?[^.!?\n£]{0,40}?\b(?:to|up to|-|–)\s+\*?£\s?(\d[\d,]*(?:\.\d{2})?)/gi;
+  const blocked = [];
+  for (const m of String(answer).matchAll(RANGE)) {
+    const [a, b] = [m[1], m[2]].map((x) => x.replace(/,/g, ''));
+    const n = (x) => x.replace('.', String.raw`\.`).replace(/\\\.00$/, String.raw`(?:\.00)?`);
+    const stated = new RegExp(String.raw`£\s?${n(a)}(?:\.00)?\s*(?:to|-|–|—|and)\s*£?\s?${n(b)}(?:\.00)?\b`, 'i').test(src);
+    if (!stated) blocked.push(`£${a}–£${b}`);
+  }
+  if (!blocked.length) return { answer, blocked };
+  return { answer: dropSentences(answer, (s) => RANGE.test(s) && ((RANGE.lastIndex = 0), true), null), blocked };
+}
+
 /**
  * "EV chargers from £704.50" when the site says "from £704.50+vat": a price that the sources only ever give with
  * "+VAT" / "plus VAT" / "ex VAT" right after it gets " + VAT" back in the answer.
@@ -179,12 +234,13 @@ export function guardPlaces(answer, sources = [], { extra = '', customerText = '
   return { answer: [...body, "I can't see our exact location in our information – the team can confirm it for you.", ...choices].join(' ').replace(/\s+\[CHOICES:/, '\n[CHOICES:').trim(), blocked };
 }
 
-export function recordAnswer(tenantId, { waId, question, answer, sources = [], productText = '', model = null, latencyMs = null, blocked = [], timeBlocked = [], placeBlocked = [] }) {
+export function recordAnswer(tenantId, { waId, question, answer, sources = [], productText = '', model = null, latencyMs = null, blocked = [], timeBlocked = [], placeBlocked = [], contactBlocked = [] }) {
   if (!answer) return null;
   const c = checkAnswer(answer, sources, { productText, customerText: question });
   if (blocked.length) { c.flags.push('price_blocked'); c.confidence = 'low'; }
   if (timeBlocked.length) { c.flags.push('time_blocked'); c.confidence = 'low'; }
   if (placeBlocked.length) { c.flags.push('place_blocked'); c.confidence = 'low'; }
+  if (contactBlocked.length) { c.flags.push('contact_blocked'); c.confidence = 'low'; }
   const id = Number(getDb().prepare('INSERT INTO answer_evidence (tenant_id, wa_id, question, answer, sources, flags, unsupported, confidence, model, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
     tenantId, waId || null, String(question || '').slice(0, 1000), String(answer).slice(0, 4000), JSON.stringify(c.sources.slice(0, 6)), JSON.stringify(c.flags), JSON.stringify(c.unsupported), c.confidence, model, latencyMs).lastInsertRowid);
   return { id, ...c };

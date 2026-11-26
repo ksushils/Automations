@@ -190,7 +190,7 @@ export function lastResortPaths(paths) {
   const used = new Map();
   const out = [];
   for (const p of list) {
-    if (/\/(blog|news|gallery|testimonials?|reviews?|case-studies)(\/|$)/i.test(p)) { out.push(p); continue; }
+    if (/\/(blog|news|gallery|testimonials?|reviews?|case-studies)[\w-]*(\.\w+)?(\/|$)/i.test(p)) { out.push(p); continue; }
     const family = keysOf(p).filter((k) => count.get(k) >= 3).sort((a, b) => count.get(b) - count.get(a))[0];
     if (!family) continue;
     used.set(family, (used.get(family) || 0) + 1);
@@ -259,13 +259,28 @@ export async function importUrl(tenantId, url, { name } = {}) {
   return addTextDoc(tenantId, { name: name || title.replace(/\s+[–|-]\s+[^–|-]+$/, '') || r.url, text: `Source: ${r.url}\n\n${text}`, source: 'url', url: r.url });
 }
 
+/**
+ * A business name from the page title when the site has no og:site_name. A title part that is a sentence or a
+ * question ("Looking for things to do in York?") isn't a name: try the other parts, then the domain ("Yorktour").
+ */
+export function nameFromTitle(title, hostname = '') {
+  const parts = String(title || '').split(/\s[|–-]\s|\s?[|–]\s?/).map((p) => p.replace(/^(welcome to|home)\s*[:-]?\s*/i, '').trim()).filter(Boolean);
+  const sentence = (p) => /[?!.]$/.test(p) || /\b(can|will|we|our|you|your)\b.*\b(help|need|offer|do)\b/i.test(p) || /^(looking for|find|discover|get|book|welcome|the best|your|we |how |why |what )/i.test(p) || p.split(/\s+/).length > 7;
+  const good = parts.find((p) => !sentence(p));
+  if (good) return good;
+  const label = String(hostname).replace(/^www\./, '').split('.')[0] || '';
+  return label ? label.charAt(0).toUpperCase() + label.slice(1).replace(/-/g, ' ') : (parts[0] || '');
+}
+
 // ---------- website detection & one-step onboarding ----------
 export async function detectWebsite(url) {
   const u = new URL(/^https?:\/\//.test(url) ? url : `https://${url}`);
   const origin = u.origin;
   const meta = await safeFetch(`${origin}/meta.json`).then((r) => (r.status === 200 && /^\s*\{/.test(r.body) ? JSON.parse(r.body) : null)).catch(() => null);
   if (meta?.myshopify_domain || meta?.domain) {
-    return { platform: 'shopify', origin, domain: meta.domain || u.hostname, name: meta.name, description: meta.description, currency: meta.currency, city: meta.city, country: meta.country };
+    // Shopify gives the country as a code ("GB"): say it as people do
+    const country = ({ GB: 'UK', UK: 'UK', IE: 'Ireland', US: 'USA' })[String(meta.country || '').toUpperCase()] || meta.country;
+    return { platform: 'shopify', origin, domain: meta.domain || u.hostname, name: meta.name, description: meta.description, currency: meta.currency, city: meta.city, country };
   }
   const woo = await safeFetch(`${origin}/wp-json/wc/store/v1/products?per_page=1`).then((r) => r.status === 200 && /^\s*\[/.test(r.body)).catch(() => false);
   const home = await safeFetch(origin).catch(() => null);
@@ -273,7 +288,7 @@ export async function detectWebsite(url) {
   const desc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)/i)?.[1] || html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)/i)?.[1] || '';
   // og:site_name may hold an apostrophe ("Noah's Barber") and some sites encode it twice ("&amp;amp;")
   const og = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=(["'])(.*?)\1/i)?.[2] || html.match(/<meta[^>]+content=(["'])(.*?)\1[^>]+property=["']og:site_name["']/i)?.[2] || '';
-  const name = decodeEntities(decodeEntities(og)).trim() || decodeEntities(htmlToText(html).title).split(/\s[|–-]\s|\s?[|–]\s?/)[0].trim();
+  const name = decodeEntities(decodeEntities(og)).trim() || nameFromTitle(decodeEntities(htmlToText(html).title), u.hostname);
   return { platform: woo ? 'woocommerce' : 'website', origin, domain: u.hostname, name, description: stripHtml(desc) };
 }
 

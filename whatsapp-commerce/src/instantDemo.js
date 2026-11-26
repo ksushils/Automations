@@ -31,7 +31,20 @@ export function demoTenantForToken(token) {
 }
 
 // pages customers never ask about (or that aren't for customers): legal, jobs, investors, test pages
-const SKIP = /\/(cart|checkout|(my-)?account|login|register|search|wp-admin|wp-login|feed|tag|author|cookie[\w-]*|privacy[\w-]*|gdpr|careers?|jobs?|vacanc(y|ies)|recruitment|join-(our|the)-team|work-with-us|investors?|investor-relations|acquisitions?|test(-?form|-?page)?|sample-page|hello-world|sitemap|accessibility|modern-slavery[\w-]*)(\/|$)|\.(pdf|jpe?g|png|gif|zip|xml)$/i;
+export const SKIP = /\/(cart|basket|checkout|(my-)?account|login|register|search|wp-admin|wp-login|feed|tag|author|cookie[\w-]*|privacy[\w-]*|gdpr|careers?|jobs?|vacanc(y|ies)|recruitment|join-(our|the)-team|work-with-us|investors?|investor-relations|acquisitions?|test(-?form|-?page)?|sample-page|hello-world|sitemap|accessibility|modern-slavery[\w-]*)(\.(?:html?|php|aspx?))?(\/|$)|\.(pdf|jpe?g|png|gif|zip|xml)$/i;
+
+/**
+ * The trade template's sample booking services, kept only when the site's own text names them (every word that isn't
+ * a generic one like "session" or "appointment"). None left → one plain "Appointment", so the demo never offers a
+ * service the business doesn't have.
+ */
+const SERVICE_GENERIC = new Set(['session', 'sessions', 'appointment', 'appointments', 'first', 'initial', 'standard', 'visit', 'booking', 'with', 'and', 'the', 'new']);
+export function siteServices(services = [], text = '') {
+  const t = String(text).toLowerCase();
+  const kept = services.filter((s) => String(s.name || '').toLowerCase().replace(/\(.*?\)/g, ' ').split(/[^\p{L}]+/u)
+    .filter((w) => w.length >= 3 && !SERVICE_GENERIC.has(w)).every((w) => t.includes(w)));
+  return kept.length ? kept : [{ name: 'Appointment', minutes: 30 }];
+}
 
 /** Start a demo; the reading happens in the background (status is polled). Returns { token }. */
 export async function startDemo(rawUrl, { ip = '' } = {}) {
@@ -107,7 +120,11 @@ async function buildDemo(tenantId, token, origin) {
     // a salon, clinic or experience: let them try real booking (typical services and times) in the demo
     const { TRADES } = await import('./trades.js');
     const t = getTenant(tenantId), T = TRADES[t?.settings?.trade];
-    if (T?.bookings && t.settings.store?.type === 'none' && !t.settings.bookings?.enabled) updateTenantSettings(tenantId, { bookings: { enabled: true, days: 14, perSlot: 1, autoConfirm: false, reminderHours: 0, ...T.bookings }, demo: { bookings: true } });
+    if (T?.bookings && t.settings.store?.type === 'none' && !t.settings.bookings?.enabled) {
+      // only the trade's sample services the site itself mentions (no "Personal training taster" at a gym that has none)
+      const text = getDb().prepare("SELECT GROUP_CONCAT(c.text, ' ') AS t FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.tenant_id = ? AND k.status NOT IN ('deleted', 'to_delete')").get(tenantId)?.t || '';
+      updateTenantSettings(tenantId, { bookings: { enabled: true, days: 14, perSlot: 1, autoConfirm: false, reminderHours: 0, ...T.bookings, services: siteServices(T.bookings.services, text) }, demo: { bookings: true } });
+    }
     return r;
   }).catch(() => null);
   let suggestions = [];

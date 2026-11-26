@@ -111,7 +111,7 @@ test('NEW SHOP JOURNEY: sign up with website → catalogue + knowledge base + AI
     // 2) shop detected & catalogue connected without any token
     assert.equal(t.settings.store.type, 'shopify_public');
     assert.equal(t.settings.business.currency, 'GBP');
-    assert.match(t.settings.ai.about, /UK RC drift specialist\. Based in Harrow, GB\./);
+    assert.match(t.settings.ai.about, /UK RC drift specialist\. Based in Harrow, UK\./, 'Shopify\'s "GB" is said as "UK"');
     // 3) policies imported into the knowledge base and synced to Dify (embedding model → high quality)
     const docs = listDocs(tenantId);
     assert.deepEqual(docs.map((d) => d.name).sort(), ['Refund policy', 'Shipping policy']);

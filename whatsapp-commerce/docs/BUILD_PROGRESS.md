@@ -23,6 +23,19 @@ Read this first when you resume work. Item IDs (R0.1 and so on) are defined in `
 - **Tests:** 367 of 367 pass locally on Node 24 (batch 16). They run again inside the Node 22 image during the deploy.
 - **Real-model AI evaluation on the live server:** 15/15 passed after two fixes (see `END_TO_END_TEST_RESULTS.md`).
 
+## Batch 20 (26 Nov 2026): fixes from the round-3 test report
+Round 3 stopped early: on 10 new sites (8 readable, 88 AI answers) it scored 87.5% good but 2.3% critical (target at most 2%). The 4 critical answers were an invented email, an invented bookable service, and a false "from £2 to £16" menu range (twice). Batch 19's new checks removed no real towns, buttons or prices; the time guard wrongly removed one bakery's real hours.
+- **From the tester's patch:** "8.30 till 3pm" is read as a time, so real hours aren't removed; `privacy.html`, `cookies.htm`, `.php`/`.aspx` versions and `basket/` pages are skipped.
+- **Contact guard** (`verified.guardContacts`): an email or UK phone number that isn't in the sources, the shop facts or the customer's message is removed ("or email us at info@…" is cut; otherwise the sentence goes, with a note). Flag `contact_blocked`.
+- **Range guard** (`verified.guardRanges`): a "from £X to / up to £Y" range is removed unless the sources write that range. Shown as `price_blocked`.
+- **Demo booking services** (`instantDemo.siteServices`): only the trade template's sample services that the site's own text names; otherwise one plain "Appointment". No more "Personal training taster" at a gym without one.
+- **Delivery passage** (`rag.deliveryPassage`): delivery questions also get the delivery/collection/shipping lines from all pages, so "Collection only" and "FREE insured UK delivery" are found.
+- **Prompt rules:** give 2–3 real example prices instead of "see our website"; no made-up whole-menu ranges; a contact method only with its number or address (never an email the information doesn't have); answer "how do I contact X" as a contact question.
+- **Names:** a title that is a sentence, slogan or question ("Looking for things to do in York?", "YORKTOUR can help.") isn't used as the name; the next part or the domain is. Shopify's country code "GB" is said as "UK".
+- **Page budget:** blog pages with an extension (`blog.php`, `blogpost.php`) are read last too.
+- **Tests:** 419 of 419 pass (`test/batch20-findings.test.js` from the tester, `test/batch20-more.test.js`). Live re-check on 7 sites in the server container: no invented email (TSE), only the Free Trial Class (Bellwether), no false range (Jalsa), Dough's real hours kept, Pink Parsnip gives free delivery and "Woking, UK", Lewy's lists real prices, York Tour gives the £18/£9 tour.
+- **Not fixed:** a site's own contradictions (Bellwether's two sets of hours); "check at checkout" when a bakery's prices are in the product list.
+
 ## Batch 19 (26 Nov 2026): fixes from the round-2 test report
 Round 2 (14 readable sites, 154 AI answers, after batch 18) scored 91.6% good answers and 1.9% critical, so it met the targets (at least 85%, at most 2%). This batch fixes what it found. The tester's own patch is included (part 1).
 - **Footer hours split over two lines** (`<dt>Monday</dt><dd>10am – 4pm</dd>`, `Monday — Friday<br>8:30 am…`) are joined, so Petal Boutique and Catmose Vets now give their hours (`knowledge.footerFacts`). More entities decoded (`&middot;`, `&starf;`, `&rarr;`…). From the tester's patch.

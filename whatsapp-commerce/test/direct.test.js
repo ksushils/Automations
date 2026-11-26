@@ -178,7 +178,8 @@ test('knowledge retrieval: "deliver" finds a page that only says "delivery" and 
   const add = (name, text) => { const id = d.prepare("INSERT INTO knowledge_docs (tenant_id, name, source, status, text) VALUES (?, ?, 'text', 'ready', ?)").run(t.id, name, text).lastInsertRowid; return indexDoc(d.prepare('SELECT * FROM knowledge_docs WHERE id = ?').get(id)); };
   await add('Shipping', 'We ship from Hertford worldwide. Delivery costs are shown at checkout once you enter your address.');
   await add('Returns', 'You can return unused items within 30 days.');
-  assert.deepEqual((await retrieve(t.id, 'do you deliver to Ireland?', { k: 2 })).map((h) => h.doc), ['Shipping']);
+  // (delivery questions also get the delivery lines from all pages as one extra passage – batch 20)
+  assert.deepEqual((await retrieve(t.id, 'do you deliver to Ireland?', { k: 2 })).map((h) => h.doc), ['Shipping', 'Delivery and collection (from the website)']);
   assert.equal((await retrieve(t.id, 'what is your returns policy?', { k: 1 }))[0]?.doc, 'Returns');
 });
 

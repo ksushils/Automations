@@ -76,7 +76,7 @@ node --disable-warning=ExperimentalWarning src/cli/trySites.js sites.txt results
 - `chat[]`: one entry per question:
   - `q` and `a`: the question, and the reply with its buttons in `[a | b]`;
   - `by`: `ai` (the AI wrote it) or `bot` (fixed flows such as greeting, booking or handover);
-  - `flags`: for example `unsupported_figures` (a number not found in the sources), `no_source`, `price_blocked` (an amount was removed), `time_blocked` (a time or duration was removed) or `place_blocked` (a town not in the sources was removed);
+  - `flags`: for example `unsupported_figures` (a number not found in the sources), `no_source`, `price_blocked` (an amount was removed), `time_blocked` (a time or duration was removed), `place_blocked` (a town not in the sources was removed) or `contact_blocked` (an email or phone number not in the sources was removed);
   - `sources`: the pages the answer was based on.
 
 ## 4. Choosing the sites
@@ -279,7 +279,7 @@ https://example.co.uk,shop,"Do you offer free shipping?","Yes, free shipping on 
 | Buttons, handover and fallbacks | `src/bot/engine.js` (`askDirect`, `extractChoices`, `handover`, `shortLabel`) |
 | The test tools | `src/cli/trySite.js`, `src/cli/trySites.js` |
 
-## 9. Already known (26 Nov 2026, after batch 19), so no need to report again
+## 9. Already known (26 Nov 2026, after batch 20), so no need to report again
 
 - **Blocked sites:** some sites block automated visits (Audley Travel, Bupa, Kwik Fit, Trailfinders, Honest Burgers, Rapanui, CCL, Chillblast, rasoiofsandy.co.uk, astargarage.com, kw-electrical.com, kingfishbar.co.uk). That's expected. Don't try to get round it; replace them with other sites of the same trade.
 - **Slow sites:** Evans Cycles timed out.
@@ -290,19 +290,21 @@ https://example.co.uk,shop,"Do you offer free shipping?","Yes, free shipping on 
 - **Area pages:** a site whose only other pages are area pages ("/lye-heating-plumbing"…) still has them read, because nothing else is left.
 - **Flaky test:** `webhook-security` fails about 1 run in 3. Re-run it before reporting.
 
-**Fixed in batch 19 (round-2 report). Re-check these, and report any that come back:**
-- **Footer hours on two lines** (`<dt>/<dd>`, `<br>`): Petal Boutique and Catmose Vets should give their hours.
-- **No returns period from the law:** Flourish should say it can't see a returns policy.
-- **Invented town:** a town after "based in" that the site never names is removed, flag `place_blocked` (Elsie & Tom should say "Suffolk, UK", not Ipswich). Check also that real towns are **not** removed.
-- **Shopify listing prices:** each product's price should be its own (Elsie & Tom wax melts: Mini Gift Box from £10.00).
-- **How do I book or order?** should give the real route first (phone, WhatsApp, email, booking page or form), then at most one question.
-- **Phone-line hours:** AJPM should give Mon–Fri 9am–5pm. Ordinary opening hours should **not** be called "phone line" hours.
-- **Price qualifiers:** "+VAT", "from", "per hour", "subject to survey", "free over £75" should stay with the price (TSE, Elsie delivery).
-- **Buttons:** no buttons for things the shop doesn't do ("Yoga class" at Bellwether) or that the reply just answered ("Is it £50?"). Also check that good buttons are **not** lost (budget ranges, ages, places it delivers to).
-- **Page budget:** blog pages and more than 2 near-identical area pages are read only when nothing else is left.
-- **Florists** get the shop trade (Petal Boutique).
-- **Checker flags:** `unsupported_figures` no longer fires on figures the customer typed, or on "£6.20 or 6.85"; `weak_support` no longer fires on honest "I can't see that" replies.
-- **Bellwether hours:** round 2 gave Mon–Fri 6am–10pm and weekends 9am–12pm; our re-check gave Mon–Thu 8am–10pm, Fri 8am–8pm, Sat 8am–2pm, Sun 8am–12pm. Please check which the site shows, and on which page.
+- **Bellwether's hours:** the site gives two sets (footer Mon–Thu 8am–10pm…, free-trial page 6am–10pm). Cause `site`.
+- **Range removals** show as `price_blocked`.
+
+**Fixed in batch 20 (round-3 report). Re-check these, and report any that come back:**
+- **Invented email or phone:** removed by a contact guard, flag `contact_blocked` (TSE must not give an email). Check also that real numbers and emails are **not** removed (written with spaces, +44, or only in the footer).
+- **False "from £X to £Y" menu ranges:** removed unless the site states the range (Jalsa Conwy). Check that ranges the site does state are kept.
+- **Demo booking services:** only services the site names (Bellwether: Free Trial Class, no "Personal Training Taster"); otherwise one plain "Appointment".
+- **Delivery facts:** "Collection only" and "free delivery" should now be found (Jalsa, Pink Parsnip).
+- **"See our website / price list":** should now give 2–3 real example prices (Punjabi, Lewy's, Viva, York Tour).
+- **"Contact us by phone or email"** without the details should not happen.
+- **"8.30 till 3pm":** real hours kept (Dough).
+- **Names:** no slogans or questions as names (York Tour); Shopify "GB" now "UK" (Pink Parsnip).
+- **Pages:** `privacy.html`, `basket/` and `blog.php` style pages skipped or read last.
+
+**Fixed in batch 19, still re-check:** footer hours on two lines (Petal, Catmose), no returns period from the law, invented towns removed (`place_blocked`) but real ones kept, Shopify listing prices, booking route first, phone-line hours only when the site says so, price qualifiers (+VAT, from), grounded buttons (good ones not lost), area/blog pages last, florists → shop, quieter checker flags.
 
 **Fixed in batch 18, still re-check:** the time guard (no false blocks, no invented times), Cloudflare emails, apostrophe and "&" names, duplicate/404/privacy/jobs pages skipped (max 14), menu labels cut at a word, one-page sites get a menu, the "how long does that take?" follow-up, no merged price ranges or unsupported "currently".
 

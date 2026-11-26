@@ -223,7 +223,7 @@ export async function directTurn(ctx, text) {
   // keep the answer with the sources it was given, and check its figures against them (Verified answers)
   // …and never let an invented price reach the customer (settings.ai.blockUnverifiedPrices, on by default)
   try {
-    const { recordAnswer, guardPrices, guardTimes, guardPlaces, keepVat } = await import('../verified.js');
+    const { recordAnswer, guardPrices, guardTimes, guardPlaces, guardContacts, guardRanges, keepVat } = await import('../verified.js');
     const productText = products.map((p) => `${p.title} ${money(p.price, sym)} ${(p.variants || []).map((v) => money(v.price, sym)).join(' ')}`).join('\n');
     let blocked = [];
     if (answer && S.ai?.blockUnverifiedPrices !== false) {
@@ -241,8 +241,14 @@ export async function directTurn(ctx, text) {
       // …and no invented town ("based in Ipswich" when the site only says Suffolk)
       const pg = guardPlaces(tg.answer, kb, { extra: `${shopFactsOnly(messages[0].content)}\n${earlier}`, customerText: text });
       if (pg.blocked.length) console.log('[place guard]', ctx.tenant.id, pg.blocked.join(', '));
-      recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt, blocked, timeBlocked: tg.blocked, placeBlocked: pg.blocked });
-      answer = keepVat(pg.answer, kb).answer; // "from £704.50" → "from £704.50 + VAT" when the site always says +VAT
+      // …no invented email or phone number, and no "from £2 to £16" range the menu doesn't state
+      const facts = `${shopFactsOnly(messages[0].content)}\n${earlier}`;
+      const cg = guardContacts(pg.answer, kb, { extra: facts, customerText: text });
+      if (cg.blocked.length) console.log('[contact guard]', ctx.tenant.id, cg.blocked.join(', '));
+      const rg = guardRanges(cg.answer, [...kb, { text: `${facts}\n${productText}` }]);
+      if (rg.blocked.length) console.log('[range guard]', ctx.tenant.id, rg.blocked.join(', '));
+      recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt, blocked: [...blocked, ...rg.blocked], timeBlocked: tg.blocked, placeBlocked: pg.blocked, contactBlocked: cg.blocked });
+      answer = keepVat(rg.answer, kb).answer; // "from £704.50" → "from £704.50 + VAT" when the site always says +VAT
     } else recordAnswer(ctx.tenant.id, { waId: ctx.conv.waId, question: text, answer, sources: kb, productText, model: model || 'default', latencyMs: Date.now() - startedAt });
   } catch (e) { console.warn('[verified answers]', e.message); }
   let shown = products;

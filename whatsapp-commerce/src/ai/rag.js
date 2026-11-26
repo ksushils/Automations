@@ -197,12 +197,38 @@ export async function retrieve(tenantId, query, { k = 4 } = {}) {
   const top = [...ranked.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([id]) => id);
   // Hours and contact questions: short lines with the phone, email and opening times lose to long pages in the
   // search, so the assistant said "check our website" while the number was on every page. Add them as one passage.
-  const contact = CONTACT_Q.test(String(query)) ? contactPassage(tenantId) : null;
-  if (!top.length) return contact ? [contact] : [];
+  // Delivery questions likewise: "Collection only" or "FREE insured UK delivery" is one short line on a page about
+  // something else, so the assistant said it couldn't see any delivery information.
+  const extras = [CONTACT_Q.test(String(query)) && contactPassage(tenantId), DELIVERY_Q.test(String(query)) && deliveryPassage(tenantId)].filter(Boolean);
+  const contact = extras.length ? extras : null;
+  if (!top.length) return contact || [];
   // documents are data: lines that try to instruct the AI are removed before anything uses the text (src/safety.js)
   const hits = top.map((id) => d.prepare('SELECT c.id, c.text, k.name AS doc, k.url, k.id AS docId, k.updated_at AS docUpdated FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.id = ?').get(id)).filter(Boolean)
     .map((c) => { const s = stripInjections(c.text); if (s.removed) console.warn(`[injection filter] removed ${s.removed} line(s) from "${c.doc}" (${tenantId})`); return s.removed ? { ...c, text: s.text, injectionRemoved: s.removed } : c; });
-  return contact ? [...hits, contact] : hits;
+  return contact ? [...hits, ...contact] : hits;
+}
+
+const DELIVERY_Q = /\b(deliv\w*|delivry|shipping|ship|postage|post|dispatch|collect\w*|pick ?up|courier)\b/i;
+const D_LINE = /\b(deliver(y|ies|s|ed)?|collection|collect(ed)?|click (and|&) collect|shipping|postage|dispatch(ed)?|pick ?up|courier)\b/i;
+
+/** Lines about delivery, collection and shipping from all of a shop's pages, as one passage. */
+export function deliveryPassage(tenantId) {
+  const rows = getDb().prepare("SELECT c.text, k.url FROM knowledge_chunks c JOIN knowledge_docs k ON k.id = c.doc_id WHERE c.tenant_id = ? AND k.status NOT IN ('deleted', 'to_delete') ORDER BY k.id, c.idx LIMIT 400").all(tenantId);
+  const lines = [], seen = new Set();
+  let url = null;
+  for (const r of rows) {
+    for (const raw of String(r.text).split('\n')) {
+      const l = raw.replace(/\s+/g, ' ').trim();
+      if (l.length < 6 || l.length > 220 || /^Source:/i.test(l) || !D_LINE.test(l) || seen.has(l.toLowerCase())) continue;
+      seen.add(l.toLowerCase());
+      lines.push(l);
+      url ||= r.url;
+      if (lines.length >= 15) break;
+    }
+    if (lines.length >= 15) break;
+  }
+  if (!lines.length) return null;
+  return { id: null, doc: 'Delivery and collection (from the website)', url, docId: null, docUpdated: null, text: stripInjections(lines.join('\n')).text };
 }
 
 const CONTACT_Q = /\b(open(ing)?|hours?|times?|close[sd]?|when|today|tomorrow|weekends?|sundays?|saturdays?|bank holiday|contact|phone|call|ring|number|e-?mail|address|where|located|location|based|find you|visit|reach|book(ing)?|order|quote|appointments?)\b/i;
